@@ -1,0 +1,23 @@
+#!/bin/bash
+# Shortcut for the Phase 0 tools:  ./lab <command> [options]
+#   metadata  <folders…>    what metadata your packs already contain
+#   compare   <folders…>    which AI model fits your library best
+#   group     <folders…>    categories + similarity groups (e.g. --category WHOOSH)
+#   music     <folders…>    tempo and key for every song
+#   serve     <report.html> open a report via a local server (if sounds won't play)
+#   selftest  [--quick]     check the installation
+# Add --help after a command for all its options.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PY="$DIR/.venv/bin/python"
+if [ ! -x "$PY" ]; then echo "Run ./setup.sh first."; exit 1; fi
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  metadata) exec "$PY" "$DIR/inspect_metadata.py" "$@" ;;
+  compare)  exec "$PY" "$DIR/compare_models.py" "$@" ;;
+  group)    exec "$PY" "$DIR/group_sounds.py" "$@" ;;
+  music)    exec "$PY" "$DIR/analyze_music.py" "$@" ;;
+  serve)    exec "$PY" "$DIR/serve_report.py" "$@" ;;
+  selftest) exec "$PY" "$DIR/selftest.py" "$@" ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac

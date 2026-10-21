@@ -1,0 +1,35 @@
+# Phase 0 test scripts. Install with ./setup.sh (it also installs S-KEY, which
+# needs special handling).
+
+# ML runtime. On Apple Silicon the PyPI wheels include the Metal (MPS) backend.
+torch>=2.8
+torchaudio>=2.8
+
+# Meta PE-AV audio/text embeddings (new model, so the version is pinned)
+transformers==5.20.2
+huggingface_hub>=0.34
+
+# Audio I/O and DSP
+numpy>=2.0
+scipy>=1.13
+soundfile>=0.13
+soxr>=0.5
+librosa>=0.11
+
+# Grouping
+scikit-learn>=1.5
+umap-learn>=0.5.7
+
+# Metadata
+mutagen>=1.47
+openpyxl>=3.1
+
+# Tempo: Beat This! (CPJKU, MIT license)
+beat-this==1.1.0
+einops>=0.8
+rotary-embedding-torch>=0.8
+
+# Key: S-KEY (Deezer, MIT license) needs nnAudio; S-KEY itself is installed by setup.sh
+nnAudio==0.3.3
+
+tqdm>=4.66
