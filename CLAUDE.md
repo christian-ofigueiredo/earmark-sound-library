@@ -25,6 +25,6 @@ The plan is in `docs/PLAN.md`; Phase 0 tools are in `phase0/`.
 
 ## Testing
 - `cd phase0 && python -m pytest`: fast, model-free tests (`tests/test_core.py`). These run on every push via `.github/workflows/checks.yml` with `requirements-ci.txt`.
-- `./lab selftest` (or `--quick`) generates a synthetic library and checks every tool end to end with real models. `.github/workflows/mac-selftest.yml` runs it on a macOS arm64 runner (manual trigger; CPU only, since GitHub's Mac VMs have no MPS).
+- `./lab selftest` (or `--quick`) generates a synthetic library and checks every tool end to end with real models. `.github/workflows/mac-selftest.yml` runs it on a macOS arm64 runner (manual trigger). That runner reports MPS but fails any allocation ("MPS backend out of memory"), so it exercises the CPU fallbacks in `Embedder.__init__`/`_with_fallback` and `analyze_music.py`.
 - Real-sound sanity set used in development: ESC-50 clips (CC BY-NC, test only, not bundled).
 - Reports were checked in headless Chromium (Playwright) for JS errors and local-file audio playback.

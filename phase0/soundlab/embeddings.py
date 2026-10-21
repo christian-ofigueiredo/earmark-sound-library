@@ -71,7 +71,17 @@ class Embedder:
 
             self.model = ClapModel.from_pretrained(self.repo, dtype=self.dtype)
             self.processor = ClapProcessor.from_pretrained(self.repo)
-        self.model = self.model.to(self.device).eval()
+        try:
+            self.model = self.model.to(self.device).eval()
+        except (RuntimeError, NotImplementedError) as e:
+            # e.g. "MPS backend out of memory" on Macs with little memory to spare
+            if self.device == "cpu":
+                raise
+            print(f"{name}: couldn't load onto {self.device} ({str(e)[:120]}); using the CPU instead.")
+            if self.device == "mps":
+                torch.mps.empty_cache()
+            self.device, self.dtype = "cpu", torch.float32
+            self.model = self.model.to("cpu", self.dtype).eval()
 
     # ------------------------------------------------------------ audio
 

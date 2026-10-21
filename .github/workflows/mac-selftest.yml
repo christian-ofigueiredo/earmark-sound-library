@@ -1,7 +1,8 @@
 # Run by hand (Actions tab → "Mac install test" → Run workflow): installs
 # everything with setup.sh on an Apple Silicon Mac and runs the quick self-test
-# with real models. Takes ~20-30 minutes. GitHub's Mac runners have no GPU
-# access, so the models run on the CPU there.
+# with real models. Takes ~20-30 minutes. GitHub's Mac runners report an Apple
+# GPU (MPS) but with almost no usable memory, so this run also exercises the
+# tools' automatic fall-back to the CPU.
 name: Mac install test
 
 on:
