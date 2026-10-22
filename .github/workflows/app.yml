@@ -1,0 +1,38 @@
+name: App
+
+on:
+  push:
+    paths: ["app/**", ".github/workflows/app.yml"]
+  pull_request:
+    paths: ["app/**", ".github/workflows/app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: Build and test (macOS)
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - uses: actions/cache@v4
+        with:
+          path: app/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('app/Package.resolved') }}
+      - name: Build (app and core)
+        run: swift build
+      - name: Test (core)
+        run: swift test
