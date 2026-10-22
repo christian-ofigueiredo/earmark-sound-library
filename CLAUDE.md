@@ -1,14 +1,17 @@
-# Sound Library: project notes
+# Earmark: project notes
 
-Open-source (MIT) Mac app to browse and categorize sound effects and music.
+Earmark is an open-source (MIT) Mac app to browse and categorize sound effects and music.
 The plan is in `docs/PLAN.md`; Phase 0 tools are in `phase0/`.
 
 ## Project principles (keep these)
+- **Ask the owner before changing anything** (code, docs, repository, settings). Propose first, act after approval. Analysis the owner asks for is fine. Work on branches; merge to `main` only when approved.
 - **Quality over speed. Use the best models available.** Prefer accuracy, ensembles and verification over shortcuts.
 - Open source and public. New models, data or bundled code must have licenses that allow redistribution; record them in `THIRD_PARTY_NOTICES.md`. Don't commit test audio that isn't freely licensed (ESC-50 is CC BY-NC, so never add it).
 - **Never write to, rename or modify original sound/music files.** All state lives in the app's database or a separate sidecar file. Phase 0 scripts enforce this with `ensure_output_outside_inputs`.
 - Sound effects: group similar sounds (e.g. whooshes) like Soundly, using vendor metadata (BOOM etc.) first.
-- Music: a separate window/tab; batch tempo + key for a folder.
+- Music: a separate window/tab; batch tempo + key for a folder. Both windows are built together from Phase 1.
+- Analysis runs mainly when the Mac is idle (overnight); the app must say so. The owner edits in DaVinci Resolve on a 16 GB M1 Pro, with libraries on an external SSD.
+- Phase 0 code keeps its `soundlab` name and `~/SoundLab` output folder so the owner's saved analyses stay valid.
 
 ## Phase 0 layout
 - `phase0/lab`: the user-facing command (`./lab metadata|compare|group|music|serve|selftest`). `setup.sh` builds `.venv` with uv (Python 3.12).

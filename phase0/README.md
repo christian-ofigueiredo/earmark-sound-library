@@ -1,6 +1,6 @@
 # Phase 0: test the AI on your own files
 
-These tools answer one question before we build the Mac app: **does this
+These tools answer one question before building the Earmark Mac app: **does this
 approach work on your sound packs and songs?** Each tool reads your folders,
 writes a report in `~/SoundLab`, and opens it in your browser.
 

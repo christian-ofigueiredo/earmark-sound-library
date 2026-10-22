@@ -1,9 +1,10 @@
-# Sound Library
+# Earmark
 
 An open-source Mac app, in progress, for organising sound-effect and music
 libraries. It groups similar sounds (all your whooshes, by how they sound),
-fills in missing categories with on-device AI, and finds the tempo and key of
-every song in a folder. It never changes your original files.
+fills in missing categories with on-device AI, finds the tempo and key of
+every song in a folder, and sends sounds to DaVinci Resolve. It never changes
+your original files.
 
 - **[docs/PLAN.md](docs/PLAN.md)**: the build plan, decisions, and what Phase 0 has shown so far.
 - **[phase0/](phase0/README.md)**: test tools you run on your own Mac and files today:
