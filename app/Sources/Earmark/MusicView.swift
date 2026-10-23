@@ -87,6 +87,9 @@ final class MusicBrowser {
         }
         .map { songs[$0] }
         .sorted(using: sortOrder)
+        // Drop selected songs the new filter hides, so the detail pane doesn't show them.
+        let kept = selection.intersection(visible.map(\.id))
+        if kept != selection { selection = kept }
     }
 }
 
@@ -96,17 +99,18 @@ struct MusicView: View {
 
     var body: some View {
         @Bindable var browser = model.musicBrowser
+        // Detail as an inspector, as in SoundsView, so the table gets the window's width.
         NavigationSplitView {
             MusicSidebar()
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
-        } content: {
+        } detail: {
             SongTable()
                 .safeAreaInset(edge: .top, spacing: 0) { MusicFilterBar() }
-                .navigationSplitViewColumnWidth(min: 560, ideal: 760)
                 .searchable(text: $browser.search, placement: .toolbar, prompt: "Title, artist, file")
-        } detail: {
-            SongDetailPane()
-                .navigationSplitViewColumnWidth(min: 300, ideal: 360)
+                .inspector(isPresented: .constant(true)) {
+                    SongDetailPane()
+                        .inspectorColumnWidth(min: 300, ideal: 360, max: 600)
+                }
         }
         .toolbar {
             ToolbarItem {

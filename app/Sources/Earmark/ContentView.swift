@@ -85,10 +85,18 @@ struct StatusBar: View {
         .overlay(alignment: .top) { Divider() }
     }
 
+    /// Totals for both sections; the current one says "N of M" while a filter or search hides some.
     private var summary: String {
-        let sounds = "\(model.sounds.count.formatted()) sound\(model.sounds.count == 1 ? "" : "s")"
-        let songs = "\(model.songs.count.formatted()) song\(model.songs.count == 1 ? "" : "s")"
+        let sounds = count(model.sounds.count, shown: model.soundBrowser.visible.count,
+                           current: model.section == .sounds, noun: "sound")
+        let songs = count(model.songs.count, shown: model.musicBrowser.visible.count,
+                          current: model.section == .music, noun: "song")
         return "\(sounds) · \(songs)"
+    }
+
+    private func count(_ total: Int, shown: Int, current: Bool, noun: String) -> String {
+        let all = "\(total.formatted()) \(noun)\(total == 1 ? "" : "s")"
+        return current && shown != total ? "\(shown.formatted()) of \(all)" : all
     }
 }
 

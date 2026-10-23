@@ -47,6 +47,9 @@ final class SoundBrowser {
         }
         .map { sounds[$0] }
         .sorted(using: sortOrder)
+        // Drop selected sounds the new filter hides, so the detail pane doesn't show them.
+        let kept = selection.intersection(visible.map(\.id))
+        if kept != selection { selection = kept }
     }
 }
 
@@ -56,16 +59,18 @@ struct SoundsView: View {
 
     var body: some View {
         @Bindable var browser = model.soundBrowser
+        // The detail pane is an inspector rather than a third split column: a three-column
+        // NavigationSplitView ignores the content column's width and squeezes the table.
         NavigationSplitView {
             SoundSidebar()
                 .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 380)
-        } content: {
-            SoundTable()
-                .navigationSplitViewColumnWidth(min: 420, ideal: 680)
-                .searchable(text: $browser.search, placement: .toolbar, prompt: "Name, description, keywords")
         } detail: {
-            SoundDetailPane()
-                .navigationSplitViewColumnWidth(min: 300, ideal: 380)
+            SoundTable()
+                .searchable(text: $browser.search, placement: .toolbar, prompt: "Name, description, keywords")
+                .inspector(isPresented: .constant(true)) {
+                    SoundDetailPane()
+                        .inspectorColumnWidth(min: 300, ideal: 380, max: 600)
+                }
         }
         .toolbar {
             ToolbarItem {
