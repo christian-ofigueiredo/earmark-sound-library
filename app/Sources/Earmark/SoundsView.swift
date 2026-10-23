@@ -33,9 +33,10 @@ final class SoundBrowser {
     func refresh(from model: AppModel) {
         let terms = search.lowercased().split(whereSeparator: \.isWhitespace)
         let scope = self.scope ?? .all
-        let sounds = model.sounds, haystacks = model.soundIndex.haystacks
+        let sounds = model.sounds, haystacks = model.soundIndex.haystacks, hidden = model.soundIndex.twins.hidden
         visible = sounds.indices.filter { i in
             let s = sounds[i]
+            if let id = s.id, hidden.contains(id) { return false }
             switch scope {
             case .all: break
             case .library(let id): if s.libraryId != id { return false }
@@ -96,7 +97,7 @@ struct SoundSidebar: View {
         @Bindable var browser = model.soundBrowser
         List(selection: $browser.scope) {
             Label("All Sounds", systemImage: "square.grid.2x2")
-                .badge(model.sounds.count)
+                .badge(model.soundIndex.shownCount)
                 .tag(SoundScope.all)
             Section("Libraries") {
                 ForEach(model.soundLibraries) { lib in
@@ -232,6 +233,7 @@ struct SoundDetail: View {
                 if online {
                     PlayerPanel(url: sound.url, knownDuration: sound.duration)
                     FileChip(url: sound.url)
+                    OtherFormats(sound: sound)
                 } else {
                     OfflineNotice(library: model.library(id: sound.libraryId))
                 }
@@ -250,6 +252,22 @@ struct SoundDetail: View {
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// Lower-quality copies of this sound (e.g. the MP3 next to the WAV), which the list hides.
+struct OtherFormats: View {
+    @Environment(AppModel.self) private var model
+    let sound: SoundRecord
+
+    var body: some View {
+        let copies = (model.soundIndex.twins.alternates[sound.id ?? -1] ?? []).compactMap { model.sound(id: $0) }
+        if !copies.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Also in this pack as").font(.caption).foregroundStyle(.secondary)
+                ForEach(copies) { copy in FileChip(url: copy.url) }
+            }
         }
     }
 }

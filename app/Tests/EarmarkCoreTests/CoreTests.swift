@@ -212,6 +212,27 @@ import Testing
         #expect(try db.sounds().first { $0.fileName == "two.wav" }?.id == ids["two.wav"])
     }
 
+    @Test func formatTwinsKeepTheBestCopy() async throws {
+        let db = try LibraryDatabase(path: nil)
+        let root = TestFiles.tempDir()
+        TestFiles.write(TestFiles.wav(seconds: 1), to: root.appendingPathComponent("Pack (MP3,WAV)/Pack - WAV/Hits/01 Hit.wav"))
+        TestFiles.write(Data("not really an mp3".utf8), to: root.appendingPathComponent("Pack (MP3,WAV)/Pack - MP3/Hits/01 Hit.mp3"))
+        // Same name and folder pattern, clearly different length: a different sound.
+        TestFiles.write(TestFiles.wav(seconds: 1), to: root.appendingPathComponent("Other/Long.wav"))
+        TestFiles.write(TestFiles.aiff(seconds: 3, name: "x"), to: root.appendingPathComponent("Other/long.aif"))
+        // Same name in an unrelated folder: not a twin.
+        TestFiles.write(Data("mp3".utf8), to: root.appendingPathComponent("Elsewhere/01 Hit.mp3"))
+        let lib = try db.addLibrary(kind: .sounds, path: root.path, bookmark: nil)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        let sounds = try db.sounds()
+        func id(_ suffix: String) -> Int64 { sounds.first { $0.path.hasSuffix(suffix) }!.id! }
+
+        let groups = FormatTwins.group(sounds)
+        #expect(groups.hidden == [id("Pack - MP3/Hits/01 Hit.mp3")])
+        #expect(groups.alternates == [id("Pack - WAV/Hits/01 Hit.wav"): [id("Pack - MP3/Hits/01 Hit.mp3")]])
+        #expect(FormatTwins.normalizedFolder("Pack (MP3,WAV)/Pack - WAV/Hits") == "pack/pack/hits")
+    }
+
     @Test func importsPhase0MusicAnalysis() throws {
         let db = try LibraryDatabase(path: nil)
         let lib = try db.addLibrary(kind: .music, path: "/Music/Liked", bookmark: nil)

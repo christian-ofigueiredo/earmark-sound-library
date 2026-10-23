@@ -87,7 +87,7 @@ struct StatusBar: View {
 
     /// Totals for both sections; the current one says "N of M" while a filter or search hides some.
     private var summary: String {
-        let sounds = count(model.sounds.count, shown: model.soundBrowser.visible.count,
+        let sounds = count(model.soundIndex.shownCount, shown: model.soundBrowser.visible.count,
                            current: model.section == .sounds, noun: "sound")
         let songs = count(model.songs.count, shown: model.musicBrowser.visible.count,
                           current: model.section == .music, noun: "song")

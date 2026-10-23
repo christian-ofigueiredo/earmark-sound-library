@@ -106,8 +106,10 @@ Settings → Repository name. Topics/description also have to be set there.
      passes an AVAudioFile one (`SoundFiles.technical`), so the core still builds on Linux.
    - Applying the owner-approved Sound Ideas folder → UCS mapping (from the C CSVs) as vendor
      rules: **blocked** until the owner fills in the "Your decision" column.
-   - Worth considering: 349 sounds exist as both MP3 and WAV in the same pack; group them and
-     prefer the WAV.
+   - ~~Group MP3/WAV twins~~ Done (`FormatTwins`): same library, same name apart from the
+     extension, folders equal once format words are blanked, lengths within 0.5 s. The list shows
+     the best copy (WAV > AIFF > FLAC > AAC > MP3); the detail pane lists the others under
+     "Also in this pack as". On SoundFX this hides 350 copies (29,177 → 28,827 listed).
 4. Then the plan's Phase 2 (analysis engine):
    - Core ML conversion of PE-AV large + CLAP (half precision only if the parity check
      passes);
