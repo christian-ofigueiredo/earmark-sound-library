@@ -227,6 +227,20 @@ public final class LibraryDatabase: Sendable {
                 t.column("analyzedAt", .datetime).notNull()
             }
         }
+        // Analysis stage 2: sound embeddings, one row per sound and model (CLAP now,
+        // PE-AV later). Same rules as soundFacts: no foreign key, fingerprint-checked.
+        m.registerMigration("v4-sound-embeddings") { db in
+            try db.create(table: "soundEmbedding") { t in
+                t.column("soundId", .integer).notNull()
+                t.column("model", .text).notNull()
+                t.column("fingerprint", .text)
+                t.column("version", .integer).notNull()
+                t.column("vector", .blob)
+                t.column("error", .text)
+                t.column("analyzedAt", .datetime).notNull()
+                t.primaryKey(["soundId", "model"])
+            }
+        }
         return m
     }
 
@@ -345,6 +359,29 @@ public final class LibraryDatabase: Sendable {
         try dbQueue.write { db in for f in facts { try f.save(db) } }
     }
 
+    // MARK: analysis embeddings
+
+    /// What's stored for `model`, without the vectors (enough to know what's left to do).
+    public func embeddingStatus(model: String) throws -> [Int64: SoundEmbedding.Status] {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT soundId, fingerprint, version FROM soundEmbedding WHERE model = ?",
+                                        arguments: [model])
+            return Dictionary(rows.map { ($0["soundId"], SoundEmbedding.Status(fingerprint: $0["fingerprint"], version: $0["version"])) },
+                              uniquingKeysWith: { a, _ in a })
+        }
+    }
+
+    public func embedding(soundId: Int64, model: String) throws -> SoundEmbedding? {
+        try dbQueue.read { db in
+            try SoundEmbedding.filter(Column("soundId") == soundId && Column("model") == model).fetchOne(db)
+        }
+    }
+
+    public func save(_ embeddings: [SoundEmbedding]) throws {
+        guard !embeddings.isEmpty else { return }
+        try dbQueue.write { db in for e in embeddings { try e.save(db) } }
+    }
+
     // MARK: songs
 
     /// Replace a music folder's songs with a fresh listing, keeping any
@@ -432,5 +469,45 @@ public struct SoundFacts: Codable, FetchableRecord, PersistableRecord, Sendable,
     /// Whether these facts still describe `sound` (same content, current version).
     public func isCurrent(for sound: SoundRecord) -> Bool {
         version >= Self.currentVersion && fingerprint == sound.fingerprint
+    }
+}
+
+/// Analysis stage 2 for one sound: its embedding from one model (stored as float32 little-endian).
+public struct SoundEmbedding: Codable, FetchableRecord, PersistableRecord, Sendable, Equatable {
+    /// Bump a model's version when its pipeline changes, so every sound is embedded again.
+    public static let versions: [String: Int] = ["clap-general": 1]
+
+    public struct Status: Sendable, Equatable {
+        public var fingerprint: String?
+        public var version: Int
+
+        public init(fingerprint: String?, version: Int) { self.fingerprint = fingerprint; self.version = version }
+    }
+
+    public var soundId: Int64
+    public var model: String
+    public var fingerprint: String?
+    public var version: Int
+    /// nil for silent sounds, or when `error` is set.
+    public var vector: Data?
+    public var error: String?
+    public var analyzedAt: Date
+
+    public init(soundId: Int64, model: String, fingerprint: String?, vector: [Float]?, error: String? = nil,
+                analyzedAt: Date = Date()) {
+        self.soundId = soundId; self.model = model; self.fingerprint = fingerprint
+        self.version = Self.versions[model] ?? 1
+        self.vector = vector.map { v in v.withUnsafeBufferPointer { Data(buffer: $0) } }
+        self.error = error; self.analyzedAt = analyzedAt
+    }
+
+    public var values: [Float]? {
+        vector.map { d in d.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) } }
+    }
+
+    /// Whether a stored row still describes `sound` (same content, current pipeline).
+    public static func isCurrent(_ status: Status?, model: String, for sound: SoundRecord) -> Bool {
+        guard let status else { return false }
+        return status.version >= (versions[model] ?? 1) && status.fingerprint == sound.fingerprint
     }
 }

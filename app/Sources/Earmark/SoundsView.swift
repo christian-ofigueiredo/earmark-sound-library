@@ -1,5 +1,6 @@
 import AppKit
 import EarmarkCore
+import EarmarkML
 import SwiftUI
 
 enum SoundScope: Hashable, Sendable {
@@ -244,6 +245,8 @@ struct SoundDetail: View {
                     ("Manufacturer", sound.manufacturer),
                     ("Designer", sound.designer),
                     ("Loudness", model.analysis.facts[sound.id ?? -1].flatMap { loudnessText($0, for: sound) }),
+                    ("Embedding", SoundEmbedding.isCurrent(model.analysis.clapStatus[sound.id ?? -1],
+                                                           model: ClapEmbedder.modelName, for: sound) ? "CLAP" : nil),
                     ("Format", sound.formatText),
                     ("Length", formatLength(sound.duration)),
                     ("Folder", sound.folder),

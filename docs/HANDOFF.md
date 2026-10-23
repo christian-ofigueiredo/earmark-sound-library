@@ -122,8 +122,12 @@ Settings → Repository name. Topics/description also have to be set there.
      Utilization %"), thermal state, power. Analysis menu: Pause / Resume / Run at Full Speed
      Now (not remembered after relaunch) / gentle-or-wait-while-you-work. App Nap is held off
      while working; idle sleep is still allowed.
-     **To check with the owner:** the thresholds are first guesses from one sample. Watch a
-     real night (Resolve open, and once during an export) and tune. Status-bar wording right
+     **Checked on a real night (2026-10-23, log in Logs/scheduler-*.csv):** with Resolve left
+     open, idle GPU was 0% (p90 5%) and other CPU 8%, so analysis ran at full speed for 4.5 h.
+     It paused for 12 min when another app used ~88% CPU at 03:00, and at once when the owner's
+     Resolve export started at 07:46 (GPU 85–96%). Something used the GPU at ~90% for a minute
+     every 30 min (not identified; possibly a periodic background task); each cost 2–3 min
+     with ramp-up, ~5% of the night. **Thresholds left as they are.** Status-bar wording right
      after launch says "waits for the Mac to be idle" during the 60 s ramp-up.
    - ~~First stage-1 fact: loudness~~ Done. `LoudnessMeter` (BS.1770-4 / EBU R128 gating,
      sample peak) passes EBU Tech 3341 cases 1–3 at 44.1/48/96 kHz and matches ffmpeg ebur128
@@ -141,8 +145,17 @@ Settings → Repository name. Topics/description also have to be set there.
      prep + CLAP log-mel, tested against a Python fixture to < 0.01 dB) gives median cosine
      1.000000, p1 0.99907, min 0.988 (short 96 kHz files: resampler differences move the
      -60 dB trim point), neighbours 99.9%; 0.38 s/file. `earmark-parity` reruns this check.
-   - Next for CLAP: store embeddings as an analysis stage (scheduler already exists), decide
-     how the app gets the model file (download or release asset; it can't live in git).
+   - ~~CLAP as an analysis stage~~ Done. `soundEmbedding` table (schema v4, key soundId+model,
+     float32 vector, fingerprint + version, no FK). The engine runs each sound's missing stages
+     (loudness, CLAP) in one job; one shared model (predictions locked) is loaded on demand
+     from `~/Library/Application Support/Earmark/Models/CLAPAudio.mlpackage` (compiled once to
+     `.mlmodelc` beside it) and unloaded while analysis is paused. No model → status bar says
+     "CLAP model not installed" and only loudness runs. Detail pane shows "Embedding: CLAP".
+     On the real library: ~4.8 files/s with 5 workers (long 96 kHz files), Earmark ~780 MB
+     with the model loaded. Stored vectors vs Phase 0 on the first 339 overlapping files:
+     median cosine 1.000000, min 0.9955, top-5 neighbours 99.4% (`models/check_app_embeddings.py`).
+   - Still open for CLAP: how the app gets the model file (download or release asset; it
+     can't live in git). Nothing uses the embeddings yet (Phase 3: similarity, groups).
    - Core ML conversion of PE-AV large (half precision only if the parity check passes);
    - music tempo/key in-app (Beat This! + S-KEY);
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot

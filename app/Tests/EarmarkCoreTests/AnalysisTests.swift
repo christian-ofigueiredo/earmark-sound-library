@@ -127,3 +127,26 @@ import Testing
         #expect(facts?.isCurrent(for: changed) == false)
     }
 }
+
+@Suite struct EmbeddingStoreTests {
+    @Test func embeddingsRoundTripAndSurviveReAdding() async throws {
+        let db = try LibraryDatabase(path: nil)
+        let root = TestFiles.tempDir()
+        TestFiles.write(TestFiles.wav(seconds: 1), to: root.appendingPathComponent("a.wav"))
+        var lib = try db.addLibrary(kind: .sounds, path: root.path, bookmark: nil)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        let sound = try db.sounds()[0]
+        let vector = (0 ..< 512).map { Float($0) / 512 }
+        try db.save([SoundEmbedding(soundId: sound.id!, model: "clap-general", fingerprint: sound.fingerprint, vector: vector)])
+        try db.removeLibrary(id: lib.id!)
+        lib = try db.addLibrary(kind: .sounds, path: root.path, bookmark: nil)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        let again = try db.sounds()[0]
+        #expect(try db.embedding(soundId: again.id!, model: "clap-general")?.values == vector)
+        let status = try db.embeddingStatus(model: "clap-general")
+        #expect(SoundEmbedding.isCurrent(status[again.id!], model: "clap-general", for: again))
+        var changed = again; changed.fingerprint = "other"
+        #expect(!SoundEmbedding.isCurrent(status[again.id!], model: "clap-general", for: changed))
+        #expect(try db.embeddingStatus(model: "pe-av-large").isEmpty)
+    }
+}
