@@ -51,3 +51,16 @@ enum MusicFiles {
         return trimmed.isEmpty ? nil : trimmed
     }
 }
+
+/// Length and format of compressed sound effects (MP3, AAC, FLAC…), which
+/// EarmarkCore's header reader skips. Opens the file read-only.
+enum SoundFiles {
+    static let technical: TechnicalReader = { url in
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        let format = file.fileFormat
+        let rate = format.sampleRate
+        return AudioTechnical(sampleRate: rate > 0 ? rate : nil, channels: Int(format.channelCount),
+                              bitsPerSample: nil,
+                              duration: rate > 0 && file.length > 0 ? Double(file.length) / rate : nil)
+    }
+}

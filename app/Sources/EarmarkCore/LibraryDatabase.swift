@@ -205,6 +205,14 @@ public final class LibraryDatabase: Sendable {
                 t.column("analysisSource", .text)
             }
         }
+        // Ids of sounds that left the database (library removed, or file gone on
+        // rescan), by fingerprint, so the same file gets its id back if it returns.
+        m.registerMigration("v2-retired-sounds") { db in
+            try db.create(table: "retiredSound") { t in
+                t.primaryKey("fingerprint", .text)
+                t.column("soundId", .integer).notNull()
+            }
+        }
         return m
     }
 
@@ -232,27 +240,73 @@ public final class LibraryDatabase: Sendable {
         }
     }
 
+    /// Forgets a library. Its sounds' ids are kept by fingerprint, so adding
+    /// the folder again (or the same files elsewhere) restores them.
     public func removeLibrary(id: Int64) throws {
-        _ = try dbQueue.write { db in try Library.deleteOne(db, key: id) }
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT OR REPLACE INTO retiredSound (fingerprint, soundId)
+                SELECT fingerprint, id FROM sound WHERE libraryId = ? AND fingerprint IS NOT NULL
+                """, arguments: [id])
+            _ = try Library.deleteOne(db, key: id)
+        }
     }
 
     // MARK: sounds
 
-    /// Replace a library's sounds with a fresh scan. Records for files that
-    /// still exist keep their id; files no longer present are removed.
+    /// Replace a library's sounds with a fresh scan. A file keeps its id when
+    /// its path is unchanged; a renamed or moved file keeps it through its
+    /// fingerprint, as does a file returning after it was removed. Files no
+    /// longer present are removed (their ids retired by fingerprint).
     /// Only call this when the library folder is online.
     public func replaceSounds(libraryId: Int64, root: URL, scanned: [ScannedSound]) throws {
         try dbQueue.write { db in
-            let existing = try Row.fetchAll(db, sql: "SELECT id, path FROM sound WHERE libraryId = ?", arguments: [libraryId])
+            let existing = try Row.fetchAll(db, sql: "SELECT id, path, fingerprint FROM sound WHERE libraryId = ?",
+                                            arguments: [libraryId])
             var idByPath: [String: Int64] = [:]
-            for row in existing { idByPath[row["path"]] = row["id"] }
-            var seen = Set<String>()
-            for s in scanned {
-                var rec = SoundRecord(libraryId: libraryId, root: root, scanned: s)
-                seen.insert(rec.path)
-                if let id = idByPath[rec.path] { rec.id = id; try rec.update(db) } else { try rec.insert(db) }
+            var fingerprintByID: [Int64: String] = [:]
+            for row in existing {
+                idByPath[row["path"]] = row["id"]
+                if let f: String = row["fingerprint"] { fingerprintByID[row["id"]] = f }
             }
-            for (path, id) in idByPath where !seen.contains(path) { _ = try SoundRecord.deleteOne(db, key: id) }
+            let records = scanned.map { SoundRecord(libraryId: libraryId, root: root, scanned: $0) }
+            let scannedPaths = Set(records.map(\.path))
+
+            // Rows whose file is no longer at their path may have moved: index them by fingerprint.
+            var movable: [String: [Int64]] = [:]
+            for (path, id) in idByPath where !scannedPaths.contains(path) {
+                if let f = fingerprintByID[id] { movable[f, default: []].append(id) }
+            }
+            var kept = Set<Int64>()
+            var fresh: [SoundRecord] = []
+            for var rec in records {
+                if let id = idByPath[rec.path] {
+                    rec.id = id
+                } else if let f = rec.fingerprint, let id = movable[f]?.popLast() {
+                    rec.id = id
+                } else {
+                    fresh.append(rec)
+                    continue
+                }
+                kept.insert(rec.id!)
+                try rec.update(db)
+            }
+            for (_, id) in idByPath where !kept.contains(id) {
+                if let f = fingerprintByID[id] {
+                    try db.execute(sql: "INSERT OR REPLACE INTO retiredSound (fingerprint, soundId) VALUES (?, ?)",
+                                   arguments: [f, id])
+                }
+                _ = try SoundRecord.deleteOne(db, key: id)
+            }
+            for var rec in fresh {
+                if let f = rec.fingerprint,
+                   let id = try Int64.fetchOne(db, sql: "SELECT soundId FROM retiredSound WHERE fingerprint = ?", arguments: [f]),
+                   try !SoundRecord.exists(db, key: id) {
+                    rec.id = id
+                }
+                try rec.insert(db)
+                if let f = rec.fingerprint { try db.execute(sql: "DELETE FROM retiredSound WHERE fingerprint = ?", arguments: [f]) }
+            }
         }
     }
 

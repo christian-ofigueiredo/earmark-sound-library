@@ -229,7 +229,7 @@ final class AppModel {
         do {
             switch library.kind {
             case .sounds:
-                let found = await LibraryScanner().scan(root: root, progress: report)
+                let found = await LibraryScanner(fallback: SoundFiles.technical).scan(root: root, progress: report)
                 if confirmScanResult(found.count, known: known, library: library) {
                     try await Task.detached { try db.replaceSounds(libraryId: id, root: root, scanned: found) }.value
                 }

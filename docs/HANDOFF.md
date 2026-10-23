@@ -1,4 +1,4 @@
-# Earmark: handoff (2026-10-22)
+# Earmark: handoff (2026-10-23)
 
 Notes for continuing in a new chat (for example Claude Code on the owner's Mac).
 Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped.
@@ -81,24 +81,30 @@ Settings → Repository name. Topics/description also have to be set there.
 
 ## Next steps (in order)
 
-1. **Get the app compiling on macOS.** It was written in a Linux container, so the
-   SwiftUI/AppKit code has never been compiled. On the Mac: `cd app && swift build`, or open
-   `app/Package.swift` in Xcode (16.0+ needed for Swift 6) and Run the "Earmark" scheme.
-   Fix compile errors; most likely Swift 6 concurrency details in `.task` closures,
-   `AVURLAsset.load` or `withTaskCancellationHandler`. CI (`app.yml`) also shows the errors.
-2. Try it on the real library (read-only): add Banana One as a sound library, add the music
-   folder, import Phase 0 `music_analysis.json`, then check:
-   - categories and counts;
+1. ~~Get the app compiling on macOS.~~ Done: builds clean with Swift 6.4 on macOS 27 and on the
+   GitHub macos-15 runner (`app.yml` green).
+2. Try it on the real library (read-only). Done for sound effects on Banana 01
+   (`02 RESOURCES/AUDIO/SoundFX`, 29,177 files): scan, UCS categories, waveform, playback,
+   range playback, search. Fixed: squeezed table (detail is now an `.inspector`), stale
+   selection after filtering, status bar "N of M". Still to check, with the owner at the Mac:
+   - the Music section and the Phase 0 import (the macOS Open panel runs out of process, so
+     computer use can't pick folders; the owner has to);
    - dragging into Resolve Studio;
-   - waveform and range playback;
-   - the music filters.
-3. Small things still to add to Phase 1:
-   - a `scripts/build-app.sh` that wraps the release build into `Earmark.app` (Info.plist,
-     resource bundle in `Contents/Resources`, ad hoc signing, and usage strings for
-     removable volumes, Desktop, Documents and Downloads);
-   - sound-ID persistence by fingerprint when a library is removed and re-added;
-   - applying the owner-approved Sound Ideas folder → UCS mapping (from the C CSVs) as
-     vendor rules.
+   - whether clicking a top-level category (e.g. "Ambience") selects it with a real mouse click
+     (accessibility presses only toggle the disclosure).
+   Not a bug: UCS filenames like `…_Ocular Sounds_Forest_The Complete Ambiences Collection` show
+   Library "Forest", because SourceID is the fourth field by the spec.
+3. Phase 1 items:
+   - ~~`scripts/build-app.sh`~~ Done (`app/build/Earmark.app`, ad hoc signed, bundle id
+     `io.github.christian-ofigueiredo.Earmark`).
+   - ~~Sound-ID persistence by fingerprint~~ Done: renamed/moved files keep their id, and ids of
+     removed sounds are kept in `retiredSound` (schema v2) so re-adding a library restores them.
+   - ~~MP3/AAC length and format~~ Done: the scanner takes an optional `TechnicalReader`; the app
+     passes an AVAudioFile one (`SoundFiles.technical`), so the core still builds on Linux.
+   - Applying the owner-approved Sound Ideas folder → UCS mapping (from the C CSVs) as vendor
+     rules: **blocked** until the owner fills in the "Your decision" column.
+   - Worth considering: 349 sounds exist as both MP3 and WAV in the same pack; group them and
+     prefer the WAV.
 4. Then the plan's Phase 2 (analysis engine):
    - Core ML conversion of PE-AV large + CLAP (half precision only if the parity check
      passes);

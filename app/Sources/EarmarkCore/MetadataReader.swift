@@ -6,6 +6,11 @@ public struct AudioTechnical: Sendable, Codable, Equatable {
     public var channels: Int?
     public var bitsPerSample: Int?
     public var duration: Double?
+
+    public init(sampleRate: Double? = nil, channels: Int? = nil, bitsPerSample: Int? = nil, duration: Double? = nil) {
+        self.sampleRate = sampleRate; self.channels = channels
+        self.bitsPerSample = bitsPerSample; self.duration = duration
+    }
 }
 
 public struct AcidInfo: Sendable, Codable, Equatable {

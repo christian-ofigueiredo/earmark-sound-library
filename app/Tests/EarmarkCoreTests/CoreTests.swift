@@ -174,6 +174,44 @@ import Testing
         #expect(try db.sounds().isEmpty)
     }
 
+    @Test func soundsKeepTheirIdThroughRenamesAndReAdding() async throws {
+        let db = try LibraryDatabase(path: nil)
+        let root = TestFiles.tempDir()
+        TestFiles.write(TestFiles.wav(seconds: 1), to: root.appendingPathComponent("A/one.wav"))
+        TestFiles.write(TestFiles.wav(seconds: 2), to: root.appendingPathComponent("two.wav"))
+        var lib = try db.addLibrary(kind: .sounds, path: root.path, bookmark: nil)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        let ids = Dictionary(uniqueKeysWithValues: try db.sounds().map { ($0.fileName, $0.id!) })
+
+        // Moved and renamed: same content, same id.
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("B"), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: root.appendingPathComponent("A/one.wav"),
+                                         to: root.appendingPathComponent("B/renamed.wav"))
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        let moved = try db.sounds()
+        #expect(moved.count == 2)
+        #expect(moved.first { $0.fileName == "renamed.wav" }?.id == ids["one.wav"])
+        #expect(moved.first { $0.fileName == "renamed.wav" }?.folder == "B")
+
+        // Removed from Earmark, then added again: ids come back.
+        try db.removeLibrary(id: lib.id!)
+        #expect(try db.sounds().isEmpty)
+        lib = try db.addLibrary(kind: .sounds, path: root.path, bookmark: nil)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        let back = try db.sounds()
+        #expect(back.first { $0.fileName == "renamed.wav" }?.id == ids["one.wav"])
+        #expect(back.first { $0.fileName == "two.wav" }?.id == ids["two.wav"])
+
+        // A file deleted on disk and later restored also gets its id back.
+        let two = root.appendingPathComponent("two.wav"), saved = try Data(contentsOf: two)
+        try FileManager.default.removeItem(at: two)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        #expect(try db.sounds().count == 1)
+        TestFiles.write(saved, to: two)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        #expect(try db.sounds().first { $0.fileName == "two.wav" }?.id == ids["two.wav"])
+    }
+
     @Test func importsPhase0MusicAnalysis() throws {
         let db = try LibraryDatabase(path: nil)
         let lib = try db.addLibrary(kind: .music, path: "/Music/Liked", bookmark: nil)

@@ -50,18 +50,25 @@ public struct ScannedSound: Sendable, Codable, Equatable {
     public var warnings: [String]
 }
 
+/// Reads length and format of files MetadataReader can't parse (MP3, AAC, FLAC…).
+/// The macOS app supplies one built on AVFoundation; the core has none.
+public typealias TechnicalReader = @Sendable (URL) -> AudioTechnical?
+
 public struct LibraryScanner: Sendable {
     public let catalog: UCSCatalog
     public let parallelism: Int
+    public let fallback: TechnicalReader?
 
-    public init(catalog: UCSCatalog = .shared, parallelism: Int = 8) {
+    public init(catalog: UCSCatalog = .shared, parallelism: Int = 8, fallback: TechnicalReader? = nil) {
         self.catalog = catalog
         self.parallelism = max(1, parallelism)
+        self.fallback = fallback
     }
 
-    public static func inspect(url: URL, catalog: UCSCatalog = .shared) -> ScannedSound {
+    public static func inspect(url: URL, catalog: UCSCatalog = .shared, fallback: TechnicalReader? = nil) -> ScannedSound {
         let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-        let raw = MetadataReader.read(url: url)
+        var raw = MetadataReader.read(url: url)
+        if raw.technical.duration == nil, let tech = fallback?(url) { raw.technical = tech }
         return ScannedSound(path: url.path, fileSize: Int64(values?.fileSize ?? 0),
                             modified: values?.contentModificationDate ?? .distantPast,
                             fingerprint: Fingerprint.of(url: url), technical: raw.technical,
@@ -73,21 +80,21 @@ public struct LibraryScanner: Sendable {
     /// as files complete. Only reads; nothing is written next to the files.
     public func scan(root: URL, progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) async -> [ScannedSound] {
         let files = AudioFiles.list(in: root)
-        let catalog = self.catalog
+        let catalog = self.catalog, fallback = self.fallback
         var results: [ScannedSound] = []
         results.reserveCapacity(files.count)
         await withTaskGroup(of: ScannedSound.self) { group in
             var next = 0
             for _ in 0 ..< min(parallelism, files.count) {
                 let url = files[next]; next += 1
-                group.addTask { LibraryScanner.inspect(url: url, catalog: catalog) }
+                group.addTask { LibraryScanner.inspect(url: url, catalog: catalog, fallback: fallback) }
             }
             for await sound in group {
                 results.append(sound)
                 progress(results.count, files.count)
                 if next < files.count {
                     let url = files[next]; next += 1
-                    group.addTask { LibraryScanner.inspect(url: url, catalog: catalog) }
+                    group.addTask { LibraryScanner.inspect(url: url, catalog: catalog, fallback: fallback) }
                 }
             }
         }
