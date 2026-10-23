@@ -27,6 +27,7 @@ final class AnalysisEngine {
     private weak var model: AppModel?
     private var governor: AnalysisGovernor
     private let monitor = SystemMonitor()
+    private let log = SchedulerLog(folder: AppModel.supportFolder.appendingPathComponent("Logs", isDirectory: true))
     private var queue: [SoundRecord] = []
     private var running: [Int64: Task<Void, Never>] = [:]
     private var unsaved: [SoundFacts] = []
@@ -93,7 +94,9 @@ final class AnalysisEngine {
     }
 
     private func tick() {
-        pace = governor.update(monitor.sample())
+        let signals = monitor.sample()
+        pace = governor.update(signals)
+        log.record(signals, mode: mode, pace: pace, remaining: remaining, running: running.count, measured: facts.count)
         // Over the limit (the Mac got busy): stop the newest files; they go back in the queue.
         while running.count > pace.workers, let (id, task) = running.max(by: { $0.key < $1.key }) {
             task.cancel()
@@ -182,5 +185,54 @@ enum SoundAnalyzer {
         } catch {
             return SoundFacts(soundId: soundId, fingerprint: fingerprint, loudness: nil, error: error.localizedDescription)
         }
+    }
+}
+
+/// One CSV line per scheduler tick (every 5 s), so a night's decisions can be
+/// checked and the thresholds tuned. Kept for the last 7 days; one file per day.
+@MainActor
+final class SchedulerLog {
+    private let folder: URL
+    private var handle: FileHandle?
+    private var day = ""
+    // Local time, so the log reads like the clock on the wall.
+    private static let dayFormat = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f }()
+    private static let timeFormat = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f }()
+
+    init(folder: URL) {
+        self.folder = folder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let old = Date().addingTimeInterval(-7 * 86400)
+        for url in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        where url.lastPathComponent.hasPrefix("scheduler-") {
+            if let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, date < old {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
+    func record(_ s: SystemSignals, mode: AnalysisGovernor.Mode, pace: AnalysisPace,
+                remaining: Int, running: Int, measured: Int) {
+        let now = Date()
+        let today = Self.dayFormat.string(from: now)
+        if today != day { open(today) }
+        let time = Self.timeFormat.string(from: now)
+        let line = [time, String(format: "%.0f", s.userIdle), String(format: "%.2f", s.otherCPU),
+                    String(format: "%.2f", s.gpu), "\(s.thermal)", "\(s.onBattery)", "\(s.lowPowerMode)",
+                    mode.rawValue, "\(pace.workers)", "\(pace.reason)", "\(running)", "\(remaining)", "\(measured)"]
+            .joined(separator: ",") + "\n"
+        handle?.write(Data(line.utf8))
+    }
+
+    private func open(_ today: String) {
+        try? handle?.close()
+        day = today
+        let url = folder.appendingPathComponent("scheduler-\(today).csv")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            let header = "time,idle_s,other_cpu,gpu,thermal,battery,low_power,mode,workers,reason,running,queued,measured\n"
+            FileManager.default.createFile(atPath: url.path, contents: Data(header.utf8))
+        }
+        handle = try? FileHandle(forWritingTo: url)
+        _ = try? handle?.seekToEnd()
     }
 }
