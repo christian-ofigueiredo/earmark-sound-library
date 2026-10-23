@@ -132,8 +132,18 @@ Settings → Repository name. Topics/description also have to be set there.
      Measured ~15–20 files/s at full speed from the SSD (843 in about a minute).
      Menu titles can't follow state: SwiftUI menu commands didn't refresh from @Observable or
      @AppStorage when read via accessibility, so Pause and Resume are separate fixed items.
-   - Core ML conversion of PE-AV large + CLAP (half precision only if the parity check
-     passes);
+   - ~~Core ML conversion of CLAP~~ Done (`models/`, see its README): `convert_clap.py` makes
+     `CLAPAudio.mlpackage` (not committed, 271 MB); `parity_clap.py` checks it against
+     Phase 0's cached vectors. On 300 real files, full precision matches Phase 0 exactly
+     (cosine 1.00000, neighbours 100%); half precision keeps 99.4% of top-5 neighbours, so
+     **the app uses full precision** (39 ms/window on CPU). The Swift pipeline
+     (`EarmarkML`: AVFoundation decode + Core ML; `EarmarkCore/ClapFeatures.swift`: Phase 0
+     prep + CLAP log-mel, tested against a Python fixture to < 0.01 dB) gives median cosine
+     1.000000, p1 0.99907, min 0.988 (short 96 kHz files: resampler differences move the
+     -60 dB trim point), neighbours 99.9%; 0.38 s/file. `earmark-parity` reruns this check.
+   - Next for CLAP: store embeddings as an analysis stage (scheduler already exists), decide
+     how the app gets the model file (download or release asset; it can't live in git).
+   - Core ML conversion of PE-AV large (half precision only if the parity check passes);
    - music tempo/key in-app (Beat This! + S-KEY);
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
      only 13–16%).

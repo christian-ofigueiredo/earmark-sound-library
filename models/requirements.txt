@@ -1,0 +1,8 @@
+# Converts the Phase 0 models to Core ML and checks parity. Separate from
+# phase0/.venv so Phase 0 keeps working as it was.
+torch==2.14.1
+transformers==5.20.2
+coremltools
+numpy
+soundfile
+soxr

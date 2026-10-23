@@ -10,13 +10,17 @@ var targets: [Target] = [
         dependencies: [.product(name: "GRDB", package: "GRDB.swift")],
         resources: [.copy("Resources/ucs_v8.2.1.csv")]
     ),
-    .testTarget(name: "EarmarkCoreTests", dependencies: ["EarmarkCore"]),
+    .testTarget(name: "EarmarkCoreTests", dependencies: ["EarmarkCore"], resources: [.copy("Fixtures")]),
 ]
 var products: [Product] = [.library(name: "EarmarkCore", targets: ["EarmarkCore"])]
 
 #if os(macOS)
-targets.append(.executableTarget(name: "Earmark", dependencies: ["EarmarkCore"]))
+// EarmarkML: decoding (AVFoundation) and Core ML models, macOS only.
+targets.append(.target(name: "EarmarkML", dependencies: ["EarmarkCore"]))
+targets.append(.executableTarget(name: "Earmark", dependencies: ["EarmarkCore", "EarmarkML"]))
 products.append(.executable(name: "Earmark", targets: ["Earmark"]))
+// Checks the app's CLAP pipeline against Phase 0 (see models/parity_clap.py).
+targets.append(.executableTarget(name: "earmark-parity", dependencies: ["EarmarkCore", "EarmarkML"]))
 #endif
 
 let package = Package(

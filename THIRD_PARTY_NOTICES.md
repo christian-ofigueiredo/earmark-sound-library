@@ -19,6 +19,12 @@ downloaded by `setup.sh` or on first use, under its own license.
 | Beat This! `final0`–`final2` (CPJKU), or the community copy `safe-models/beat-this-final0` if the official server is down | Tempo, beats, downbeats | MIT. Its authors note that some training audio is copyrighted or under restrictive Creative Commons terms, and that users should judge whether this matters for their use. |
 | S-KEY (Deezer), installed from github.com/deezer/skey at a pinned commit | Musical key | MIT |
 
+## Converted models (made by `models/`, not in the repository)
+
+| File | From | License |
+|---|---|---|
+| `CLAPAudio.mlpackage` (Core ML) | LAION CLAP `laion/larger_clap_general`, audio tower and projection, converted unchanged except that its bicubic time resize is written as the equivalent matrix multiply | Apache-2.0, as the original. Converted with coremltools (BSD-3-Clause), which isn't distributed. |
+
 ## Python libraries (installed by `setup.sh`, not distributed here)
 
 Mostly permissive (BSD, MIT, Apache-2.0, ISC): PyTorch, transformers,

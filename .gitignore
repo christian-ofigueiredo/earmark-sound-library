@@ -9,3 +9,7 @@ __pycache__/
 .swiftpm/
 app/build/
 *.xcodeproj/xcuserdata/
+
+# Core ML conversion (models/)
+models/.venv/
+models/build/
