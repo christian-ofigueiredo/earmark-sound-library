@@ -243,6 +243,7 @@ struct SoundDetail: View {
                     ("Library", sound.vendorLibrary),
                     ("Manufacturer", sound.manufacturer),
                     ("Designer", sound.designer),
+                    ("Loudness", model.analysis.facts[sound.id ?? -1].flatMap { loudnessText($0, for: sound) }),
                     ("Format", sound.formatText),
                     ("Length", formatLength(sound.duration)),
                     ("Folder", sound.folder),
@@ -270,4 +271,13 @@ struct OtherFormats: View {
             }
         }
     }
+}
+
+/// "-18.2 LUFS · peak -0.4 dBFS", or nil while not measured yet.
+func loudnessText(_ facts: SoundFacts, for sound: SoundRecord) -> String? {
+    guard facts.isCurrent(for: sound) else { return nil }
+    if facts.error != nil { return "Couldn't be measured" }
+    guard let lufs = facts.loudness else { return "Silent" }
+    let peak = facts.peak.map { String(format: " · peak %.1f dBFS", $0) } ?? ""
+    return String(format: "%.1f LUFS", lufs) + peak
 }

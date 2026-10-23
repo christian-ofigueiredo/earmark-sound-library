@@ -213,6 +213,20 @@ public final class LibraryDatabase: Sendable {
                 t.column("soundId", .integer).notNull()
             }
         }
+        // Analysis stage 1 ("facts"). Rows are keyed by sound id with no foreign
+        // key, so they survive a library being removed and re-added (ids come back
+        // through retiredSound); the fingerprint says whether they still apply.
+        m.registerMigration("v3-sound-facts") { db in
+            try db.create(table: "soundFacts") { t in
+                t.primaryKey("soundId", .integer)
+                t.column("fingerprint", .text)
+                t.column("version", .integer).notNull()
+                t.column("loudness", .double)
+                t.column("peak", .double)
+                t.column("error", .text)
+                t.column("analyzedAt", .datetime).notNull()
+            }
+        }
         return m
     }
 
@@ -318,6 +332,19 @@ public final class LibraryDatabase: Sendable {
         }
     }
 
+    // MARK: analysis facts
+
+    public func soundFacts() throws -> [Int64: SoundFacts] {
+        try dbQueue.read { db in
+            Dictionary(try SoundFacts.fetchAll(db).map { ($0.soundId, $0) }, uniquingKeysWith: { a, _ in a })
+        }
+    }
+
+    public func save(_ facts: [SoundFacts]) throws {
+        guard !facts.isEmpty else { return }
+        try dbQueue.write { db in for f in facts { try f.save(db) } }
+    }
+
     // MARK: songs
 
     /// Replace a music folder's songs with a fresh listing, keeping any
@@ -376,5 +403,34 @@ public final class LibraryDatabase: Sendable {
             }
             return matched
         }
+    }
+}
+
+/// Analysis stage 1 for one sound: measured from the decoded audio.
+public struct SoundFacts: Codable, FetchableRecord, PersistableRecord, Sendable, Equatable {
+    /// Bump when the measurement changes, so every sound is measured again.
+    public static let currentVersion = 1
+
+    public var soundId: Int64
+    public var fingerprint: String?
+    public var version: Int
+    /// Integrated loudness, LUFS (EBU R128).
+    public var loudness: Double?
+    /// Sample peak, dBFS.
+    public var peak: Double?
+    /// Why the file couldn't be measured (it isn't retried until the file or version changes).
+    public var error: String?
+    public var analyzedAt: Date
+
+    public init(soundId: Int64, fingerprint: String?, loudness: LoudnessMeter.Result?, error: String? = nil,
+                version: Int = SoundFacts.currentVersion, analyzedAt: Date = Date()) {
+        self.soundId = soundId; self.fingerprint = fingerprint; self.version = version
+        self.loudness = loudness?.integrated; self.peak = loudness?.peak
+        self.error = error; self.analyzedAt = analyzedAt
+    }
+
+    /// Whether these facts still describe `sound` (same content, current version).
+    public func isCurrent(for sound: SoundRecord) -> Bool {
+        version >= Self.currentVersion && fingerprint == sound.fingerprint
     }
 }

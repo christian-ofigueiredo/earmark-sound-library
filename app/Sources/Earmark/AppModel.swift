@@ -42,6 +42,7 @@ final class AppModel {
     let player = AudioPlayer()
     let soundBrowser = SoundBrowser()
     let musicBrowser = MusicBrowser()
+    let analysis = AnalysisEngine()
 
     var section: AppSection
     var showWelcome: Bool
@@ -73,7 +74,10 @@ final class AppModel {
             database = nil
             startupError = "Earmark couldn't open its database in \(Self.supportFolder.path): \(error.localizedDescription)"
         }
-        Task { await reload() }
+        Task {
+            await reload()
+            analysis.start(model: self)
+        }
     }
 
     // MARK: reading
@@ -89,6 +93,7 @@ final class AppModel {
             songs = snap.songs
             songIndex = snap.songIndex
             version += 1
+            analysis.libraryChanged()
         } catch {
             show(error, title: "Couldn't read Earmark's database")
         }

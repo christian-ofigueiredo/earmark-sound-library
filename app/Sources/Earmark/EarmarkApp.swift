@@ -1,4 +1,5 @@
 import AppKit
+import EarmarkCore
 import SwiftUI
 
 @main
@@ -31,6 +32,7 @@ struct EarmarkApp: App {
                     .keyboardShortcut("2")
                 Divider()
             }
+            CommandMenu("Analysis") { AnalysisMenu(analysis: model.analysis) }
             CommandGroup(replacing: .help) {
                 Button("Welcome to Earmark") { model.showWelcome = true }
             }
@@ -47,4 +49,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+}
+
+/// The Analysis menu. Titles are fixed: menu commands don't reliably refresh when
+/// the engine's state changes, so nothing here depends on it except the picker.
+struct AnalysisMenu: View {
+    let analysis: AnalysisEngine
+
+    var body: some View {
+        Button("Pause Analysis") { analysis.mode = .paused }
+            .keyboardShortcut("p", modifiers: [.command, .option])
+        Button("Resume Analysis") { analysis.mode = .automatic }
+            .keyboardShortcut("r", modifiers: [.command, .option])
+        Button("Run at Full Speed Now") { analysis.mode = .fullSpeed }
+        Divider()
+        Picker("While You Use the Mac", selection: Binding(
+            get: { analysis.mode == .idleOnly ? AnalysisGovernor.Mode.idleOnly : .automatic },
+            set: { analysis.mode = $0 }
+        )) {
+            Text("Keep Analysing Gently").tag(AnalysisGovernor.Mode.automatic)
+            Text("Wait Until the Mac Is Idle").tag(AnalysisGovernor.Mode.idleOnly)
+        }
+    }
 }

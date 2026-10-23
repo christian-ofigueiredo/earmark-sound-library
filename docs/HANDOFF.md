@@ -110,10 +110,30 @@ Settings → Repository name. Topics/description also have to be set there.
      extension, folders equal once format words are blanked, lengths within 0.5 s. The list shows
      the best copy (WAV > AIFF > FLAC > AAC > MP3); the detail pane lists the others under
      "Also in this pack as". On SoundFX this hides 350 copies (29,177 → 28,827 listed).
-4. Then the plan's Phase 2 (analysis engine):
+4. Phase 2 (analysis engine), started on `phase1`:
+   - ~~Idle/overnight scheduler~~ Done. `AnalysisGovernor` (core, tested) turns `SystemSignals`
+     into a pace: paused / 1 gentle worker while you work / cores÷2 when idle ≥ 5 min. Other
+     apps' load pauses it: while you work at CPU > 50% or GPU > 35% (editing in Resolve:
+     GPU ~40%, Resolve ~47% CPU on the Edit page); once idle only at CPU or GPU > 60%
+     (an export), so Resolve left open overnight doesn't block it. Hysteresis back to
+     25%/15% (idle 40%/45%); speeding up waits 60 s, slowing down is immediate; heat
+     (serious), battery and Low Power Mode pause it. `SystemMonitor` (app) samples idle time
+     (HID), CPU (host ticks minus Earmark's own rusage), GPU (IOAccelerator "Device
+     Utilization %"), thermal state, power. Analysis menu: Pause / Resume / Run at Full Speed
+     Now (not remembered after relaunch) / gentle-or-wait-while-you-work. App Nap is held off
+     while working; idle sleep is still allowed.
+     **To check with the owner:** the thresholds are first guesses from one sample. Watch a
+     real night (Resolve open, and once during an export) and tune. Status-bar wording right
+     after launch says "waits for the Mac to be idle" during the 60 s ramp-up.
+   - ~~First stage-1 fact: loudness~~ Done. `LoudnessMeter` (BS.1770-4 / EBU R128 gating,
+     sample peak) passes EBU Tech 3341 cases 1–3 at 44.1/48/96 kHz and matches ffmpeg ebur128
+     within 0.05 LU on 6 real files. Results in `soundFacts` (schema v3, keyed by sound id +
+     fingerprint, no FK, so they survive re-adding a library). Shown in the detail pane.
+     Measured ~15–20 files/s at full speed from the SSD (843 in about a minute).
+     Menu titles can't follow state: SwiftUI menu commands didn't refresh from @Observable or
+     @AppStorage when read via accessibility, so Pause and Resume are separate fixed items.
    - Core ML conversion of PE-AV large + CLAP (half precision only if the parity check
      passes);
-   - idle/overnight scheduler;
    - music tempo/key in-app (Beat This! + S-KEY);
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
      only 13–16%).

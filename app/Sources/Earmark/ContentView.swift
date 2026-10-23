@@ -72,6 +72,13 @@ struct StatusBar: View {
                 Text(summary).foregroundStyle(.secondary)
             }
             Spacer(minLength: 16)
+            if !model.analysis.statusText.isEmpty {
+                Label(model.analysis.statusText, systemImage: model.analysis.pace.isPaused ? "pause.circle" : "waveform.badge.magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                Divider().frame(height: 12)
+            }
             Label("Analysis is much faster when you're not using the Mac. Leave Earmark open overnight.",
                   systemImage: "moon.zzz")
                 .foregroundStyle(.secondary)
