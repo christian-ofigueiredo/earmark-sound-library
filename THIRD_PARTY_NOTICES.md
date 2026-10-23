@@ -23,6 +23,7 @@ downloaded by `setup.sh` or on first use, under its own license.
 
 | File | From | License |
 |---|---|---|
+| `PEAV/PEAVEmbed…PEAVLayers3.mlpackage` (Core ML, 5 parts) | Meta PE-AV large `facebook/pe-av-large`, audio tower and audio head only, converted unchanged except that its rotary position embedding is written as the equivalent pairwise rotation | Apache-2.0, as the original |
 | `CLAPAudio.mlpackage` (Core ML) | LAION CLAP `laion/larger_clap_general`, audio tower and projection, converted unchanged except that its bicubic time resize is written as the equivalent matrix multiply | Apache-2.0, as the original. Converted with coremltools (BSD-3-Clause), which isn't distributed. |
 
 ## Python libraries (installed by `setup.sh`, not distributed here)

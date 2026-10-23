@@ -22,24 +22,24 @@ import Testing
 
     /// Same formula as parity_clap.fixture_signal().
     static func signal() -> [Float] {
-        let sr = Double(ClapAudio.sampleRate)
-        var body = (0 ..< 23 * ClapAudio.sampleRate).map { i -> Double in
+        let sr = Double(Phase0Audio.sampleRate)
+        var body = (0 ..< 23 * Phase0Audio.sampleRate).map { i -> Double in
             let t = Double(i) / sr
             var v = 0.4 * sin(2 * .pi * (200 * t + 40 * t * t)) + 0.2 * sin(2 * .pi * 3000 * t) * exp(-0.1 * t)
             v += 0.5 * exp(-200 * t.truncatingRemainder(dividingBy: 2)) * sin(2 * .pi * 800 * t)
             return v
         }
-        for i in 0 ..< 3 * ClapAudio.sampleRate { body[i] *= 0.01 }
-        let x = [Double](repeating: 0, count: ClapAudio.sampleRate / 2) + body + [Double](repeating: 0, count: ClapAudio.sampleRate)
+        for i in 0 ..< 3 * Phase0Audio.sampleRate { body[i] *= 0.01 }
+        let x = [Double](repeating: 0, count: Phase0Audio.sampleRate / 2) + body + [Double](repeating: 0, count: Phase0Audio.sampleRate)
         return x.map { Float($0) }
     }
 
     @Test func prepareAndWindowsMatchPhase0() throws {
         let f = Self.fixture
-        let prepared = try #require(ClapAudio.prepare(Self.signal()))
+        let prepared = try #require(Phase0Audio.prepare(Self.signal()))
         #expect(prepared.count == f.prepared_length)
         #expect(abs(prepared.map(abs).max()! - f.prepared_peak) < 1e-6)
-        let windows = ClapAudio.windows(prepared)
+        let windows = Phase0Audio.windows(prepared)
         #expect(windows.count == f.windows.count)
         for (w, ref) in zip(windows, f.windows) {
             #expect(w.count == ref.length)
@@ -52,8 +52,8 @@ import Testing
     @Test(arguments: ["long", "short"])
     func featuresMatchClapFeatureExtractor(which: String) throws {
         let f = Self.fixture
-        let prepared = try #require(ClapAudio.prepare(Self.signal()))
-        let input = which == "long" ? ClapAudio.windows(prepared)[0] : Array(prepared.prefix(Int(3.3 * Double(ClapAudio.sampleRate))))
+        let prepared = try #require(Phase0Audio.prepare(Self.signal()))
+        let input = which == "long" ? Phase0Audio.windows(prepared)[0] : Array(prepared.prefix(Int(3.3 * Double(Phase0Audio.sampleRate))))
         let ref = which == "long" ? f.long : f.short
         let feats = ClapAudio.features(input)
         #expect(feats.count == ref.shape[0] * ref.shape[1])

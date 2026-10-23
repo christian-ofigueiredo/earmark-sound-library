@@ -258,7 +258,7 @@ enum SoundAnalyzer {
             }
             do {
                 // Phase 0's audio path: mono, 48 kHz, at most the first 10 minutes.
-                let audio = try AudioDecoder.mono(url: url, sampleRate: Double(ClapAudio.sampleRate), maxSeconds: ClapAudio.maxSeconds)
+                let audio = try AudioDecoder.mono(url: url, sampleRate: Double(Phase0Audio.sampleRate), maxSeconds: Phase0Audio.maxSeconds)
                 if Task.isCancelled { return nil }
                 let vector = try embedder.embed(audio48k: audio)   // nil: silent or shorter than 20 ms
                 result.embedding = SoundEmbedding(soundId: soundId, model: ClapEmbedder.modelName, fingerprint: fingerprint, vector: vector)

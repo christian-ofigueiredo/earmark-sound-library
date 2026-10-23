@@ -156,7 +156,19 @@ Settings → Repository name. Topics/description also have to be set there.
      median cosine 1.000000, min 0.9955, top-5 neighbours 99.4% (`models/check_app_embeddings.py`).
    - Still open for CLAP: how the app gets the model file (download or release asset; it
      can't live in git). Nothing uses the embeddings yet (Phase 3: similarity, groups).
-   - Core ML conversion of PE-AV large (half precision only if the parity check passes);
+   - ~~Core ML conversion of PE-AV large~~ Done (`models/convert_peav.py`, `parity_peav.py`;
+     see models/README). Audio tower only, in 5 parts (4.2 GB float32, not committed).
+     300 real files: full precision matches Phase 0 exactly (cosine 1.00000, neighbours
+     100%); half precision keeps only 94.6% of neighbours, so **full precision**. App side:
+     `PeavAudio.input` (reflect padding, tested against the Python extractor) and
+     `PeavEmbedder`, which runs **one part at a time over a batch of windows**: with three
+     or more float32 parts loaded, Core ML's CPU path segfaulted under memory pressure
+     (Resolve open, swap nearly full). Swift end to end vs Phase 0: median 1.000000, p1
+     0.99984, min 0.99895, neighbours 99.9%; **4.0 s/file** on CPU, peak 2.5 GB.
+   - Next for PE-AV: run it as an analysis stage. At 4 s/file the library is ~32 h of CPU,
+     i.e. several nights. Options to discuss with the owner: accept that; or use the GPU at
+     night (ran all parts fine, likely much faster) but then the scheduler must tell
+     Earmark's own GPU use from other apps'.
    - music tempo/key in-app (Beat This! + S-KEY);
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
      only 13–16%).

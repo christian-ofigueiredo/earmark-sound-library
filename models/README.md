@@ -10,7 +10,12 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 .venv/bin/python -I convert_clap.py            # build/CLAPAudio.mlpackage (full precision)
 .venv/bin/python -I convert_clap.py --fp16     # build/CLAPAudio-fp16.mlpackage (for comparison)
 .venv/bin/python -I parity_clap.py --files 300 --reference
-cd ../app && swift run -c release earmark-parity ../models/build/CLAPAudio.mlpackage ../models/build/clap_reference.json 300
+.venv/bin/python -I convert_peav.py            # build/PEAV/*.mlpackage (5 parts, 4.2 GB)
+.venv/bin/python -I convert_peav.py --fp16     # build/PEAV-fp16/ (for comparison)
+.venv/bin/python -I parity_peav.py --files 300 --reference
+cd ../app
+swift run -c release earmark-parity clap ../models/build/CLAPAudio.mlpackage ../models/build/clap_reference.json 300
+swift run -c release earmark-parity peav ../models/build/PEAV ../models/build/peav_reference.json 300
 ```
 
 `parity_clap.py` needs Phase 0's CLAP cache (`~/SoundLab/cache/clap-general.pkl`).
@@ -43,3 +48,29 @@ Conversion notes:
   casts reject 1-element NumPy arrays under NumPy 2; `convert_clap.py` patches them.
 - CLAP's bicubic resize of 1001 → 1024 time frames isn't convertible; it is a fixed
   linear map along time, baked in as a 1024×1001 matrix (exact in float64).
+
+## PE-AV large results (2026-10-23, 300 random files, 647 windows)
+
+| | Cosine to Phase 0 (min / p1 / median) | Top-5 neighbours kept | Model time per window |
+|---|---|---|---|
+| **Core ML, full precision** | 1.00000 / 1.00000 / 1.000000 | 100% | 1.39 s (CPU) |
+| Core ML, half precision | 0.97546 / 0.98497 / 0.999584 | 94.6% | 0.75 s (CPU) |
+
+The app uses full precision: half precision changes 5% of nearest neighbours.
+
+How it's converted (`convert_peav.py`):
+- Only the audio tower's weights are read (1.13 B parameters of the 8.9 GB checkpoint;
+  no text or video tower).
+- Split into five models (codec encoder + class token; 4 × 7 transformer layers, the
+  last with the output head) so conversion fits in memory. The parts chained in PyTorch
+  equal the original encoder exactly.
+- Window lengths are flexible (1920–480000 samples, multiples of 1920), so short
+  sounds are embedded at their own length as in Phase 0.
+- RoPE is rewritten as a plain pairwise rotation: transformers' version builds 2×2
+  matrices with `narrow`, which coremltools can't convert for a flexible length. Exact.
+
+Running it: **one part at a time over a batch of windows** (`parity_peav.py`, and
+`PeavEmbedder` in the app). With three or more float32 parts loaded at once, Core ML's
+CPU path crashed (segmentation fault) while Resolve was open and swap was nearly full;
+two parts or one at a time is fine. GPU (`CPU_AND_GPU`) ran all five at once, but the
+scheduler counts GPU load as "another app is busy", so the app uses the CPU.

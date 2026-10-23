@@ -23,9 +23,15 @@ public final class ClapEmbedder: @unchecked Sendable {
 
     /// The file's vector from mono 48 kHz audio, or nil if it's silent or shorter than 20 ms.
     public func embed(audio48k x: [Float]) throws -> [Float]? {
-        guard let prepared = ClapAudio.prepare(x) else { return nil }
+        guard let prepared = Phase0Audio.prepare(x) else { return nil }
+        return try embed(windows: Phase0Audio.windows(prepared))
+    }
+
+    /// The file's vector from its Phase 0 windows, or nil if there are none.
+    public func embed(windows: [[Float]]) throws -> [Float]? {
+        guard !windows.isEmpty else { return nil }
         var sum = [Float](repeating: 0, count: Self.dimensions)
-        for window in ClapAudio.windows(prepared) {
+        for window in windows {
             let e = try embed(features: ClapAudio.features(window))
             for i in 0 ..< Self.dimensions { sum[i] += e[i] }
         }

@@ -1,20 +1,15 @@
 import Foundation
 
-/// Audio preparation for the CLAP embedding, ported from Phase 0 so the app's
-/// vectors match the ones Phase 0 measured (see models/parity_clap.py):
-/// mono 48 kHz → trim silence (-60 dB) → peak-normalise to 0.9 → up to six
-/// evenly spread 10 s windows → per window, CLAP's log-mel spectrogram
-/// (repeat-padded to 10 s, Hann 1024 / hop 480, 64 Slaney mels 50 Hz–14 kHz, dB).
-public enum ClapAudio {
+/// Phase 0's audio preparation, shared by the embedding models so the app's
+/// vectors match the ones Phase 0 measured: mono 48 kHz (at most the first 10
+/// minutes) → trim silence (-60 dB) → peak-normalise to 0.9 → up to six evenly
+/// spread 10 s windows, each embedded on its own.
+public enum Phase0Audio {
     public static let sampleRate = 48_000
     public static let windowSamples = 480_000
     public static let maxWindows = 6
     /// Phase 0 decodes at most the first 10 minutes of a file.
     public static let maxSeconds = 600.0
-    public static let frames = 1001, mels = 64
-    static let nFFT = 1024, hop = 480
-
-    // MARK: Phase 0's prepare() and pick_windows()
 
     /// Trimmed and peak-normalised audio, or nil if silent or shorter than 20 ms.
     public static func prepare(_ x: [Float]) -> [Float]? {
@@ -62,6 +57,36 @@ public enum ClapAudio {
         let kept = zip(windows, rms).filter { $0.1 >= 0.05 * loudest }.map(\.0)
         return kept.isEmpty ? windows : kept
     }
+}
+
+/// PE-AV's input: the window itself, reflect-padded at the end to a multiple of
+/// 1920 samples (PeAudioFeatureExtractor), as numpy's "reflect" pads.
+public enum PeavAudio {
+    public static let hop = 1920
+
+    public static func input(_ window: [Float]) -> [Float] {
+        let n = window.count
+        guard n > 1, n % hop != 0 else { return window }
+        let pad = hop - n % hop
+        // numpy "reflect" keeps mirroring for long pads: a periodic mirror of period 2(n-1).
+        let period = 2 * (n - 1)
+        var out = window
+        out.reserveCapacity(n + pad)
+        for j in 0 ..< pad {
+            var m = (n - 1 + j + 1) % period
+            if m >= n { m = period - m }
+            out.append(window[m])
+        }
+        return out
+    }
+}
+
+/// CLAP's log-mel features (see models/parity_clap.py), on Phase 0's windows.
+public enum ClapAudio {
+    public static let frames = 1001, mels = 64
+    static let nFFT = 1024, hop = 480
+    static let sampleRate = Phase0Audio.sampleRate
+    static let windowSamples = Phase0Audio.windowSamples
 
     // MARK: CLAP's feature extractor ("repeatpad", Slaney mel, dB)
 
