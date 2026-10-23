@@ -87,11 +87,14 @@ Settings → Repository name. Topics/description also have to be set there.
    (`02 RESOURCES/AUDIO/SoundFX`, 29,177 files): scan, UCS categories, waveform, playback,
    range playback, search. Fixed: squeezed table (detail is now an `.inspector`), stale
    selection after filtering, status bar "N of M". Still to check, with the owner at the Mac:
-   - the Music section and the Phase 0 import (the macOS Open panel runs out of process, so
-     computer use can't pick folders; the owner has to);
    - dragging into Resolve Studio;
    - whether clicking a top-level category (e.g. "Ambience") selects it with a real mouse click
      (accessibility presses only toggle the disclosure).
+   Music checked too (`~/Music/IPOD/Liked Songs`, 1,688 songs): Phase 0 import matched all 1,688
+   (1,670 with BPM after dropping 14 outside 20–400, 1,444 with beats per bar), BPM filter with
+   half/double, "Find Songs That Mix With This", detail pane and playback all correct (counts
+   checked against SQL). The owner has to pick folders/files: the macOS Open panel runs out of
+   process, so computer use can't drive it.
    Not a bug: UCS filenames like `…_Ocular Sounds_Forest_The Complete Ambiences Collection` show
    Library "Forest", because SourceID is the fourth field by the spec.
 3. Phase 1 items:
