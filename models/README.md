@@ -55,6 +55,7 @@ Conversion notes:
 |---|---|---|---|
 | **Core ML, full precision** | 1.00000 / 1.00000 / 1.000000 | 100% | 1.39 s (CPU) |
 | Core ML, half precision | 0.97546 / 0.98497 / 0.999584 | 94.6% | 0.75 s (CPU) |
+| **Core ML, full precision on the GPU** (`--units CPU_AND_GPU`) | 1.00000 / 1.00000 / 1.000000 | 100% | 0.44 s |
 
 The app uses full precision: half precision changes 5% of nearest neighbours.
 
@@ -72,5 +73,5 @@ How it's converted (`convert_peav.py`):
 Running it: **one part at a time over a batch of windows** (`parity_peav.py`, and
 `PeavEmbedder` in the app). With three or more float32 parts loaded at once, Core ML's
 CPU path crashed (segmentation fault) while Resolve was open and swap was nearly full;
-two parts or one at a time is fine. GPU (`CPU_AND_GPU`) ran all five at once, but the
-scheduler counts GPU load as "another app is busy", so the app uses the CPU.
+two parts or one at a time is fine. The app runs PE-AV on the GPU, only while the Mac
+is idle: exact on the GPU too, and 3× faster than the CPU.

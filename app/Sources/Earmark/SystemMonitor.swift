@@ -10,7 +10,10 @@ import IOKit.ps
 final class SystemMonitor {
     private var lastTicks: (busy: UInt64, total: UInt64)?
     private var lastOwnCPU: Double?
+    private var lastOwnGPU: Double?
     private var lastSample: Date?
+    /// Earmark's own share of the GPU in the last interval (0…1), for the log.
+    private(set) var ownGPU = 0.0
 
     func sample() -> SystemSignals {
         let now = Date()
@@ -24,11 +27,19 @@ final class SystemMonitor {
             let ours = elapsed > 0 ? (own - lastOwn) / (elapsed * Double(ProcessInfo.processInfo.activeProcessorCount)) : 0
             otherCPU = min(1, max(0, total - ours))
         }
+        // The GPU: total utilisation minus Earmark's own share (PE-AV runs on it while idle).
+        let ownGPUTime = Self.ownGPUSeconds()
+        ownGPU = 0
+        if let lastGPU = lastOwnGPU, let lastTime = lastSample, now > lastTime {
+            ownGPU = min(1, max(0, (ownGPUTime - lastGPU) / now.timeIntervalSince(lastTime)))
+        }
+        let otherGPU = max(0, Self.gpuUtilisation() - ownGPU)
         lastTicks = ticks
         lastOwnCPU = own
+        lastOwnGPU = ownGPUTime
         lastSample = now
         let info = ProcessInfo.processInfo
-        return SystemSignals(userIdle: Self.userIdleSeconds(), otherCPU: otherCPU, gpu: Self.gpuUtilisation(),
+        return SystemSignals(userIdle: Self.userIdleSeconds(), otherCPU: otherCPU, gpu: otherGPU,
                              thermal: Self.thermal(info.thermalState), onBattery: Self.onBattery(),
                              lowPowerMode: info.isLowPowerModeEnabled)
     }
@@ -78,6 +89,32 @@ final class SystemMonitor {
             }
         }
         return min(1, highest)
+    }
+
+    /// GPU time used by Earmark itself, in seconds: the GPU driver's per-client
+    /// "accumulatedGPUTime" (nanoseconds) for the clients this process created.
+    static func ownGPUSeconds() -> Double {
+        let me = "pid \(ProcessInfo.processInfo.processIdentifier),"
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &iterator) == KERN_SUCCESS
+        else { return 0 }
+        defer { IOObjectRelease(iterator) }
+        var nanoseconds = 0.0
+        while case let accelerator = IOIteratorNext(iterator), accelerator != 0 {
+            defer { IOObjectRelease(accelerator) }
+            var children: io_iterator_t = 0
+            guard IORegistryEntryGetChildIterator(accelerator, kIOServicePlane, &children) == KERN_SUCCESS else { continue }
+            defer { IOObjectRelease(children) }
+            while case let client = IOIteratorNext(children), client != 0 {
+                defer { IOObjectRelease(client) }
+                guard let creator = IORegistryEntryCreateCFProperty(client, "IOUserClientCreator" as CFString, kCFAllocatorDefault, 0)?
+                        .takeRetainedValue() as? String, creator.hasPrefix(me),
+                      let usage = IORegistryEntryCreateCFProperty(client, "AppUsage" as CFString, kCFAllocatorDefault, 0)?
+                        .takeRetainedValue() as? [[String: Any]] else { continue }
+                for entry in usage { nanoseconds += (entry["accumulatedGPUTime"] as? NSNumber)?.doubleValue ?? 0 }
+            }
+        }
+        return nanoseconds / 1e9
     }
 
     static func onBattery() -> Bool {

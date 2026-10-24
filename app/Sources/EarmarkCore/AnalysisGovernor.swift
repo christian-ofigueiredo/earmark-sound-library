@@ -11,8 +11,8 @@ public struct SystemSignals: Sendable, Equatable {
     public var userIdle: TimeInterval
     /// CPU used by other apps, 0…1 of all cores (Earmark's own use is excluded).
     public var otherCPU: Double
-    /// GPU utilisation, 0…1. Earmark doesn't use the GPU, so this is other apps
-    /// (a Resolve export shows up here first).
+    /// Other apps' GPU utilisation, 0…1: the total minus Earmark's own share (it uses
+    /// the GPU for PE-AV while the Mac is idle). A Resolve export shows up here first.
     public var gpu: Double
     public var thermal: Thermal
     public var onBattery: Bool

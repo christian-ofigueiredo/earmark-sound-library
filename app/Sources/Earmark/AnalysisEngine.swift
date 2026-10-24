@@ -8,11 +8,14 @@ import Observation
 enum AnalysisStage: String, CaseIterable, Sendable {
     case loudness
     case clap
+    /// Runs in batches on the GPU, only while the Mac is idle (see AnalysisEngine.fillPeav()).
+    case peav
 
     var title: String {
         switch self {
         case .loudness: "loudness"
         case .clap: "CLAP embeddings"
+        case .peav: "PE-AV embeddings"
         }
     }
 }
@@ -32,6 +35,9 @@ final class AnalysisEngine {
     private(set) var remainingByStage: [AnalysisStage: Int] = [:]
     /// Why CLAP isn't running, if it can't (model missing or failed to load).
     private(set) var clapUnavailable: String?
+    private(set) var peavStatus: [Int64: SoundEmbedding.Status] = [:]
+    /// Why PE-AV isn't running, if it can't.
+    private(set) var peavUnavailable: String?
 
     var mode: AnalysisGovernor.Mode {
         didSet {
@@ -44,6 +50,10 @@ final class AnalysisEngine {
 
     /// Where the CLAP model is installed for now: ~/Library/Application Support/Earmark/Models.
     let clapModels = ClapModelStore(folder: AppModel.supportFolder.appendingPathComponent("Models", isDirectory: true))
+    /// PE-AV's five parts: ~/Library/Application Support/Earmark/Models/PEAV/PEAV*.mlpackage.
+    let peavFolder = AppModel.supportFolder.appendingPathComponent("Models/PEAV", isDirectory: true)
+    /// Sounds per PE-AV batch: each of the five parts is loaded once per batch.
+    static let peavBatchSize = 32
 
     private weak var model: AppModel?
     private var governor: AnalysisGovernor
@@ -51,6 +61,8 @@ final class AnalysisEngine {
     private let log = SchedulerLog(folder: AppModel.supportFolder.appendingPathComponent("Logs", isDirectory: true))
     private var queue: [(sound: SoundRecord, stages: Set<AnalysisStage>)] = []
     private var running: [Int64: (task: Task<Void, Never>, sound: SoundRecord, stages: Set<AnalysisStage>)] = [:]
+    private var peavQueue: [SoundRecord] = []
+    private var peavBatch: (task: Task<Void, Never>, sounds: [SoundRecord])?
     private var unsavedFacts: [SoundFacts] = []
     private var unsavedEmbeddings: [SoundEmbedding] = []
     private var loop: Task<Void, Never>?
@@ -70,6 +82,7 @@ final class AnalysisEngine {
         if let db = model.database {
             facts = (try? db.soundFacts()) ?? [:]
             clapStatus = (try? db.embeddingStatus(model: ClapEmbedder.modelName)) ?? [:]
+            peavStatus = (try? db.embeddingStatus(model: PeavEmbedder.modelName)) ?? [:]
         }
         rebuildQueue()
         loop = Task { [weak self] in
@@ -88,11 +101,16 @@ final class AnalysisEngine {
 
     var statusText: String {
         let left = remaining + inProgress
-        let missingModel = clapUnavailable != nil ? " · CLAP model not installed" : ""
+        let missing = [clapUnavailable != nil ? "CLAP" : nil, peavUnavailable != nil ? "PE-AV" : nil].compactMap { $0 }
+        let missingModel = missing.isEmpty ? "" : " · \(missing.joined(separator: " and ")) model not installed"
         guard left > 0 else { return facts.isEmpty ? "" : "Analysis up to date" + missingModel }
         let count = "\(left.formatted()) sound\(left == 1 ? "" : "s") to analyse"
         let doing = AnalysisStage.allCases.filter { (remainingByStage[$0] ?? 0) > 0 }.map(\.title).joined(separator: ", ")
         let what = doing.isEmpty ? count : "\(count) (\(doing))"
+        // Only PE-AV left, and the Mac isn't idle: say what it's waiting for.
+        if doing == AnalysisStage.peav.title, !Self.gpuAllowed(pace), !pace.isPaused {
+            return "PE-AV embeddings wait for the Mac to be idle: \(count)" + missingModel
+        }
         switch pace.reason {
         case .idle: return "Analysing at full speed: \(what)" + missingModel
         case .requested: return "Analysing at full speed, as asked: \(what)" + missingModel
@@ -117,9 +135,27 @@ final class AnalysisEngine {
         return needed
     }
 
+    /// Whether this sound still needs a PE-AV embedding.
+    private func needsPeav(_ s: SoundRecord) -> Bool {
+        guard let id = s.id, peavUnavailable == nil else { return false }
+        return !SoundEmbedding.isCurrent(peavStatus[id], model: PeavEmbedder.modelName, for: s)
+    }
+
+    /// PE-AV uses the GPU, so it runs only while the Mac is idle or when the user asked for full speed.
+    static func gpuAllowed(_ pace: AnalysisPace) -> Bool {
+        pace.workers > 0 && (pace.reason == .idle || pace.reason == .requested)
+    }
+
+    private var peavInstalled: Bool {
+        PeavEmbedder.parts.allSatisfy { part in
+            ["mlpackage", "mlmodelc"].contains { FileManager.default.fileExists(atPath: peavFolder.appendingPathComponent("\(part).\($0)").path) }
+        }
+    }
+
     private func rebuildQueue() {
         guard let model else { return }
         clapUnavailable = clapModels.isInstalled ? nil : "not installed"
+        if peavUnavailable == nil || peavUnavailable == "not installed" { peavUnavailable = peavInstalled ? nil : "not installed" }
         let hidden = model.soundIndex.twins.hidden
         let online = Set(model.soundLibraries.filter(\.isOnline).compactMap(\.id))   // one disk check per library
         // Reversed so popLast() works through the library in list order.
@@ -128,24 +164,42 @@ final class AnalysisEngine {
             let needed = stages(for: s)
             return needed.isEmpty ? nil : (s, needed)
         }
+        let inBatch = Set(peavBatch?.sounds.compactMap(\.id) ?? [])
+        peavQueue = model.sounds.reversed().filter { s in
+            guard let id = s.id, !hidden.contains(id), !inBatch.contains(id), online.contains(s.libraryId) else { return false }
+            return needsPeav(s)
+        }
         countRemaining()
     }
 
     private func countRemaining() {
-        remaining = queue.count
-        inProgress = running.count
+        // Distinct sounds with any stage left; the PE-AV lane has its own queue.
+        var waiting = Set(queue.compactMap(\.sound.id))
+        waiting.formUnion(peavQueue.compactMap(\.id))
+        var busy = Set(running.keys)
+        busy.formUnion(peavBatch?.sounds.compactMap(\.id) ?? [])
+        remaining = waiting.subtracting(busy).count
+        inProgress = busy.count
         var byStage: [AnalysisStage: Int] = [:]
         for job in queue { for stage in job.stages { byStage[stage, default: 0] += 1 } }
         for job in running.values { for stage in job.stages { byStage[stage, default: 0] += 1 } }
-        remainingByStage = byStage
+        byStage[.peav] = peavQueue.count + (peavBatch?.sounds.count ?? 0)
+        remainingByStage = byStage.filter { $0.value > 0 }
     }
 
     private func tick() {
         let signals = monitor.sample()
         pace = governor.update(signals)
-        log.record(signals, mode: mode, pace: pace, remaining: remaining, running: running.count, measured: facts.count)
+        log.record(signals, ownGPU: monitor.ownGPU, mode: mode, pace: pace, remaining: remaining,
+                   running: running.count + (peavBatch?.sounds.count ?? 0), measured: facts.count)
+        // The Mac isn't idle any more: stop the PE-AV batch (it uses the GPU); it goes back in the queue.
+        if let batch = peavBatch, !Self.gpuAllowed(pace) {
+            batch.task.cancel()
+            peavBatch = nil
+            peavQueue.append(contentsOf: batch.sounds.reversed())
+        }
         // Over the limit (the Mac got busy): stop the newest files; they go back in the queue.
-        while running.count > pace.workers, let (id, job) = running.max(by: { $0.key < $1.key }) {
+        while running.count > cpuWorkers, let (id, job) = running.max(by: { $0.key < $1.key }) {
             job.task.cancel()
             running[id] = nil
             queue.append((job.sound, job.stages))
@@ -160,8 +214,12 @@ final class AnalysisEngine {
         updateActivity()
     }
 
+    /// Per-sound workers: the PE-AV batch, while it runs, takes one of the pace's slots.
+    private var cpuWorkers: Int { max(0, pace.workers - (peavBatch != nil ? 1 : 0)) }
+
     private func fill() {
-        while running.count < pace.workers, let job = queue.popLast() {
+        fillPeav()
+        while running.count < cpuWorkers, let job = queue.popLast() {
             guard let id = job.sound.id else { continue }
             let url = job.sound.url, fingerprint = job.sound.fingerprint, stages = job.stages, models = clapModels
             let priority: TaskPriority = pace.reason == .userActive ? .background : .utility
@@ -173,6 +231,40 @@ final class AnalysisEngine {
             running[id] = (task, job.sound, stages)
         }
         countRemaining()
+    }
+
+    /// Starts the next PE-AV batch when the Mac is idle and none is running.
+    private func fillPeav() {
+        guard peavBatch == nil, Self.gpuAllowed(pace), !peavQueue.isEmpty else { return }
+        let sounds = Array(peavQueue.suffix(Self.peavBatchSize).reversed())
+        peavQueue.removeLast(sounds.count)
+        let folder = peavFolder
+        let jobs = sounds.compactMap { s in s.id.map { (id: $0, url: s.url, fingerprint: s.fingerprint) } }
+        let task = Task.detached(priority: .utility) { [weak self] in
+            guard let result = PeavBatch.run(jobs, folder: folder) else { return }   // cancelled
+            await self?.finishedPeav(result)
+        }
+        peavBatch = (task, sounds)
+    }
+
+    private func finishedPeav(_ result: PeavBatch.Result) {
+        guard peavBatch != nil else { return }   // cancelled meanwhile
+        peavBatch = nil
+        defer {
+            save()
+            fill()
+        }
+        if let problem = result.modelProblem {
+            peavUnavailable = problem
+            rebuildQueue()
+            return
+        }
+        for e in result.embeddings {
+            // A read error because the drive went away isn't the file's fault: analyse it next time.
+            if e.error != nil, let s = model?.sound(id: e.soundId), !(model?.isOnline(libraryId: s.libraryId) ?? false) { continue }
+            peavStatus[e.soundId] = .init(fingerprint: e.fingerprint, version: e.version)
+            unsavedEmbeddings.append(e)
+        }
     }
 
     private func finished(_ result: SoundAnalyzer.Result) {
@@ -211,7 +303,7 @@ final class AnalysisEngine {
     }
 
     private func updateActivity() {
-        let working = !running.isEmpty
+        let working = !running.isEmpty || peavBatch != nil
         if working, activity == nil {
             activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep],
                                                              reason: "Analysing sounds")
@@ -225,7 +317,60 @@ final class AnalysisEngine {
         loop?.cancel()
         running.values.forEach { $0.task.cancel() }
         running = [:]
+        peavBatch?.task.cancel()
+        peavBatch = nil
         save()
+    }
+}
+
+/// Runs PE-AV over a batch of sounds, off the main thread: decodes each file
+/// (read-only) to Phase 0's windows, then runs the five parts one at a time
+/// over all windows on the GPU.
+enum PeavBatch {
+    struct Result: Sendable {
+        var embeddings: [SoundEmbedding] = []
+        /// Set when the model itself couldn't be prepared or loaded (not the sounds' fault).
+        var modelProblem: String?
+    }
+
+    /// nil when cancelled (the sounds stay in the queue).
+    static func run(_ jobs: [(id: Int64, url: URL, fingerprint: String?)], folder: URL) -> Result? {
+        var result = Result()
+        let embedder: PeavEmbedder
+        do {
+            for part in PeavEmbedder.parts {
+                let package = folder.appendingPathComponent("\(part).mlpackage")
+                if FileManager.default.fileExists(atPath: package.path) { try CompiledModel.ensure(package: package) }
+            }
+            embedder = try PeavEmbedder(compiledIn: folder, computeUnits: .cpuAndGPU)
+        } catch {
+            result.modelProblem = error.localizedDescription
+            return result
+        }
+        var windows: [[[Float]]] = []
+        var ok: [(id: Int64, fingerprint: String?)] = []
+        for job in jobs {
+            if Task.isCancelled { return nil }
+            do {
+                let audio = try AudioDecoder.mono(url: job.url, sampleRate: Double(Phase0Audio.sampleRate),
+                                                  maxSeconds: Phase0Audio.maxSeconds)
+                windows.append(PeavEmbedder.windows(audio48k: audio))
+                ok.append((job.id, job.fingerprint))
+            } catch {
+                result.embeddings.append(SoundEmbedding(soundId: job.id, model: PeavEmbedder.modelName, fingerprint: job.fingerprint,
+                                                        vector: nil, error: error.localizedDescription))
+            }
+        }
+        do {
+            guard let vectors = try embedder.embed(filesWindows: windows, isCancelled: { Task.isCancelled }) else { return nil }
+            for (job, vector) in zip(ok, vectors) {   // nil vector: silent or shorter than 20 ms
+                result.embeddings.append(SoundEmbedding(soundId: job.id, model: PeavEmbedder.modelName,
+                                                        fingerprint: job.fingerprint, vector: vector))
+            }
+        } catch {
+            result.modelProblem = error.localizedDescription
+        }
+        return result
     }
 }
 
@@ -311,21 +456,21 @@ final class SchedulerLog {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let old = Date().addingTimeInterval(-7 * 86400)
         for url in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-        where url.lastPathComponent.hasPrefix("scheduler-") {
+        where url.lastPathComponent.hasPrefix("scheduler-") || url.lastPathComponent.hasPrefix("analysis-") {
             if let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, date < old {
                 try? FileManager.default.removeItem(at: url)
             }
         }
     }
 
-    func record(_ s: SystemSignals, mode: AnalysisGovernor.Mode, pace: AnalysisPace,
+    func record(_ s: SystemSignals, ownGPU: Double, mode: AnalysisGovernor.Mode, pace: AnalysisPace,
                 remaining: Int, running: Int, measured: Int) {
         let now = Date()
         let today = Self.dayFormat.string(from: now)
         if today != day { open(today) }
         let time = Self.timeFormat.string(from: now)
         let line = [time, String(format: "%.0f", s.userIdle), String(format: "%.2f", s.otherCPU),
-                    String(format: "%.2f", s.gpu), "\(s.thermal)", "\(s.onBattery)", "\(s.lowPowerMode)",
+                    String(format: "%.2f", s.gpu), String(format: "%.2f", ownGPU), "\(s.thermal)", "\(s.onBattery)", "\(s.lowPowerMode)",
                     mode.rawValue, "\(pace.workers)", "\(pace.reason)", "\(running)", "\(remaining)", "\(measured)"]
             .joined(separator: ",") + "\n"
         handle?.write(Data(line.utf8))
@@ -334,9 +479,9 @@ final class SchedulerLog {
     private func open(_ today: String) {
         try? handle?.close()
         day = today
-        let url = folder.appendingPathComponent("scheduler-\(today).csv")
+        let url = folder.appendingPathComponent("analysis-\(today).csv")
         if !FileManager.default.fileExists(atPath: url.path) {
-            let header = "time,idle_s,other_cpu,gpu,thermal,battery,low_power,mode,workers,reason,running,queued,measured\n"
+            let header = "time,idle_s,other_cpu,other_gpu,own_gpu,thermal,battery,low_power,mode,workers,reason,running,queued,measured\n"
             FileManager.default.createFile(atPath: url.path, contents: Data(header.utf8))
         }
         handle = try? FileHandle(forWritingTo: url)

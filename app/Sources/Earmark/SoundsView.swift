@@ -209,6 +209,16 @@ struct SoundDetail: View {
     @Environment(AppModel.self) private var model
     let sound: SoundRecord
 
+    /// Which embeddings this sound has ("CLAP, PE-AV"), or nil.
+    private func embeddingText(for sound: SoundRecord) -> String? {
+        let id = sound.id ?? -1
+        let done = [
+            SoundEmbedding.isCurrent(model.analysis.clapStatus[id], model: ClapEmbedder.modelName, for: sound) ? "CLAP" : nil,
+            SoundEmbedding.isCurrent(model.analysis.peavStatus[id], model: PeavEmbedder.modelName, for: sound) ? "PE-AV" : nil,
+        ].compactMap { $0 }
+        return done.isEmpty ? nil : done.joined(separator: ", ")
+    }
+
     var body: some View {
         let online = model.isOnline(libraryId: sound.libraryId)
         ScrollView {
@@ -245,8 +255,7 @@ struct SoundDetail: View {
                     ("Manufacturer", sound.manufacturer),
                     ("Designer", sound.designer),
                     ("Loudness", model.analysis.facts[sound.id ?? -1].flatMap { loudnessText($0, for: sound) }),
-                    ("Embedding", SoundEmbedding.isCurrent(model.analysis.clapStatus[sound.id ?? -1],
-                                                           model: ClapEmbedder.modelName, for: sound) ? "CLAP" : nil),
+                    ("Embedding", embeddingText(for: sound)),
                     ("Format", sound.formatText),
                     ("Length", formatLength(sound.duration)),
                     ("Folder", sound.folder),

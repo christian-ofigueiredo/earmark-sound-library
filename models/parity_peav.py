@@ -104,6 +104,7 @@ def main():
     ap.add_argument("--reference", action="store_true")
     ap.add_argument("--fixture", action="store_true")
     ap.add_argument("--variants", default="PEAV,PEAV-fp16")
+    ap.add_argument("--units", default="CPU_ONLY", help="Core ML compute units, e.g. CPU_AND_GPU")
     args = ap.parse_args()
 
     fe = PeAudioFeatureExtractor.from_pretrained("facebook/pe-av-large")
@@ -136,7 +137,7 @@ def main():
         scratch.mkdir(parents=True, exist_ok=True)
         seconds = 0.0
         for index, part in enumerate(PARTS):
-            model = ct.models.MLModel(str(folder / f"{part}.mlpackage"), compute_units=ct.ComputeUnit.CPU_ONLY)
+            model = ct.models.MLModel(str(folder / f"{part}.mlpackage"), compute_units=getattr(ct.ComputeUnit, args.units))
             if index == 0:
                 windows_of, kept, w = [], [], 0
                 for p in paths:
@@ -171,7 +172,7 @@ def main():
         c = np.sort((E * P).sum(1))
         print(f"{variant:10s} vs Phase 0 ({len(kept)} files, {w} windows): cosine min {c[0]:.5f}  "
               f"p1 {c[len(c) // 100]:.5f}  median {c[len(c) // 2]:.6f}   top-5 neighbours kept "
-              f"{overlap(neighbours(E), neighbours(P)):.1%}   {seconds / w:.2f} s/window (CPU, model time)", flush=True)
+              f"{overlap(neighbours(E), neighbours(P)):.1%}   {seconds / w:.2f} s/window ({args.units}, model time)", flush=True)
         for f in scratch.glob("*.npy"):
             f.unlink()
 

@@ -165,10 +165,26 @@ Settings → Repository name. Topics/description also have to be set there.
      or more float32 parts loaded, Core ML's CPU path segfaulted under memory pressure
      (Resolve open, swap nearly full). Swift end to end vs Phase 0: median 1.000000, p1
      0.99984, min 0.99895, neighbours 99.9%; **4.0 s/file** on CPU, peak 2.5 GB.
-   - Next for PE-AV: run it as an analysis stage. At 4 s/file the library is ~32 h of CPU,
-     i.e. several nights. Options to discuss with the owner: accept that; or use the GPU at
-     night (ran all parts fine, likely much faster) but then the scheduler must tell
-     Earmark's own GPU use from other apps'.
+   - ~~PE-AV as an analysis stage~~ Built (owner chose: GPU, only while idle). A separate
+     lane in `AnalysisEngine`: batches of 32 sounds (`PeavBatch`), five parts loaded one at a
+     time with `.cpuAndGPU`, only when the pace is `idle` or `requested`; the batch is
+     cancelled and requeued as soon as that stops, and takes one of the per-sound worker
+     slots while it runs. Model: `~/Library/Application Support/Earmark/Models/PEAV/
+     PEAV*.mlmodelc` (installed, 4.2 GB). On the GPU it matches Phase 0 exactly (300 files:
+     cosine 1.00000, neighbours 100%) at 0.44 s/window, 3× the CPU. `SystemMonitor` now
+     subtracts Earmark's own GPU time (per-client `accumulatedGPUTime` of the
+     AGXDeviceUserClients this pid created) from total GPU utilisation, so its own work
+     doesn't count as "another app is busy". The log (`Logs/analysis-*.csv`) has
+     `other_gpu` and `own_gpu` columns.
+     **Not yet seen running in the app:** when tested the Mac was on battery (analysis
+     correctly paused) and another app used ~80% GPU. Check the next idle night's log:
+     own_gpu > 0 with workers > 0 while PE-AV runs, other_gpu staying low, `soundEmbedding`
+     rows for `pe-av-large`, and `models/check_app_embeddings.py`-style parity (it checks
+     CLAP only for now).
+   - Disk: only ~13 GB free on 2026-10-23 evening. Converting PE-AV used ~12 GB in
+     `models/build` (could be trimmed to the float32 parts) plus 4.5 GB of installed models;
+     45 GB of coremltools temp compiles from crashed runs were deleted. The rest of the drop
+     (from 156 GB) wasn't from this work.
    - music tempo/key in-app (Beat This! + S-KEY);
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
      only 13–16%).

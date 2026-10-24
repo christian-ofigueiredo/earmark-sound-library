@@ -15,7 +15,8 @@ public final class ClapEmbedder: @unchecked Sendable {
 
     /// `url`: the converted model (`CLAPAudio.mlpackage`, or an already compiled `.mlmodelc`).
     public init(modelAt url: URL, computeUnits: MLComputeUnits = .cpuOnly) throws {
-        let compiled = url.pathExtension == "mlmodelc" ? url : try MLModel.compileModel(at: url)
+        // Compiled once beside the package (MLModel.compileModel alone leaves a copy in the temp folder each time).
+        let compiled = url.pathExtension == "mlmodelc" ? url : try CompiledModel.ensure(package: url)
         let config = MLModelConfiguration()
         config.computeUnits = computeUnits
         model = try MLModel(contentsOf: compiled, configuration: config)

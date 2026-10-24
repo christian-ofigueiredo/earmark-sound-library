@@ -475,7 +475,7 @@ public struct SoundFacts: Codable, FetchableRecord, PersistableRecord, Sendable,
 /// Analysis stage 2 for one sound: its embedding from one model (stored as float32 little-endian).
 public struct SoundEmbedding: Codable, FetchableRecord, PersistableRecord, Sendable, Equatable {
     /// Bump a model's version when its pipeline changes, so every sound is embedded again.
-    public static let versions: [String: Int] = ["clap-general": 1]
+    public static let versions: [String: Int] = ["clap-general": 1, "pe-av-large": 1]
 
     public struct Status: Sendable, Equatable {
         public var fingerprint: String?
