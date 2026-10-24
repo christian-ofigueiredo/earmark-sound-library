@@ -198,7 +198,21 @@ Settings → Repository name. Topics/description also have to be set there.
      2.1 s/sound on long-file packs, GPU 73% busy, no failures. Remaining on 2026-10-24
      ~10:00: 4,836 sounds ≥ 10 s and 23,387 shorter; rough estimate ~6 h.
    - Status bar: per-stage percentage, a progress bar (least finished stage) and the time
-     left from the speed over the last 15 min of work.
+     left. The first version sampled every tick, so between batches the estimate kept
+     climbing (25 → 44 h) and looked like a hang; it now measures between batch completions.
+   - **PE-AV is too slow for the owner (max 12 h wanted); postponed, runs only when idle.**
+     Measured per batch (`Logs/errors.log`, "PE-AV batch:"), on long-file packs:
+     ~95 sounds / 256 windows (≈245 full 10 s) in ~185 s: GPU 120 s (≈0.47 s per full
+     window), decode 33 s, CPU (short windows) 14–27 s, model loading 10–12 s, all one
+     after another. That's ~0.5 sounds/s, i.e. ~15 h for the library. 1,323 of ~28,800
+     done on 2026-10-24 10:12. Plan for later, in this order:
+     1. Overlap: decode the next batch and run the short (CPU) windows while the GPU works
+        on the full ones. Removes ~45–60 s of 185.
+     2. GPU time is mostly the codec encoder (PEAVEmbed: 0.32 of 0.44 s per window). Try
+        PEAVEmbed in float16 with the transformer parts in float32 (parity test first;
+        whole-model float16 failed at 94.6% neighbours).
+     3. Short windows: ~23,400 of them, avg 1.8 s; measure their CPU cost per window.
+     Estimate with 1–2: GPU ~19k full windows × 0.47 s ≈ 2.5 h, CPU in parallel → ~4–6 h.
    - Disk: only ~13 GB free on 2026-10-23 evening. Converting PE-AV used ~12 GB in
      `models/build` (could be trimmed to the float32 parts) plus 4.5 GB of installed models;
      45 GB of coremltools temp compiles from crashed runs were deleted. The rest of the drop

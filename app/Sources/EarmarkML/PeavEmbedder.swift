@@ -20,6 +20,8 @@ public final class PeavEmbedder: @unchecked Sendable {
     /// Windows the last batch had to run on the CPU because the GPU couldn't compute them
     /// (part and window length), for the app's error log.
     public private(set) var lastFallbacks: [String] = []
+    /// Where the last batch spent its time (seconds), for tuning: "load", "gpu", "cpu".
+    public private(set) var lastTimings: [String: Double] = [:]
 
     /// `folder` holds the five compiled parts (`<part>.mlmodelc`); nothing is loaded yet.
     public init(compiledIn folder: URL, computeUnits: MLComputeUnits = .cpuOnly) throws {
@@ -52,6 +54,12 @@ public final class PeavEmbedder: @unchecked Sendable {
         var failures: [Int: String] = [:]
         var states: [MLMultiArray?] = Array(repeating: nil, count: flat.count)
         lastFallbacks = []
+        lastTimings = [:]
+        func timed<T>(_ key: String, _ body: () throws -> T) rethrows -> T {
+            let start = Date()
+            defer { lastTimings[key, default: 0] += Date().timeIntervalSince(start) }
+            return try body()
+        }
         // Full 10 s windows all have one shape, so the GPU compiles each part once for them.
         // Shorter windows each have their own length; on the GPU every new length means a
         // new graph compiled on the CPU (slower than computing it), so they run on the CPU.
@@ -63,7 +71,8 @@ public final class PeavEmbedder: @unchecked Sendable {
             for (group, units) in [(full, computeUnits), (short, MLComputeUnits.cpuOnly)] where !group.isEmpty {
                 let config = MLModelConfiguration()
                 config.computeUnits = units
-                let model = try MLModel(contentsOf: url, configuration: config)
+                let model = try timed("load") { try MLModel(contentsOf: url, configuration: config) }
+                let phase = units == .cpuOnly ? "cpu" : "gpu"
                 // Loaded only if the GPU fails a window: the CPU computed every length in the parity tests.
                 var cpuModel: MLModel?
                 for w in group {
@@ -80,7 +89,7 @@ public final class PeavEmbedder: @unchecked Sendable {
                         let features = try MLDictionaryFeatureProvider(dictionary: input)
                         let output: MLFeatureProvider
                         do {
-                            output = try model.prediction(from: features)
+                            output = try timed(phase) { try model.prediction(from: features) }
                         } catch where units != .cpuOnly {
                             if cpuModel == nil {
                                 let cpu = MLModelConfiguration()

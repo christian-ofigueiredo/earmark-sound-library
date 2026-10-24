@@ -129,10 +129,11 @@ final class AnalysisEngine {
     /// The least finished stage's share done, for the status bar's progress bar.
     var progress: Double? { stageProgress.map(\.done).min() }
 
-    /// Estimated time to finish everything, from the speed over the last 15 minutes of work.
+    /// Estimated time to finish everything, from the speed between batch completions in the
+    /// last 20 minutes of work (needs two completions after the first).
     var timeLeft: TimeInterval? {
-        guard let first = history.first, let last = history.last,
-              last.time.timeIntervalSince(first.time) >= 120, first.left > last.left else { return nil }
+        guard history.count >= 3, let first = history.first, let last = history.last,
+              first.left > last.left else { return nil }
         let rate = Double(first.left - last.left) / last.time.timeIntervalSince(first.time)
         return Double(last.left) / rate
     }
@@ -247,11 +248,13 @@ final class AnalysisEngine {
         pace = governor.update(signals)
         // Speed for the time estimate: only while analysis runs (a pause would skew it).
         let left = remainingByStage.values.reduce(0, +)
+        // Work finishes in batches, so measure from one completion to the next (sampling
+        // every tick made the estimate climb between batches).
         if pace.isPaused {
             history = []
-        } else {
+        } else if history.last?.left != left {
             history.append((Date(), left))
-            history.removeAll { Date().timeIntervalSince($0.time) > 15 * 60 }
+            history.removeAll { Date().timeIntervalSince($0.time) > 20 * 60 }
         }
         log.record(signals, totalGPU: monitor.totalGPU, peav: peavBatch != nil, mode: mode, pace: pace, remaining: remaining,
                    running: running.count + (peavBatch?.sounds.count ?? 0), measured: facts.count)
@@ -326,6 +329,7 @@ final class AnalysisEngine {
             rebuildQueue()
             return
         }
+        if !result.timing.isEmpty { log.error("PE-AV batch: \(result.timing)") }
         if !result.fallbacks.isEmpty {
             log.error("PE-AV: \(result.fallbacks.count) window(s) ran on the CPU after the GPU failed them: "
                       + result.fallbacks.prefix(20).joined(separator: ", "))
@@ -410,6 +414,8 @@ enum PeavBatch {
         var notStarted: [Int64] = []
         /// Windows the GPU couldn't compute and the CPU did ("part length").
         var fallbacks: [String] = []
+        /// Where the batch spent its time, for the log.
+        var timing = ""
         /// Set when the model itself couldn't be prepared or loaded (not the sounds' fault).
         var modelProblem: String?
     }
@@ -434,6 +440,7 @@ enum PeavBatch {
         var windows: [[[Float]]] = []
         var ok: [(id: Int64, fingerprint: String?)] = []
         var windowCount = 0
+        let started = Date()
         for (index, job) in jobs.enumerated() {
             if Task.isCancelled { return nil }
             if windowCount >= maxWindows {
@@ -452,9 +459,15 @@ enum PeavBatch {
                                                         vector: nil, error: error.localizedDescription))
             }
         }
+        let decoded = Date()
         do {
             guard let outcomes = try embedder.embed(filesWindows: windows, isCancelled: { Task.isCancelled }) else { return nil }
             result.fallbacks = embedder.lastFallbacks
+            let t = embedder.lastTimings
+            let full = windows.joined().filter { $0.count == Phase0Audio.windowSamples }.count
+            result.timing = String(format: "%d sounds, %d windows (%d full): decode %.0f s, load %.0f s, gpu %.0f s, cpu %.0f s, total %.0f s",
+                                   ok.count, windowCount, full, decoded.timeIntervalSince(started), t["load"] ?? 0,
+                                   t["gpu"] ?? 0, t["cpu"] ?? 0, Date().timeIntervalSince(started))
             for (job, outcome) in zip(ok, outcomes) {
                 let vector: [Float]?, error: String?
                 switch outcome {
