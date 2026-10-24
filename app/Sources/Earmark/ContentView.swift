@@ -73,6 +73,11 @@ struct StatusBar: View {
             }
             Spacer(minLength: 16)
             if !model.analysis.statusText.isEmpty {
+                if let done = model.analysis.progress {
+                    ProgressView(value: done)
+                        .frame(width: 80)
+                        .help("\(Int((done * 100).rounded(.down)))% of the slowest unfinished stage")
+                }
                 Label(model.analysis.statusText, systemImage: model.analysis.pace.isPaused ? "pause.circle" : "waveform.badge.magnifyingglass")
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

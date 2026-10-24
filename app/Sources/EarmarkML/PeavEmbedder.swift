@@ -10,12 +10,16 @@ import Foundation
 /// part by part over a batch of windows: only one part (≤ 1.1 GB) is loaded at a
 /// time, so it fits beside Resolve on a 16 GB Mac. (With three or more float32
 /// parts loaded at once, Core ML's CPU path crashed under memory pressure.)
+/// With GPU compute units, full 10 s windows run on the GPU and shorter ones on the CPU.
 public final class PeavEmbedder: @unchecked Sendable {
     public static let dimensions = 1024
     public static let modelName = "pe-av-large"
     public static let parts = ["PEAVEmbed", "PEAVLayers0", "PEAVLayers1", "PEAVLayers2", "PEAVLayers3"]
     private let folder: URL
     private let computeUnits: MLComputeUnits
+    /// Windows the last batch had to run on the CPU because the GPU couldn't compute them
+    /// (part and window length), for the app's error log.
+    public private(set) var lastFallbacks: [String] = []
 
     /// `folder` holds the five compiled parts (`<part>.mlmodelc`); nothing is loaded yet.
     public init(compiledIn folder: URL, computeUnits: MLComputeUnits = .cpuOnly) throws {
@@ -31,43 +35,86 @@ public final class PeavEmbedder: @unchecked Sendable {
         Phase0Audio.prepare(x).map(Phase0Audio.windows) ?? []
     }
 
-    /// One vector per file from each file's windows (nil for a file with none).
-    /// `isCancelled` is checked between windows; returns nil if it says so.
-    public func embed(filesWindows: [[[Float]]], isCancelled: () -> Bool = { false }) throws -> [[Float]?]? {
+    /// What came out for one file.
+    public enum FileResult: Sendable {
+        case vector([Float])
+        /// No windows: silent or shorter than 20 ms.
+        case silent
+        /// Core ML couldn't compute one of the file's windows; the rest of the batch goes on.
+        case failed(String)
+    }
+
+    /// One result per file from each file's windows. A window Core ML can't compute
+    /// fails only its own file. `isCancelled` is checked between windows; returns nil if it says so.
+    public func embed(filesWindows: [[[Float]]], isCancelled: () -> Bool = { false }) throws -> [FileResult]? {
+        let owner = filesWindows.enumerated().flatMap { file, windows in windows.map { _ in file } }
         let flat = filesWindows.flatMap { $0 }
-        guard !flat.isEmpty else { return filesWindows.map { _ in nil } }
-        var states: [MLMultiArray] = []
-        for (index, part) in Self.parts.enumerated() {
-            let config = MLModelConfiguration()
-            config.computeUnits = computeUnits
-            let model = try MLModel(contentsOf: folder.appendingPathComponent("\(part).mlmodelc"), configuration: config)
+        var failures: [Int: String] = [:]
+        var states: [MLMultiArray?] = Array(repeating: nil, count: flat.count)
+        lastFallbacks = []
+        // Full 10 s windows all have one shape, so the GPU compiles each part once for them.
+        // Shorter windows each have their own length; on the GPU every new length means a
+        // new graph compiled on the CPU (slower than computing it), so they run on the CPU.
+        let full = flat.indices.filter { flat[$0].count == Phase0Audio.windowSamples }
+        let short = flat.indices.filter { flat[$0].count != Phase0Audio.windowSamples }
+        for (index, part) in Self.parts.enumerated() where !flat.isEmpty {
+            let url = folder.appendingPathComponent("\(part).mlmodelc")
             let last = index == Self.parts.count - 1
-            var next: [MLMultiArray] = []
-            next.reserveCapacity(flat.count)
-            for w in 0 ..< flat.count {
-                if isCancelled() { return nil }
-                let input: [String: Any] = index == 0 ? ["input_values": try Self.samples(PeavAudio.input(flat[w]))]
-                                                      : ["hidden": states[w]]
-                let output = try model.prediction(from: MLDictionaryFeatureProvider(dictionary: input))
-                guard let value = output.featureValue(for: last ? "embedding" : "hidden_out")?.multiArrayValue else {
-                    throw CocoaError(.coderValueNotFound)
+            for (group, units) in [(full, computeUnits), (short, MLComputeUnits.cpuOnly)] where !group.isEmpty {
+                let config = MLModelConfiguration()
+                config.computeUnits = units
+                let model = try MLModel(contentsOf: url, configuration: config)
+                // Loaded only if the GPU fails a window: the CPU computed every length in the parity tests.
+                var cpuModel: MLModel?
+                for w in group {
+                    if isCancelled() { return nil }
+                    guard failures[owner[w]] == nil else { states[w] = nil; continue }
+                    do {
+                        let input: [String: Any]
+                        if index == 0 {
+                            input = ["input_values": try Self.samples(PeavAudio.input(flat[w]))]
+                        } else {
+                            guard let state = states[w] else { continue }
+                            input = ["hidden": state]
+                        }
+                        let features = try MLDictionaryFeatureProvider(dictionary: input)
+                        let output: MLFeatureProvider
+                        do {
+                            output = try model.prediction(from: features)
+                        } catch where units != .cpuOnly {
+                            if cpuModel == nil {
+                                let cpu = MLModelConfiguration()
+                                cpu.computeUnits = .cpuOnly
+                                cpuModel = try MLModel(contentsOf: url, configuration: cpu)
+                            }
+                            output = try cpuModel!.prediction(from: features)
+                            lastFallbacks.append("\(part) \(index == 0 ? PeavAudio.input(flat[w]).count : states[w]?.shape[1].intValue ?? 0)")
+                        }
+                        guard let value = output.featureValue(for: last ? "embedding" : "hidden_out")?.multiArrayValue else {
+                            throw CocoaError(.coderValueNotFound)
+                        }
+                        states[w] = value
+                    } catch {
+                        let samples = PeavAudio.input(flat[w]).count
+                        failures[owner[w]] = "\(part), window of \(samples) samples: \(error.localizedDescription)"
+                        states[w] = nil
+                    }
                 }
-                next.append(value)
             }
-            states = next
         }
-        var result: [[Float]?] = []
+        var result: [FileResult] = []
         var w = 0
-        for windows in filesWindows {
-            guard !windows.isEmpty else { result.append(nil); continue }
+        for (file, windows) in filesWindows.enumerated() {
+            defer { w += windows.count }
+            if windows.isEmpty { result.append(.silent); continue }
+            if let failure = failures[file] { result.append(.failed(failure)); continue }
             var sum = [Float](repeating: 0, count: Self.dimensions)
-            for _ in windows {
-                let e = states[w]
+            for k in w ..< w + windows.count {
+                guard let e = states[k] else { continue }
                 for i in 0 ..< Self.dimensions { sum[i] += e[i].floatValue }
-                w += 1
             }
             let norm = max(1e-12, sum.reduce(0) { $0 + $1 * $1 }.squareRoot())
-            result.append(sum.map { $0 / norm })
+            result.append(.vector(sum.map { $0 / norm }))
         }
         return result
     }

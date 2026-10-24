@@ -187,6 +187,18 @@ Settings → Repository name. Topics/description also have to be set there.
      state); with 32-file batches, loading the five parts took about half of each 89 s batch.
      Estimate for the whole library at 128: ~8 h. Log: `Logs/analysis2-*.csv` with
      other_gpu, total_gpu and peav_running.
+   - **PE-AV on the real library (2026-10-24):** a GPU prediction error ("Unable to compute
+     the prediction using ML Program") stopped the stage for a whole night, because any
+     model error disabled it until relaunch. Fixed: errors other than a missing model retry
+     after 10 min and go to `Logs/errors.log`; a window the GPU can't compute is retried on
+     the CPU; only a file both fail gets an error (the rest of the batch goes on). Then a
+     batch of short sounds took 35 min for 128 files with the GPU nearly idle: with flexible
+     lengths, the GPU path (MPSGraph) compiles a new graph on the CPU for every new window
+     length. Now **full 10 s windows run on the GPU and shorter windows on the CPU**:
+     2.1 s/sound on long-file packs, GPU 73% busy, no failures. Remaining on 2026-10-24
+     ~10:00: 4,836 sounds ≥ 10 s and 23,387 shorter; rough estimate ~6 h.
+   - Status bar: per-stage percentage, a progress bar (least finished stage) and the time
+     left from the speed over the last 15 min of work.
    - Disk: only ~13 GB free on 2026-10-23 evening. Converting PE-AV used ~12 GB in
      `models/build` (could be trimmed to the float32 parts) plus 4.5 GB of installed models;
      45 GB of coremltools temp compiles from crashed runs were deleted. The rest of the drop

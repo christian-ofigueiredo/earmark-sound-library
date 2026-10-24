@@ -33,11 +33,15 @@ final class AnalysisEngine {
     private(set) var remaining = 0
     private(set) var inProgress = 0
     private(set) var remainingByStage: [AnalysisStage: Int] = [:]
+    /// Work left (sound × stage) at recent ticks while analysis ran, for the time estimate.
+    private var history: [(time: Date, left: Int)] = []
     /// Why CLAP isn't running, if it can't (model missing or failed to load).
     private(set) var clapUnavailable: String?
     private(set) var peavStatus: [Int64: SoundEmbedding.Status] = [:]
-    /// Why PE-AV isn't running, if it can't.
+    /// Why PE-AV isn't running, if it can't ("not installed", or the last model error).
     private(set) var peavUnavailable: String?
+    /// After a model error (not a missing model), PE-AV is tried again from this time.
+    private var peavRetryAt: Date?
 
     var mode: AnalysisGovernor.Mode {
         didSet {
@@ -102,16 +106,56 @@ final class AnalysisEngine {
         fill()
     }
 
+    /// Stages that can run (their models are installed).
+    private var activeStages: [AnalysisStage] {
+        AnalysisStage.allCases.filter { stage in
+            switch stage {
+            case .loudness: true
+            case .clap: clapUnavailable != "model not installed"
+            case .peav: peavUnavailable != "model not installed"
+            }
+        }
+    }
+
+    /// Share done (0…1) of each stage that isn't finished, in stage order.
+    var stageProgress: [(stage: AnalysisStage, done: Double)] {
+        let total = max(1, model?.soundIndex.shownCount ?? 0)
+        return activeStages.compactMap { stage in
+            let left = remainingByStage[stage] ?? 0
+            return left > 0 ? (stage, max(0, 1 - Double(left) / Double(total))) : nil
+        }
+    }
+
+    /// The least finished stage's share done, for the status bar's progress bar.
+    var progress: Double? { stageProgress.map(\.done).min() }
+
+    /// Estimated time to finish everything, from the speed over the last 15 minutes of work.
+    var timeLeft: TimeInterval? {
+        guard let first = history.first, let last = history.last,
+              last.time.timeIntervalSince(first.time) >= 120, first.left > last.left else { return nil }
+        let rate = Double(first.left - last.left) / last.time.timeIntervalSince(first.time)
+        return Double(last.left) / rate
+    }
+
+    static func describe(_ seconds: TimeInterval) -> String {
+        let minutes = Int((seconds / 60).rounded())
+        if minutes < 1 { return "less than a minute" }
+        if minutes < 60 { return "about \(minutes) min" }
+        let h = minutes / 60, m = (minutes % 60) / 10 * 10
+        return m == 0 ? "about \(h) h" : "about \(h) h \(m) min"
+    }
+
     var statusText: String {
         let left = remaining + inProgress
-        let missing = [clapUnavailable != nil ? "CLAP" : nil, peavUnavailable != nil ? "PE-AV" : nil].compactMap { $0 }
-        let missingModel = missing.isEmpty ? "" : " · \(missing.joined(separator: " and ")) model not installed"
+        let problems = [clapUnavailable.map { "CLAP \($0)" }, peavUnavailable.map { "PE-AV \($0)" }].compactMap { $0 }
+        let missingModel = problems.isEmpty ? "" : " · " + problems.joined(separator: " · ")
         guard left > 0 else { return facts.isEmpty ? "" : "Analysis up to date" + missingModel }
         let count = "\(left.formatted()) sound\(left == 1 ? "" : "s") to analyse"
-        let doing = AnalysisStage.allCases.filter { (remainingByStage[$0] ?? 0) > 0 }.map(\.title).joined(separator: ", ")
-        let what = doing.isEmpty ? count : "\(count) (\(doing))"
+        let doing = stageProgress.map { "\($0.stage.title) \(Int(($0.done * 100).rounded(.down)))%" }.joined(separator: ", ")
+        let eta = !pace.isPaused ? timeLeft.map { " · \(Self.describe($0)) left" } ?? "" : ""
+        let what = (doing.isEmpty ? count : "\(count) (\(doing))") + eta
         // Only PE-AV left, and the Mac isn't idle: say what it's waiting for.
-        if doing == AnalysisStage.peav.title, !Self.gpuAllowed(pace), !pace.isPaused {
+        if stageProgress.map(\.stage) == [.peav], !Self.gpuAllowed(pace), !pace.isPaused {
             return "PE-AV embeddings wait for the Mac to be idle: \(count)" + missingModel
         }
         switch pace.reason {
@@ -157,8 +201,13 @@ final class AnalysisEngine {
 
     private func rebuildQueue() {
         guard let model else { return }
-        clapUnavailable = clapModels.isInstalled ? nil : "not installed"
-        if peavUnavailable == nil || peavUnavailable == "not installed" { peavUnavailable = peavInstalled ? nil : "not installed" }
+        clapUnavailable = clapModels.isInstalled ? nil : "model not installed"
+        if !peavInstalled {
+            peavUnavailable = "model not installed"
+        } else if peavRetryAt.map({ Date() >= $0 }) ?? true {
+            peavUnavailable = nil
+            peavRetryAt = nil
+        }
         let hidden = model.soundIndex.twins.hidden
         let online = Set(model.soundLibraries.filter(\.isOnline).compactMap(\.id))   // one disk check per library
         // Reversed so popLast() works through the library in list order.
@@ -191,10 +240,19 @@ final class AnalysisEngine {
     }
 
     private func tick() {
+        if let retry = peavRetryAt, Date() >= retry { rebuildQueue() }
         // A PE-AV batch running since the last tick means Earmark itself used the GPU.
         let signals = monitor.sample(ownGPUWork: peavBatch != nil || peavRanSinceTick)
         peavRanSinceTick = peavBatch != nil
         pace = governor.update(signals)
+        // Speed for the time estimate: only while analysis runs (a pause would skew it).
+        let left = remainingByStage.values.reduce(0, +)
+        if pace.isPaused {
+            history = []
+        } else {
+            history.append((Date(), left))
+            history.removeAll { Date().timeIntervalSince($0.time) > 15 * 60 }
+        }
         log.record(signals, totalGPU: monitor.totalGPU, peav: peavBatch != nil, mode: mode, pace: pace, remaining: remaining,
                    running: running.count + (peavBatch?.sounds.count ?? 0), measured: facts.count)
         // The Mac isn't idle any more: stop the PE-AV batch (it uses the GPU); it goes back in the queue.
@@ -261,10 +319,18 @@ final class AnalysisEngine {
             fill()
         }
         if let problem = result.modelProblem {
-            peavUnavailable = problem
+            // Often temporary (e.g. GPU memory): wait, then try again, rather than stopping for good.
+            log.error("PE-AV: \(problem)")
+            peavUnavailable = "paused after an error, retrying in 10 min: \(problem.prefix(80))"
+            peavRetryAt = Date().addingTimeInterval(600)
             rebuildQueue()
             return
         }
+        if !result.fallbacks.isEmpty {
+            log.error("PE-AV: \(result.fallbacks.count) window(s) ran on the CPU after the GPU failed them: "
+                      + result.fallbacks.prefix(20).joined(separator: ", "))
+        }
+        for e in result.embeddings where e.error != nil { log.error("PE-AV sound \(e.soundId): \(e.error!)") }
         // Sounds the batch didn't get to (window cap): next in line.
         if let sounds = model.map({ m in result.notStarted.compactMap { m.sound(id: $0) } }), !sounds.isEmpty {
             peavQueue.append(contentsOf: sounds.reversed())
@@ -285,6 +351,7 @@ final class AnalysisEngine {
         }
         if let problem = result.modelProblem {
             // The model, not the sound: stop CLAP for now and say why.
+            log.error("CLAP: \(problem)")
             clapUnavailable = problem
             rebuildQueue()
         }
@@ -341,6 +408,8 @@ enum PeavBatch {
         var embeddings: [SoundEmbedding] = []
         /// Sounds left for the next batch because this one reached its window cap.
         var notStarted: [Int64] = []
+        /// Windows the GPU couldn't compute and the CPU did ("part length").
+        var fallbacks: [String] = []
         /// Set when the model itself couldn't be prepared or loaded (not the sounds' fault).
         var modelProblem: String?
     }
@@ -384,10 +453,17 @@ enum PeavBatch {
             }
         }
         do {
-            guard let vectors = try embedder.embed(filesWindows: windows, isCancelled: { Task.isCancelled }) else { return nil }
-            for (job, vector) in zip(ok, vectors) {   // nil vector: silent or shorter than 20 ms
+            guard let outcomes = try embedder.embed(filesWindows: windows, isCancelled: { Task.isCancelled }) else { return nil }
+            result.fallbacks = embedder.lastFallbacks
+            for (job, outcome) in zip(ok, outcomes) {
+                let vector: [Float]?, error: String?
+                switch outcome {
+                case .vector(let v): (vector, error) = (v, nil)
+                case .silent: (vector, error) = (nil, nil)
+                case .failed(let why): (vector, error) = (nil, why)
+                }
                 result.embeddings.append(SoundEmbedding(soundId: job.id, model: PeavEmbedder.modelName,
-                                                        fingerprint: job.fingerprint, vector: vector))
+                                                        fingerprint: job.fingerprint, vector: vector, error: error))
             }
         } catch {
             result.modelProblem = error.localizedDescription
@@ -496,6 +572,19 @@ final class SchedulerLog {
                     mode.rawValue, "\(pace.workers)", "\(pace.reason)", "\(running)", "\(remaining)", "\(measured)"]
             .joined(separator: ",") + "\n"
         handle?.write(Data(line.utf8))
+    }
+
+    /// Appends to Logs/errors.log (model errors, which would otherwise only show briefly).
+    func error(_ message: String) {
+        let url = folder.appendingPathComponent("errors.log")
+        let line = "\(Self.dayFormat.string(from: Date())) \(Self.timeFormat.string(from: Date())) \(message)\n"
+        if let h = try? FileHandle(forWritingTo: url) {
+            _ = try? h.seekToEnd()
+            h.write(Data(line.utf8))
+            try? h.close()
+        } else {
+            FileManager.default.createFile(atPath: url.path, contents: Data(line.utf8))
+        }
     }
 
     private func open(_ today: String) {

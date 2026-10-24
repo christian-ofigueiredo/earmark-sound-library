@@ -16,9 +16,12 @@ protocol BatchEmbedder { func embed(batch: [[Float]]) throws -> [[Float]?] }
 extension ClapEmbedder: BatchEmbedder {
     func embed(batch: [[Float]]) throws -> [[Float]?] { try batch.map { try embed(audio48k: $0) } }
 }
+extension PeavEmbedder.FileResult {
+    var vector: [Float]? { if case .vector(let v) = self { v } else { nil } }
+}
 extension PeavEmbedder: BatchEmbedder {
     func embed(batch: [[Float]]) throws -> [[Float]?] {
-        try embed(filesWindows: batch.map { PeavEmbedder.windows(audio48k: $0) }) ?? []
+        try (embed(filesWindows: batch.map { PeavEmbedder.windows(audio48k: $0) }) ?? []).map(\.vector)
     }
 }
 
@@ -76,7 +79,9 @@ var pending: [(path: String, windows: [[Float]])] = []
     guard !pending.isEmpty else { return }
     let vectors: [[Float]?]
     if let peav = embedder as? PeavEmbedder {
-        vectors = try peav.embed(filesWindows: pending.map(\.windows)) ?? []
+        let outcomes = try peav.embed(filesWindows: pending.map(\.windows)) ?? []
+        for (item, o) in zip(pending, outcomes) { if case .failed(let why) = o { print("failed: \(item.path): \(why)") } }
+        vectors = outcomes.map(\.vector)
     } else {
         vectors = try pending.map { try (embedder as! ClapEmbedder).embed(windows: $0.windows) }
     }
