@@ -171,16 +171,22 @@ Settings → Repository name. Topics/description also have to be set there.
      cancelled and requeued as soon as that stops, and takes one of the per-sound worker
      slots while it runs. Model: `~/Library/Application Support/Earmark/Models/PEAV/
      PEAV*.mlmodelc` (installed, 4.2 GB). On the GPU it matches Phase 0 exactly (300 files:
-     cosine 1.00000, neighbours 100%) at 0.44 s/window, 3× the CPU. `SystemMonitor` now
-     subtracts Earmark's own GPU time (per-client `accumulatedGPUTime` of the
-     AGXDeviceUserClients this pid created) from total GPU utilisation, so its own work
-     doesn't count as "another app is busy". The log (`Logs/analysis-*.csv`) has
-     `other_gpu` and `own_gpu` columns.
-     **Not yet seen running in the app:** when tested the Mac was on battery (analysis
-     correctly paused) and another app used ~80% GPU. Check the next idle night's log:
-     own_gpu > 0 with workers > 0 while PE-AV runs, other_gpu staying low, `soundEmbedding`
-     rows for `pe-av-large`, and `models/check_app_embeddings.py`-style parity (it checks
-     CLAP only for now).
+     cosine 1.00000, neighbours 100%) at 0.44 s/window, 3× the CPU.
+     **Telling Earmark's GPU use from other apps':** Core ML's GPU time is *not* reliably
+     credited to Earmark's process in the GPU driver's per-client stats (during a batch at
+     96–99% GPU, no process was credited; once a system agent, CoreServicesUIAgent, got
+     ~0.67). So `SystemMonitor.sample(ownGPUWork:)`: without a PE-AV batch, other apps' GPU =
+     total utilisation (as before); with one, other apps' GPU = GPU time credited to every
+     *other* process. Checked 2026-10-23 at full speed: total GPU 0.96–0.99, other_gpu
+     0.00–0.01. Not yet checked: a Resolve export during a PE-AV batch (Resolve uses Metal
+     directly, so its time should be credited to it).
+     **"Run at Full Speed Now" now also runs on battery** (owner asked to run on battery;
+     heat and Low Power Mode still stop it). It isn't remembered after a relaunch; for
+     testing, `open Earmark.app --args -analysisMode fullSpeed` sets it for one launch.
+     Batches: up to 128 files or 256 windows (each window waits between parts as a 1.8 MB
+     state); with 32-file batches, loading the five parts took about half of each 89 s batch.
+     Estimate for the whole library at 128: ~8 h. Log: `Logs/analysis2-*.csv` with
+     other_gpu, total_gpu and peav_running.
    - Disk: only ~13 GB free on 2026-10-23 evening. Converting PE-AV used ~12 GB in
      `models/build` (could be trimmed to the float32 parts) plus 4.5 GB of installed models;
      45 GB of coremltools temp compiles from crashed runs were deleted. The rest of the drop

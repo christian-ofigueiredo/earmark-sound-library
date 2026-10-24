@@ -52,8 +52,9 @@ final class AnalysisEngine {
     let clapModels = ClapModelStore(folder: AppModel.supportFolder.appendingPathComponent("Models", isDirectory: true))
     /// PE-AV's five parts: ~/Library/Application Support/Earmark/Models/PEAV/PEAV*.mlpackage.
     let peavFolder = AppModel.supportFolder.appendingPathComponent("Models/PEAV", isDirectory: true)
-    /// Sounds per PE-AV batch: each of the five parts is loaded once per batch.
-    static let peavBatchSize = 32
+    /// Sounds per PE-AV batch: each of the five parts (1.1 GB) is loaded once per batch,
+    /// so bigger batches spend less time loading. Capped by windows too (PeavBatch).
+    static let peavBatchSize = 128
 
     private weak var model: AppModel?
     private var governor: AnalysisGovernor
@@ -63,6 +64,8 @@ final class AnalysisEngine {
     private var running: [Int64: (task: Task<Void, Never>, sound: SoundRecord, stages: Set<AnalysisStage>)] = [:]
     private var peavQueue: [SoundRecord] = []
     private var peavBatch: (task: Task<Void, Never>, sounds: [SoundRecord])?
+    /// A PE-AV batch ran at some point since the last tick (it may have finished in between).
+    private var peavRanSinceTick = false
     private var unsavedFacts: [SoundFacts] = []
     private var unsavedEmbeddings: [SoundEmbedding] = []
     private var loop: Task<Void, Never>?
@@ -188,9 +191,11 @@ final class AnalysisEngine {
     }
 
     private func tick() {
-        let signals = monitor.sample()
+        // A PE-AV batch running since the last tick means Earmark itself used the GPU.
+        let signals = monitor.sample(ownGPUWork: peavBatch != nil || peavRanSinceTick)
+        peavRanSinceTick = peavBatch != nil
         pace = governor.update(signals)
-        log.record(signals, ownGPU: monitor.ownGPU, mode: mode, pace: pace, remaining: remaining,
+        log.record(signals, totalGPU: monitor.totalGPU, peav: peavBatch != nil, mode: mode, pace: pace, remaining: remaining,
                    running: running.count + (peavBatch?.sounds.count ?? 0), measured: facts.count)
         // The Mac isn't idle any more: stop the PE-AV batch (it uses the GPU); it goes back in the queue.
         if let batch = peavBatch, !Self.gpuAllowed(pace) {
@@ -245,6 +250,7 @@ final class AnalysisEngine {
             await self?.finishedPeav(result)
         }
         peavBatch = (task, sounds)
+        peavRanSinceTick = true
     }
 
     private func finishedPeav(_ result: PeavBatch.Result) {
@@ -258,6 +264,10 @@ final class AnalysisEngine {
             peavUnavailable = problem
             rebuildQueue()
             return
+        }
+        // Sounds the batch didn't get to (window cap): next in line.
+        if let sounds = model.map({ m in result.notStarted.compactMap { m.sound(id: $0) } }), !sounds.isEmpty {
+            peavQueue.append(contentsOf: sounds.reversed())
         }
         for e in result.embeddings {
             // A read error because the drive went away isn't the file's fault: analyse it next time.
@@ -329,9 +339,14 @@ final class AnalysisEngine {
 enum PeavBatch {
     struct Result: Sendable {
         var embeddings: [SoundEmbedding] = []
+        /// Sounds left for the next batch because this one reached its window cap.
+        var notStarted: [Int64] = []
         /// Set when the model itself couldn't be prepared or loaded (not the sounds' fault).
         var modelProblem: String?
     }
+
+    /// At most this many windows per batch: each waits between parts as a 1.8 MB state.
+    static let maxWindows = 256
 
     /// nil when cancelled (the sounds stay in the queue).
     static func run(_ jobs: [(id: Int64, url: URL, fingerprint: String?)], folder: URL) -> Result? {
@@ -349,12 +364,19 @@ enum PeavBatch {
         }
         var windows: [[[Float]]] = []
         var ok: [(id: Int64, fingerprint: String?)] = []
-        for job in jobs {
+        var windowCount = 0
+        for (index, job) in jobs.enumerated() {
             if Task.isCancelled { return nil }
+            if windowCount >= maxWindows {
+                result.notStarted = jobs[index...].map(\.id)
+                break
+            }
             do {
                 let audio = try AudioDecoder.mono(url: job.url, sampleRate: Double(Phase0Audio.sampleRate),
                                                   maxSeconds: Phase0Audio.maxSeconds)
-                windows.append(PeavEmbedder.windows(audio48k: audio))
+                let w = PeavEmbedder.windows(audio48k: audio)
+                windows.append(w)
+                windowCount += w.count
                 ok.append((job.id, job.fingerprint))
             } catch {
                 result.embeddings.append(SoundEmbedding(soundId: job.id, model: PeavEmbedder.modelName, fingerprint: job.fingerprint,
@@ -456,21 +478,21 @@ final class SchedulerLog {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let old = Date().addingTimeInterval(-7 * 86400)
         for url in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-        where url.lastPathComponent.hasPrefix("scheduler-") || url.lastPathComponent.hasPrefix("analysis-") {
+        where ["scheduler-", "analysis-", "analysis2-"].contains(where: url.lastPathComponent.hasPrefix) {
             if let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, date < old {
                 try? FileManager.default.removeItem(at: url)
             }
         }
     }
 
-    func record(_ s: SystemSignals, ownGPU: Double, mode: AnalysisGovernor.Mode, pace: AnalysisPace,
+    func record(_ s: SystemSignals, totalGPU: Double, peav: Bool, mode: AnalysisGovernor.Mode, pace: AnalysisPace,
                 remaining: Int, running: Int, measured: Int) {
         let now = Date()
         let today = Self.dayFormat.string(from: now)
         if today != day { open(today) }
         let time = Self.timeFormat.string(from: now)
         let line = [time, String(format: "%.0f", s.userIdle), String(format: "%.2f", s.otherCPU),
-                    String(format: "%.2f", s.gpu), String(format: "%.2f", ownGPU), "\(s.thermal)", "\(s.onBattery)", "\(s.lowPowerMode)",
+                    String(format: "%.2f", s.gpu), String(format: "%.2f", totalGPU), "\(peav)", "\(s.thermal)", "\(s.onBattery)", "\(s.lowPowerMode)",
                     mode.rawValue, "\(pace.workers)", "\(pace.reason)", "\(running)", "\(remaining)", "\(measured)"]
             .joined(separator: ",") + "\n"
         handle?.write(Data(line.utf8))
@@ -479,9 +501,9 @@ final class SchedulerLog {
     private func open(_ today: String) {
         try? handle?.close()
         day = today
-        let url = folder.appendingPathComponent("analysis-\(today).csv")
+        let url = folder.appendingPathComponent("analysis2-\(today).csv")
         if !FileManager.default.fileExists(atPath: url.path) {
-            let header = "time,idle_s,other_cpu,other_gpu,own_gpu,thermal,battery,low_power,mode,workers,reason,running,queued,measured\n"
+            let header = "time,idle_s,other_cpu,other_gpu,total_gpu,peav_running,thermal,battery,low_power,mode,workers,reason,running,queued,measured\n"
             FileManager.default.createFile(atPath: url.path, contents: Data(header.utf8))
         }
         handle = try? FileHandle(forWritingTo: url)

@@ -1,21 +1,25 @@
-"""Compare the CLAP vectors the app stored with Phase 0's for the same files.
+"""Compare the vectors the app stored with Phase 0's for the same files.
 
-    .venv/bin/python -I check_app_embeddings.py
+    .venv/bin/python -I check_app_embeddings.py            # CLAP
+    .venv/bin/python -I check_app_embeddings.py pe-av-large
 
-Reads Earmark's database (read-only) and build/clap_reference.json (from
-parity_clap.py --reference). Reports cosine and top-5 neighbour agreement.
+Reads Earmark's database (read-only) and build/clap_reference.json or
+build/peav_reference.json (from parity_clap.py / parity_peav.py --reference).
+Reports cosine and top-5 neighbour agreement.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 import numpy as np
 
 DB = Path.home() / "Library" / "Application Support" / "Earmark" / "library.sqlite"
-REF = Path(__file__).resolve().parent / "build" / "clap_reference.json"
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "clap-general"
+REF = Path(__file__).resolve().parent / "build" / ("peav_reference.json" if MODEL == "pe-av-large" else "clap_reference.json")
 
 
 def main():
@@ -23,7 +27,7 @@ def main():
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
     rows = con.execute("""
         SELECT s.path, e.vector, e.error FROM soundEmbedding e JOIN sound s ON s.id = e.soundId
-        WHERE e.model = 'clap-general'""").fetchall()
+        WHERE e.model = ?""", (MODEL,)).fetchall()
     stored = len(rows)
     errors = sum(1 for _, v, err in rows if err)
     silent = sum(1 for _, v, err in rows if v is None and not err)

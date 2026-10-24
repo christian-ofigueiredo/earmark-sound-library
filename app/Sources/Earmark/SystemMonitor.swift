@@ -10,12 +10,13 @@ import IOKit.ps
 final class SystemMonitor {
     private var lastTicks: (busy: UInt64, total: UInt64)?
     private var lastOwnCPU: Double?
-    private var lastOwnGPU: Double?
+    private var lastOthersGPU: Double?
     private var lastSample: Date?
-    /// Earmark's own share of the GPU in the last interval (0…1), for the log.
-    private(set) var ownGPU = 0.0
+    /// Total GPU utilisation at the last sample (0…1), for the log.
+    private(set) var totalGPU = 0.0
 
-    func sample() -> SystemSignals {
+    /// `ownGPUWork`: Earmark had GPU work (PE-AV) running during the interval.
+    func sample(ownGPUWork: Bool) -> SystemSignals {
         let now = Date()
         let ticks = Self.cpuTicks()
         let own = Self.ownCPUSeconds()
@@ -27,20 +28,29 @@ final class SystemMonitor {
             let ours = elapsed > 0 ? (own - lastOwn) / (elapsed * Double(ProcessInfo.processInfo.activeProcessorCount)) : 0
             otherCPU = min(1, max(0, total - ours))
         }
-        // The GPU: total utilisation minus Earmark's own share (PE-AV runs on it while idle).
-        let ownGPUTime = Self.ownGPUSeconds()
-        ownGPU = 0
-        if let lastGPU = lastOwnGPU, let lastTime = lastSample, now > lastTime {
-            ownGPU = min(1, max(0, (ownGPUTime - lastGPU) / now.timeIntervalSince(lastTime)))
+        // The GPU. Without Earmark's own GPU work, total utilisation is other apps'.
+        // While PE-AV runs on the GPU, utilisation is mostly Earmark's, and Core ML's GPU
+        // time isn't reliably credited to Earmark's process (it often shows under no
+        // process, sometimes under a system agent), so other apps' load is the GPU time
+        // credited to every other process instead. If some of Earmark's work were credited
+        // elsewhere, analysis would only back off more.
+        totalGPU = Self.gpuUtilisation()
+        let othersTime = Self.othersGPUSeconds()
+        var otherGPU = totalGPU
+        if ownGPUWork {
+            otherGPU = 0
+            if let last = lastOthersGPU, let lastTime = lastSample, now > lastTime {
+                otherGPU = min(totalGPU, max(0, (othersTime - last) / now.timeIntervalSince(lastTime)))
+            }
         }
-        let otherGPU = max(0, Self.gpuUtilisation() - ownGPU)
         lastTicks = ticks
         lastOwnCPU = own
-        lastOwnGPU = ownGPUTime
+        lastOthersGPU = othersTime
         lastSample = now
         let info = ProcessInfo.processInfo
         return SystemSignals(userIdle: Self.userIdleSeconds(), otherCPU: otherCPU, gpu: otherGPU,
                              thermal: Self.thermal(info.thermalState), onBattery: Self.onBattery(),
+                             batteryLevel: Self.batteryLevel(),
                              lowPowerMode: info.isLowPowerModeEnabled)
     }
 
@@ -91,9 +101,9 @@ final class SystemMonitor {
         return min(1, highest)
     }
 
-    /// GPU time used by Earmark itself, in seconds: the GPU driver's per-client
-    /// "accumulatedGPUTime" (nanoseconds) for the clients this process created.
-    static func ownGPUSeconds() -> Double {
+    /// GPU time used by all other processes, in seconds: the GPU driver's per-client
+    /// "accumulatedGPUTime" (nanoseconds) for clients not created by this process.
+    static func othersGPUSeconds() -> Double {
         let me = "pid \(ProcessInfo.processInfo.processIdentifier),"
         var iterator: io_iterator_t = 0
         guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &iterator) == KERN_SUCCESS
@@ -108,7 +118,7 @@ final class SystemMonitor {
             while case let client = IOIteratorNext(children), client != 0 {
                 defer { IOObjectRelease(client) }
                 guard let creator = IORegistryEntryCreateCFProperty(client, "IOUserClientCreator" as CFString, kCFAllocatorDefault, 0)?
-                        .takeRetainedValue() as? String, creator.hasPrefix(me),
+                        .takeRetainedValue() as? String, !creator.hasPrefix(me),
                       let usage = IORegistryEntryCreateCFProperty(client, "AppUsage" as CFString, kCFAllocatorDefault, 0)?
                         .takeRetainedValue() as? [[String: Any]] else { continue }
                 for entry in usage { nanoseconds += (entry["accumulatedGPUTime"] as? NSNumber)?.doubleValue ?? 0 }
@@ -121,6 +131,20 @@ final class SystemMonitor {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let source = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() else { return false }
         return (source as String) == kIOPMBatteryPowerKey
+    }
+
+    /// Charge of the internal battery, 0…1 (1 if there's none).
+    static func batteryLevel() -> Double {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let sources = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return 1 }
+        for source in sources {
+            guard let d = IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any],
+                  d[kIOPSTypeKey] as? String == kIOPSInternalBatteryType,
+                  let current = d[kIOPSCurrentCapacityKey] as? Double, let max = d[kIOPSMaxCapacityKey] as? Double, max > 0
+            else { continue }
+            return current / max
+        }
+        return 1
     }
 
     static func thermal(_ state: ProcessInfo.ThermalState) -> SystemSignals.Thermal {

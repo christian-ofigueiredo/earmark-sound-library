@@ -16,12 +16,15 @@ public struct SystemSignals: Sendable, Equatable {
     public var gpu: Double
     public var thermal: Thermal
     public var onBattery: Bool
+    /// Battery charge 0…1 (1 when there's no battery).
+    public var batteryLevel: Double
     public var lowPowerMode: Bool
 
     public init(userIdle: TimeInterval, otherCPU: Double, gpu: Double, thermal: Thermal = .nominal,
-                onBattery: Bool = false, lowPowerMode: Bool = false) {
+                onBattery: Bool = false, batteryLevel: Double = 1, lowPowerMode: Bool = false) {
         self.userIdle = userIdle; self.otherCPU = otherCPU; self.gpu = gpu
-        self.thermal = thermal; self.onBattery = onBattery; self.lowPowerMode = lowPowerMode
+        self.thermal = thermal; self.onBattery = onBattery; self.batteryLevel = batteryLevel
+        self.lowPowerMode = lowPowerMode
     }
 }
 
@@ -52,8 +55,9 @@ public struct AnalysisGovernor: Sendable {
         case automatic
         /// Nothing at all while you use the Mac.
         case idleOnly
-        /// The user asked for it: full speed even while the Mac is in use (heat,
-        /// battery and Low Power Mode still stop it). Not remembered across launches.
+        /// The user asked for it: full speed even while the Mac is in use or on
+        /// battery (heat, Low Power Mode and a battery below `minimumBattery` still stop
+        /// it). Not remembered across launches.
         case fullSpeed
         case paused
     }
@@ -72,6 +76,8 @@ public struct AnalysisGovernor: Sendable {
         /// How long conditions must allow more work before workers are added.
         public var rampUpAfter: TimeInterval = 60
         public var fullWorkers: Int
+        /// On battery, even full speed stops below this charge.
+        public var minimumBattery = 0.2
 
         public init(fullWorkers: Int) { self.fullWorkers = max(1, fullWorkers) }
     }
@@ -115,8 +121,10 @@ public struct AnalysisGovernor: Sendable {
         if mode == .paused { return AnalysisPace(workers: 0, reason: .pausedByUser) }
         if s.thermal >= .serious { return AnalysisPace(workers: 0, reason: .hot) }
         if s.lowPowerMode { return AnalysisPace(workers: 0, reason: .lowPower) }
+        if mode == .fullSpeed, !(s.onBattery && s.batteryLevel < settings.minimumBattery) {
+            return AnalysisPace(workers: settings.fullWorkers, reason: .requested)
+        }
         if s.onBattery { return AnalysisPace(workers: 0, reason: .battery) }
-        if mode == .fullSpeed { return AnalysisPace(workers: settings.fullWorkers, reason: .requested) }
         // Busy above the high threshold; once paused for being busy, stay paused
         // until load drops below the low one.
         let idle = s.userIdle >= settings.idleAfter

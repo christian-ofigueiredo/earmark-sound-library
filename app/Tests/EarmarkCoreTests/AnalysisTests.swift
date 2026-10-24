@@ -101,6 +101,13 @@ import Testing
         #expect(g.update(hot, now: Self.at(2)).reason == .hot)
         var battery = Self.idle; battery.onBattery = true
         #expect(g.target(for: battery).reason == .battery)
+        g.mode = .fullSpeed                                   // asked for: runs on battery too
+        #expect(g.target(for: battery) == AnalysisPace(workers: 4, reason: .requested))
+        var lowPower = battery; lowPower.lowPowerMode = true  // but not in Low Power Mode
+        #expect(g.target(for: lowPower).reason == .lowPower)
+        var flat = battery; flat.batteryLevel = 0.19           // nor below 20% charge
+        #expect(g.target(for: flat).reason == .battery)
+        g.mode = .automatic
         var warm = Self.idle; warm.thermal = .fair
         #expect(g.target(for: warm).workers == 2)
     }
