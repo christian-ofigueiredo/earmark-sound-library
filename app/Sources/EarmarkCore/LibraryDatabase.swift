@@ -371,6 +371,23 @@ public final class LibraryDatabase: Sendable {
         }
     }
 
+    /// Every stored vector for `model` that still describes its sound (same fingerprint, current version).
+    public func vectors(model: String) throws -> [(id: Int64, vector: [Float])] {
+        let version = SoundEmbedding.versions[model] ?? 1
+        return try dbQueue.read { db in
+            let rows = try Row.fetchCursor(db, sql: """
+                SELECT e.soundId, e.vector FROM soundEmbedding e JOIN sound s ON s.id = e.soundId
+                WHERE e.model = ? AND e.vector IS NOT NULL AND e.version >= ? AND e.fingerprint IS s.fingerprint
+                """, arguments: [model, version])
+            var out: [(id: Int64, vector: [Float])] = []
+            while let r = try rows.next() {
+                let data: Data = r["vector"]
+                out.append((r["soundId"], data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }))
+            }
+            return out
+        }
+    }
+
     public func embedding(soundId: Int64, model: String) throws -> SoundEmbedding? {
         try dbQueue.read { db in
             try SoundEmbedding.filter(Column("soundId") == soundId && Column("model") == model).fetchOne(db)

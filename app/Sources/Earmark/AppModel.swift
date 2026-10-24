@@ -1,5 +1,6 @@
 import AppKit
 import EarmarkCore
+import EarmarkML
 import Observation
 import UniformTypeIdentifiers
 
@@ -339,6 +340,44 @@ final class AppModel {
         let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
         guard common.count >= 3, url.path != home else { return nil }
         return url
+    }
+
+    // MARK: find similar
+
+    /// CLAP vectors of every analysed sound, loaded on first use.
+    private var similarity: SimilarityIndex?
+    /// How many CLAP results existed when `similarity` was built (rebuilt when more arrive).
+    private var similarityBuiltFor = -1
+
+    func canFindSimilar(_ sound: SoundRecord) -> Bool {
+        SoundEmbedding.isCurrent(analysis.clapStatus[sound.id ?? -1], model: ClapEmbedder.modelName, for: sound)
+    }
+
+    /// Shows the 100 sounds closest to `sound` (CLAP, cosine), leaving out format twins
+    /// already hidden from the list and byte-identical copies.
+    func findSimilar(to sound: SoundRecord) {
+        guard let id = sound.id, let db = database else { return }
+        let analysed = analysis.clapStatus.count
+        Task {
+            do {
+                if similarity == nil || similarityBuiltFor != analysed {
+                    let vectors = try await Task.detached(priority: .userInitiated) { try db.vectors(model: ClapEmbedder.modelName) }.value
+                    similarity = SimilarityIndex(vectors: vectors)
+                    similarityBuiltFor = analysed
+                }
+                guard let index = similarity, index.contains(id) else { return }
+                var excluded = soundIndex.twins.hidden
+                if let fp = sound.fingerprint {
+                    for s in sounds where s.fingerprint == fp && s.id != id { if let other = s.id { excluded.insert(other) } }
+                }
+                let skip = excluded
+                let matches = await Task.detached(priority: .userInitiated) { index.nearest(to: id, count: 100, excluding: skip) }.value
+                soundBrowser.showSimilar(.init(source: id, name: sound.displayName,
+                                               scores: Dictionary(uniqueKeysWithValues: matches.map { ($0.id, $0.score) })))
+            } catch {
+                show(error, title: "Couldn't find similar sounds")
+            }
+        }
     }
 
     // MARK: messages

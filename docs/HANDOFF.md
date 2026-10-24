@@ -213,6 +213,15 @@ Settings → Repository name. Topics/description also have to be set there.
         whole-model float16 failed at 94.6% neighbours).
      3. Short windows: ~23,400 of them, avg 1.8 s; measure their CPU cost per window.
      Estimate with 1–2: GPU ~19k full windows × 0.47 s ≈ 2.5 h, CPU in parallel → ~4–6 h.
+   - **Find Similar Sounds** (first Phase 3 feature, from CLAP): `SimilarityIndex` (core,
+     tested) holds every current CLAP vector (~29k × 512, loaded on first use, rebuilt when
+     more arrive) and ranks by cosine. Detail pane button and list context menu switch the
+     list to "Similar to …": the sound first, then its 100 nearest, with a Match column
+     (shown via column customisation; conditional columns need macOS 14.4). Format twins
+     already hidden and byte-identical copies are left out. On the library's 4,948
+     UCS-labelled sounds, the 5 nearest share the subcategory 56% and the category 66% of
+     the time (Phase 0: 53–56% / 69–72%). Clearing it rebuilds the sidebar list (a removed,
+     selected row otherwise stayed drawn).
    - Disk: only ~13 GB free on 2026-10-23 evening. Converting PE-AV used ~12 GB in
      `models/build` (could be trimmed to the float32 parts) plus 4.5 GB of installed models;
      45 GB of coremltools temp compiles from crashed runs were deleted. The rest of the drop

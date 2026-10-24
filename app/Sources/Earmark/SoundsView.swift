@@ -9,6 +9,8 @@ enum SoundScope: Hashable, Sendable {
     case category(String)
     case catID(String)
     case uncategorised
+    /// The sounds most like this one (Find Similar Sounds).
+    case similar(Int64)
 }
 
 /// What the sound list shows: scope, search, sort and selection.
@@ -19,6 +21,42 @@ final class SoundBrowser {
     var selection: Set<SoundRecord.ID> = []
     var sortOrder = [KeyPathComparator(\SoundRecord.displayName)]
     private(set) var visible: [SoundRecord] = []
+
+    /// The last Find Similar Sounds: the sound it started from and its matches' cosine scores.
+    struct Similar: Equatable {
+        var source: Int64
+        var name: String
+        var scores: [Int64: Float]
+    }
+    private(set) var similar: Similar?
+    /// Bumped when a similar search is cleared, so the sidebar list is rebuilt rather than
+    /// animating the row away (that left a stale, highlighted row drawn in the sidebar).
+    private(set) var sidebarGeneration = 0
+
+    var isShowingSimilar: Bool { if case .similar = scope { true } else { false } }
+
+    /// Column visibility; the Match column follows the similar scope (see `refresh`).
+    var columns = TableColumnCustomization<SoundRecord>()
+
+    func showSimilar(_ result: Similar) {
+        similar = result
+        search = ""
+        scope = .similar(result.source)
+        selection = [result.source]
+    }
+
+    func clearSimilar() {
+        if isShowingSimilar { scope = .all }
+        similar = nil
+        sidebarGeneration += 1
+    }
+
+    /// "87%" for a match, "Source" for the sound the search started from, "" otherwise.
+    func matchText(_ s: SoundRecord) -> String {
+        guard let similar, let id = s.id else { return "" }
+        if id == similar.source { return "Source" }
+        return similar.scores[id].map { "\(Int(($0 * 100).rounded()))%" } ?? ""
+    }
 
     struct FilterKey: Hashable {
         var scope: SoundScope?
@@ -44,11 +82,23 @@ final class SoundBrowser {
             case .category(let c): if s.category != c { return false }
             case .catID(let c): if s.catID != c { return false }
             case .uncategorised: if s.catID != nil { return false }
+            case .similar(let source):
+                guard let id = s.id, id == source || similar?.scores[id] != nil else { return false }
             }
             return terms.allSatisfy { haystacks[i].contains($0) }
         }
         .map { sounds[$0] }
         .sorted(using: sortOrder)
+        let matchVisibility: Visibility = isShowingSimilar ? .visible : .hidden
+        if columns[visibility: "match"] != matchVisibility { columns[visibility: "match"] = matchVisibility }
+        if case .similar(let source) = scope, let scores = similar?.scores {
+            // Best match first, the sound it started from at the top.
+            visible.sort { a, b in
+                let sa = a.id == source ? 2 : scores[a.id ?? -1] ?? -2
+                let sb = b.id == source ? 2 : scores[b.id ?? -1] ?? -2
+                return sa > sb
+            }
+        }
         // Drop selected sounds the new filter hides, so the detail pane doesn't show them.
         let kept = selection.intersection(visible.map(\.id))
         if kept != selection { selection = kept }
@@ -115,6 +165,25 @@ struct SoundSidebar: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
             }
+            if let similar = browser.similar {
+                Section("Similar") {
+                    HStack {
+                        Label("Similar to “\(similar.name)”", systemImage: "waveform.path.ecg")
+                            .lineLimit(1)
+                        Spacer()
+                        Button {
+                            browser.clearSimilar()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .help("Clear")
+                    }
+                    .badge(similar.scores.count)
+                    .tag(SoundScope.similar(similar.source))
+                }
+            }
             if !model.sounds.isEmpty {
                 Section("Categories") {
                     OutlineGroup(model.soundIndex.categories, children: \.children) { node in
@@ -127,6 +196,7 @@ struct SoundSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .id(browser.sidebarGeneration)
     }
 }
 
@@ -135,8 +205,15 @@ struct SoundTable: View {
 
     var body: some View {
         @Bindable var browser = model.soundBrowser
-        Table(of: SoundRecord.self, selection: $browser.selection, sortOrder: $browser.sortOrder) {
+        Table(of: SoundRecord.self, selection: $browser.selection, sortOrder: $browser.sortOrder,
+              columnCustomization: $browser.columns) {
+            // Shown only for Find Similar Sounds (conditional columns need macOS 14.4).
+            TableColumn("Match") { s in Text(browser.matchText(s)).monospacedDigit().foregroundStyle(.secondary) }
+                .width(min: 50, ideal: 56, max: 70)
+                .customizationID("match")
+                .defaultVisibility(.hidden)
             TableColumn("Name", value: \.displayName)
+                .customizationID("name")
             TableColumn("Category", value: \.categoryText)
             TableColumn("Length", value: \.durationValue) { s in
                 Text(formatLength(s.duration)).monospacedDigit()
@@ -154,6 +231,8 @@ struct SoundTable: View {
             let picked = ids.compactMap { model.sound(id: $0) }
             if picked.count == 1, let s = picked.first {
                 Button("Play") { model.player.play(s.url) }
+                Button("Find Similar Sounds") { model.findSimilar(to: s) }
+                    .disabled(!model.canFindSimilar(s))
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([s.url]) }
             } else if !picked.isEmpty {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(picked.map(\.url)) }
@@ -261,6 +340,14 @@ struct SoundDetail: View {
                     ("Folder", sound.folder),
                     ("File", sound.fileName),
                 ])
+                Button {
+                    model.findSimilar(to: sound)
+                } label: {
+                    Label("Find Similar Sounds", systemImage: "waveform.path.ecg")
+                }
+                .disabled(!model.canFindSimilar(sound))
+                .help(model.canFindSimilar(sound) ? "Sounds that sound most like this one (CLAP)"
+                                                  : "Available once this sound has been analysed")
                 FileActions(url: sound.url, online: online)
             }
             .padding(20)

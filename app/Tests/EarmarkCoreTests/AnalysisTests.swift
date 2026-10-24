@@ -157,3 +157,41 @@ import Testing
         #expect(try db.embeddingStatus(model: "pe-av-large").isEmpty)
     }
 }
+
+@Suite struct SimilarityTests {
+    static func unit(_ v: [Float]) -> [Float] {
+        let n = v.reduce(0) { $0 + $1 * $1 }.squareRoot()
+        return v.map { $0 / n }
+    }
+
+    @Test func nearestByCosineBestFirst() {
+        let index = SimilarityIndex(vectors: [
+            (1, Self.unit([1, 0, 0])), (2, Self.unit([0.9, 0.1, 0])), (3, Self.unit([0, 1, 0])),
+            (4, Self.unit([0.7, 0.7, 0])), (5, Self.unit([-1, 0, 0])), (6, [1, 0]),   // wrong length: skipped
+        ])
+        #expect(index.count == 5)
+        let r = index.nearest(to: 1, count: 3)
+        #expect(r.map(\.id) == [2, 4, 3])
+        #expect(r[0].score > r[1].score && r[1].score > r[2].score)
+        #expect(index.nearest(to: 1, count: 3, excluding: [2]).map(\.id) == [4, 3, 5])
+        #expect(index.nearest(to: 1, count: 10).count == 4)
+        #expect(index.nearest(to: 99, count: 3).isEmpty)
+    }
+
+    @Test func vectorsComeBackFromTheDatabaseOnlyWhileCurrent() async throws {
+        let db = try LibraryDatabase(path: nil)
+        let root = TestFiles.tempDir()
+        TestFiles.write(TestFiles.wav(seconds: 1), to: root.appendingPathComponent("a.wav"))
+        TestFiles.write(TestFiles.wav(seconds: 2), to: root.appendingPathComponent("b.wav"))
+        let lib = try db.addLibrary(kind: .sounds, path: root.path, bookmark: nil)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        let sounds = try db.sounds()
+        try db.save([
+            SoundEmbedding(soundId: sounds[0].id!, model: "clap-general", fingerprint: sounds[0].fingerprint, vector: [1, 0]),
+            SoundEmbedding(soundId: sounds[1].id!, model: "clap-general", fingerprint: "stale", vector: [0, 1]),
+        ])
+        let v = try db.vectors(model: "clap-general")
+        #expect(v.map(\.id) == [sounds[0].id!])
+        #expect(v.first?.vector == [1, 0])
+    }
+}
