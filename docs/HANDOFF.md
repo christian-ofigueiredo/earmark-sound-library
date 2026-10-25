@@ -233,6 +233,18 @@ Settings → Repository name. Topics/description also have to be set there.
      scrolls only when its content doesn't fit (`DetailScroll`) and the file chip drags via
      an AppKit view (`FileDragArea`). Verified with real mouse clicks (full-screen control);
      clicks sent to a background window are unreliable for testing SwiftUI controls.
+   - **PE-AV speed, 2026-10-25** (owner wants ≤ 12 h for the library):
+     GPU and CPU groups run side by side per part; the next batch is decoded while one runs;
+     the queue interleaves long (≥ 10 s, full windows → GPU) and short sounds (→ CPU) ~1:6 so
+     both are busy; batches up to 256 sounds or 256 full windows' worth of audio.
+     Measured at full speed (on battery): 768 sounds in ~17 min, 0.76 sounds/s (was 0.46)
+     → ~9.5 h for the 26k left. Each batch is CPU-bound: GPU ~45–54 s, CPU 260–335 s for
+     ~220 short windows (1.2–1.5 s each, though one alone measured 0.45–0.55 s in Python).
+     Tried and rejected: PEAVEmbed in float16 (98.5% neighbours kept, fails parity).
+     Ruled out: per-length recompiling on the CPU (+0.05 s per new length only).
+     Next if more speed is needed: several CPU model instances for the short windows (same
+     part, so the mmapped weights may be shared; check memory), or measure why short windows
+     are 3× slower beside the GPU.
    - Disk: only ~13 GB free on 2026-10-23 evening. Converting PE-AV used ~12 GB in
      `models/build` (could be trimmed to the float32 parts) plus 4.5 GB of installed models;
      45 GB of coremltools temp compiles from crashed runs were deleted. The rest of the drop

@@ -57,8 +57,8 @@ final class AnalysisEngine {
     /// PE-AV's five parts: ~/Library/Application Support/Earmark/Models/PEAV/PEAV*.mlpackage.
     let peavFolder = AppModel.supportFolder.appendingPathComponent("Models/PEAV", isDirectory: true)
     /// Sounds per PE-AV batch: each of the five parts (1.1 GB) is loaded once per batch,
-    /// so bigger batches spend less time loading. Capped by windows too (PeavBatch).
-    static let peavBatchSize = 128
+    /// so bigger batches spend less time loading. Capped by audio held too (PeavBatch).
+    static let peavBatchSize = 256
 
     private weak var model: AppModel?
     private var governor: AnalysisGovernor
@@ -220,11 +220,33 @@ final class AnalysisEngine {
             return needed.isEmpty ? nil : (s, needed)
         }
         let inBatch = Set(((peavBatch?.sounds ?? []) + (peavNext?.sounds ?? [])).compactMap(\.id))
-        peavQueue = model.sounds.reversed().filter { s in
+        let pending = model.sounds.filter { s in
             guard let id = s.id, !hidden.contains(id), !inBatch.contains(id), online.contains(s.libraryId) else { return false }
             return needsPeav(s)
         }
+        // Mix long sounds (full 10 s windows, run on the GPU) with short ones (run on the CPU)
+        // in every batch, so both work at the same time; in folder order, packs of one kind
+        // came together and left the other idle. Reversed so popLast() takes the front.
+        peavQueue = Self.interleaved(pending.filter { ($0.duration ?? 0) >= 10 },
+                                     pending.filter { ($0.duration ?? 0) < 10 }).reversed()
         countRemaining()
+    }
+
+    /// `a` and `b` merged in proportion, keeping each one's order (1 of `a` per `b.count / a.count`).
+    static func interleaved<T>(_ a: [T], _ b: [T]) -> [T] {
+        guard !a.isEmpty, !b.isEmpty else { return a + b }
+        var out: [T] = []
+        out.reserveCapacity(a.count + b.count)
+        var i = 0, j = 0
+        while i < a.count || j < b.count {
+            // Take from whichever list is further behind its share.
+            if j >= b.count || (i < a.count && Double(i) / Double(a.count) <= Double(j) / Double(b.count)) {
+                out.append(a[i]); i += 1
+            } else {
+                out.append(b[j]); j += 1
+            }
+        }
+        return out
     }
 
     private func countRemaining() {
@@ -470,6 +492,7 @@ enum PeavBatch {
         var notStarted: [Int64] = []
         var decodeSeconds = 0.0
         var windowCount: Int { windows.reduce(0) { $0 + $1.count } }
+        var sampleCount: Int { windows.reduce(0) { $0 + $1.reduce(0) { $0 + $1.count } } }
     }
 
     struct Result: Sendable {
@@ -483,8 +506,9 @@ enum PeavBatch {
         var modelProblem: String?
     }
 
-    /// At most this many windows per batch: each waits between parts as a 1.8 MB state.
-    static let maxWindows = 256
+    /// At most this much audio per batch (as many samples as 256 full windows): the decoded
+    /// windows, and their states between parts, are held in memory.
+    static let maxSamples = 256 * Phase0Audio.windowSamples
 
     /// Decodes the files (read-only) to Phase 0's windows; nil when cancelled.
     static func prepare(_ jobs: [Job], cancelled: CancellationFlag) -> Prepared? {
@@ -492,7 +516,7 @@ enum PeavBatch {
         let started = Date()
         for (index, job) in jobs.enumerated() {
             if cancelled.isSet { return nil }
-            if out.windowCount >= maxWindows {
+            if out.sampleCount >= maxSamples {
                 out.notStarted = jobs[index...].map(\.id)
                 break
             }
