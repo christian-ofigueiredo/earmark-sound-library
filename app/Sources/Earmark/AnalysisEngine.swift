@@ -68,6 +68,8 @@ final class AnalysisEngine {
     private var running: [Int64: (task: Task<Void, Never>, sound: SoundRecord, stages: Set<AnalysisStage>)] = [:]
     private var peavQueue: [SoundRecord] = []
     private var peavBatch: (task: Task<Void, Never>, sounds: [SoundRecord])?
+    /// The batch after it, being decoded while the current one runs on the GPU.
+    private var peavNext: (task: Task<PeavBatch.Prepared?, Never>, sounds: [SoundRecord])?
     /// A PE-AV batch ran at some point since the last tick (it may have finished in between).
     private var peavRanSinceTick = false
     private var unsavedFacts: [SoundFacts] = []
@@ -217,7 +219,7 @@ final class AnalysisEngine {
             let needed = stages(for: s)
             return needed.isEmpty ? nil : (s, needed)
         }
-        let inBatch = Set(peavBatch?.sounds.compactMap(\.id) ?? [])
+        let inBatch = Set(((peavBatch?.sounds ?? []) + (peavNext?.sounds ?? [])).compactMap(\.id))
         peavQueue = model.sounds.reversed().filter { s in
             guard let id = s.id, !hidden.contains(id), !inBatch.contains(id), online.contains(s.libraryId) else { return false }
             return needsPeav(s)
@@ -231,12 +233,13 @@ final class AnalysisEngine {
         waiting.formUnion(peavQueue.compactMap(\.id))
         var busy = Set(running.keys)
         busy.formUnion(peavBatch?.sounds.compactMap(\.id) ?? [])
+        waiting.formUnion(peavNext?.sounds.compactMap(\.id) ?? [])
         remaining = waiting.subtracting(busy).count
         inProgress = busy.count
         var byStage: [AnalysisStage: Int] = [:]
         for job in queue { for stage in job.stages { byStage[stage, default: 0] += 1 } }
         for job in running.values { for stage in job.stages { byStage[stage, default: 0] += 1 } }
-        byStage[.peav] = peavQueue.count + (peavBatch?.sounds.count ?? 0)
+        byStage[.peav] = peavQueue.count + (peavBatch?.sounds.count ?? 0) + (peavNext?.sounds.count ?? 0)
         remainingByStage = byStage.filter { $0.value > 0 }
     }
 
@@ -259,10 +262,17 @@ final class AnalysisEngine {
         log.record(signals, totalGPU: monitor.totalGPU, peav: peavBatch != nil, mode: mode, pace: pace, remaining: remaining,
                    running: running.count + (peavBatch?.sounds.count ?? 0), measured: facts.count)
         // The Mac isn't idle any more: stop the PE-AV batch (it uses the GPU); it goes back in the queue.
-        if let batch = peavBatch, !Self.gpuAllowed(pace) {
-            batch.task.cancel()
-            peavBatch = nil
-            peavQueue.append(contentsOf: batch.sounds.reversed())
+        if !Self.gpuAllowed(pace) {
+            if let next = peavNext {
+                next.task.cancel()
+                peavNext = nil
+                peavQueue.append(contentsOf: next.sounds.reversed())
+            }
+            if let batch = peavBatch {
+                batch.task.cancel()
+                peavBatch = nil
+                peavQueue.append(contentsOf: batch.sounds.reversed())
+            }
         }
         // Over the limit (the Mac got busy): stop the newest files; they go back in the queue.
         while running.count > cpuWorkers, let (id, job) = running.max(by: { $0.key < $1.key }) {
@@ -299,19 +309,53 @@ final class AnalysisEngine {
         countRemaining()
     }
 
-    /// Starts the next PE-AV batch when the Mac is idle and none is running.
+    /// Starts the next PE-AV batch when the Mac is idle and none is running, and has the
+    /// one after it decoded meanwhile, so the GPU doesn't wait for files to be read.
     private func fillPeav() {
-        guard peavBatch == nil, Self.gpuAllowed(pace), !peavQueue.isEmpty else { return }
+        guard Self.gpuAllowed(pace) else { return }
+        if peavBatch == nil {
+            let prepared: Task<PeavBatch.Prepared?, Never>, sounds: [SoundRecord]
+            if let next = peavNext {
+                (prepared, sounds) = next
+                peavNext = nil
+            } else if let started = startPreparing() {
+                (prepared, sounds) = started
+            } else {
+                return
+            }
+            let folder = peavFolder
+            let task = Task.detached(priority: .utility) { [weak self] in
+                guard let batch = await prepared.value else { return }   // cancelled
+                let flag = CancellationFlag()
+                let result = await withTaskCancellationHandler {
+                    PeavBatch.embed(batch, folder: folder, cancelled: flag)
+                } onCancel: {
+                    flag.set()
+                }
+                guard let result else { return }   // cancelled
+                await self?.finishedPeav(result)
+            }
+            peavBatch = (task, sounds)
+            peavRanSinceTick = true
+        }
+        if peavNext == nil, let next = startPreparing() { peavNext = next }
+    }
+
+    /// Takes the next sounds off the PE-AV queue and starts decoding them in the background.
+    private func startPreparing() -> (task: Task<PeavBatch.Prepared?, Never>, sounds: [SoundRecord])? {
+        guard !peavQueue.isEmpty else { return nil }
         let sounds = Array(peavQueue.suffix(Self.peavBatchSize).reversed())
         peavQueue.removeLast(sounds.count)
-        let folder = peavFolder
-        let jobs = sounds.compactMap { s in s.id.map { (id: $0, url: s.url, fingerprint: s.fingerprint) } }
-        let task = Task.detached(priority: .utility) { [weak self] in
-            guard let result = PeavBatch.run(jobs, folder: folder) else { return }   // cancelled
-            await self?.finishedPeav(result)
+        let jobs = sounds.compactMap { s in s.id.map { PeavBatch.Job(id: $0, url: s.url, fingerprint: s.fingerprint) } }
+        let task = Task.detached(priority: .utility) {
+            let flag = CancellationFlag()
+            return await withTaskCancellationHandler {
+                PeavBatch.prepare(jobs, cancelled: flag)
+            } onCancel: {
+                flag.set()
+            }
         }
-        peavBatch = (task, sounds)
-        peavRanSinceTick = true
+        return (task, sounds)
     }
 
     private func finishedPeav(_ result: PeavBatch.Result) {
@@ -400,6 +444,8 @@ final class AnalysisEngine {
         running = [:]
         peavBatch?.task.cancel()
         peavBatch = nil
+        peavNext?.task.cancel()
+        peavNext = nil
         save()
     }
 }
@@ -408,9 +454,26 @@ final class AnalysisEngine {
 /// (read-only) to Phase 0's windows, then runs the five parts one at a time
 /// over all windows on the GPU.
 enum PeavBatch {
+    struct Job: Sendable {
+        var id: Int64
+        var url: URL
+        var fingerprint: String?
+    }
+
+    /// A batch decoded to Phase 0's windows, ready for the model.
+    struct Prepared: Sendable {
+        var windows: [[[Float]]] = []
+        var jobs: [Job] = []
+        /// Files that couldn't be read (stored as errors).
+        var unreadable: [SoundEmbedding] = []
+        /// Sounds left for the next batch because this one reached its window cap.
+        var notStarted: [Int64] = []
+        var decodeSeconds = 0.0
+        var windowCount: Int { windows.reduce(0) { $0 + $1.count } }
+    }
+
     struct Result: Sendable {
         var embeddings: [SoundEmbedding] = []
-        /// Sounds left for the next batch because this one reached its window cap.
         var notStarted: [Int64] = []
         /// Windows the GPU couldn't compute and the CPU did ("part length").
         var fallbacks: [String] = []
@@ -423,9 +486,34 @@ enum PeavBatch {
     /// At most this many windows per batch: each waits between parts as a 1.8 MB state.
     static let maxWindows = 256
 
-    /// nil when cancelled (the sounds stay in the queue).
-    static func run(_ jobs: [(id: Int64, url: URL, fingerprint: String?)], folder: URL) -> Result? {
-        var result = Result()
+    /// Decodes the files (read-only) to Phase 0's windows; nil when cancelled.
+    static func prepare(_ jobs: [Job], cancelled: CancellationFlag) -> Prepared? {
+        var out = Prepared()
+        let started = Date()
+        for (index, job) in jobs.enumerated() {
+            if cancelled.isSet { return nil }
+            if out.windowCount >= maxWindows {
+                out.notStarted = jobs[index...].map(\.id)
+                break
+            }
+            do {
+                let audio = try AudioDecoder.mono(url: job.url, sampleRate: Double(Phase0Audio.sampleRate),
+                                                  maxSeconds: Phase0Audio.maxSeconds)
+                out.windows.append(PeavEmbedder.windows(audio48k: audio))
+                out.jobs.append(job)
+            } catch {
+                out.unreadable.append(SoundEmbedding(soundId: job.id, model: PeavEmbedder.modelName, fingerprint: job.fingerprint,
+                                                     vector: nil, error: error.localizedDescription))
+            }
+        }
+        out.decodeSeconds = Date().timeIntervalSince(started)
+        return out
+    }
+
+    /// Runs the five parts over a prepared batch (full windows on the GPU, short ones on the
+    /// CPU, side by side); nil when cancelled.
+    static func embed(_ batch: Prepared, folder: URL, cancelled: CancellationFlag) -> Result? {
+        var result = Result(embeddings: batch.unreadable, notStarted: batch.notStarted)
         let embedder: PeavEmbedder
         do {
             for part in PeavEmbedder.parts {
@@ -437,38 +525,16 @@ enum PeavBatch {
             result.modelProblem = error.localizedDescription
             return result
         }
-        var windows: [[[Float]]] = []
-        var ok: [(id: Int64, fingerprint: String?)] = []
-        var windowCount = 0
         let started = Date()
-        for (index, job) in jobs.enumerated() {
-            if Task.isCancelled { return nil }
-            if windowCount >= maxWindows {
-                result.notStarted = jobs[index...].map(\.id)
-                break
-            }
-            do {
-                let audio = try AudioDecoder.mono(url: job.url, sampleRate: Double(Phase0Audio.sampleRate),
-                                                  maxSeconds: Phase0Audio.maxSeconds)
-                let w = PeavEmbedder.windows(audio48k: audio)
-                windows.append(w)
-                windowCount += w.count
-                ok.append((job.id, job.fingerprint))
-            } catch {
-                result.embeddings.append(SoundEmbedding(soundId: job.id, model: PeavEmbedder.modelName, fingerprint: job.fingerprint,
-                                                        vector: nil, error: error.localizedDescription))
-            }
-        }
-        let decoded = Date()
         do {
-            guard let outcomes = try embedder.embed(filesWindows: windows, isCancelled: { Task.isCancelled }) else { return nil }
+            guard let outcomes = try embedder.embed(filesWindows: batch.windows, isCancelled: { cancelled.isSet }) else { return nil }
             result.fallbacks = embedder.lastFallbacks
             let t = embedder.lastTimings
-            let full = windows.joined().filter { $0.count == Phase0Audio.windowSamples }.count
-            result.timing = String(format: "%d sounds, %d windows (%d full): decode %.0f s, load %.0f s, gpu %.0f s, cpu %.0f s, total %.0f s",
-                                   ok.count, windowCount, full, decoded.timeIntervalSince(started), t["load"] ?? 0,
-                                   t["gpu"] ?? 0, t["cpu"] ?? 0, Date().timeIntervalSince(started))
-            for (job, outcome) in zip(ok, outcomes) {
+            let full = batch.windows.joined().filter { $0.count == Phase0Audio.windowSamples }.count
+            result.timing = String(format: "%d sounds, %d windows (%d full): decoded ahead %.0f s; load %.0f s, gpu %.0f s, cpu %.0f s (side by side), parts %.0f s, total %.0f s",
+                                   batch.jobs.count, batch.windowCount, full, batch.decodeSeconds, t["load"] ?? 0,
+                                   t["gpu"] ?? 0, t["cpu"] ?? 0, t["part"] ?? 0, Date().timeIntervalSince(started))
+            for (job, outcome) in zip(batch.jobs, outcomes) {
                 let vector: [Float]?, error: String?
                 switch outcome {
                 case .vector(let v): (vector, error) = (v, nil)
@@ -483,6 +549,15 @@ enum PeavBatch {
         }
         return result
     }
+}
+
+/// Set once when a task is cancelled; readable from any thread (the PE-AV work runs on
+/// Dispatch threads, where Task.isCancelled doesn't see the task).
+final class CancellationFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
 }
 
 /// Analyses one sound. Runs off the main thread; opens the file read-only.
