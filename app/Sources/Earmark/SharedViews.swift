@@ -51,17 +51,10 @@ struct PlayerPanel: View {
                 .help("Stop and go back to the start")
                 Text(timeLabel).monospacedDigit().foregroundStyle(.secondary)
                 Spacer()
-            }
-            if let sel = selection, length > 0 {
-                HStack(spacing: 8) {
-                    let a = sel.lowerBound * length, b = sel.upperBound * length
-                    Text("Selection \(formatLength(a, precise: true))–\(formatLength(b, precise: true)) (\(formatLength(b - a, precise: true)))")
-                        .monospacedDigit().foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Clear Selection", systemImage: "xmark.circle", action: clearSelection)
-                        .controlSize(.small)
+                if selection != nil {
+                    Button("Clear Selection", action: clearSelection)
+                        .buttonStyle(.link)
                 }
-                .font(.callout)
             }
             if player.url == url, let error = player.error {
                 Text(error).font(.caption).foregroundStyle(.red)
@@ -111,9 +104,15 @@ struct PlayerPanel: View {
         if player.url == url { player.clearRange() }
     }
 
+    /// The time while playing or paused; otherwise the selection, or the length.
     private var timeLabel: String {
         if isActive {
             return "\(formatLength(player.currentTime, precise: precise)) / \(formatLength(length, precise: precise))"
+        }
+        if let sel = selection, length > 0 {
+            let a = sel.lowerBound * length, b = sel.upperBound * length
+            // Short, to fit beside the stop button and Clear Selection; the highlight says it's a selection.
+            return "\(formatLength(a, precise: true))–\(formatLength(b, precise: true)) · \(formatLength(b - a, precise: true))"
         }
         return formatLength(length > 0 ? length : nil, precise: precise)
     }
