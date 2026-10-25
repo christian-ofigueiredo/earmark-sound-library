@@ -16,43 +16,60 @@ struct PlayerPanel: View {
 
     private var player: AudioPlayer { model.player }
     private var length: Double { waveform?.duration ?? knownDuration ?? 0 }
-    private var isCurrent: Bool { player.url == url }
+    /// This file is playing or paused.
+    private var isActive: Bool { player.isActive(url) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             WaveformView(peaks: waveform?.peaks,
-                         playhead: isCurrent && length > 0 ? player.currentTime / length : nil,
-                         selection: $selection) { fraction in
-                player.play(url, from: fraction * length)
-            }
-            .frame(height: 96)
-            .overlay {
-                if loading {
-                    ProgressView().controlSize(.small)
-                } else if waveform == nil {
-                    Text("No waveform for this file").font(.caption).foregroundStyle(.secondary)
+                         playhead: isActive && length > 0 ? player.currentTime / length : nil,
+                         selection: $selection,
+                         onClick: click,
+                         onScrub: { fraction, _ in if isActive { player.seek(to: fraction * length) } })
+                .frame(height: 96)
+                .overlay {
+                    if loading {
+                        ProgressView().controlSize(.small)
+                    } else if waveform == nil {
+                        Text("No waveform for this file").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
-            }
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Button {
                     togglePlayback()
                 } label: {
-                    Image(systemName: player.plays(url) ? "stop.fill" : "play.fill").frame(width: 16)
+                    Image(systemName: player.plays(url) ? "pause.fill" : "play.fill").frame(width: 16)
                 }
-                .help(selection == nil ? "Play (Space in the list)" : "Play the selection")
+                .help(player.plays(url) ? "Pause (Space in the list)"
+                      : selection == nil ? "Play (Space in the list)" : "Play the selection")
+                Button {
+                    player.stop()
+                } label: {
+                    Image(systemName: "stop.fill").frame(width: 16)
+                }
+                .disabled(!isActive)
+                .help("Stop and go back to the start")
                 Text(timeLabel).monospacedDigit().foregroundStyle(.secondary)
                 Spacer()
-                if selection != nil {
-                    Button("Clear Selection") { selection = nil }
-                        .buttonStyle(.link)
-                }
             }
-            if isCurrent, let error = player.error {
+            if let sel = selection, length > 0 {
+                HStack(spacing: 8) {
+                    let a = sel.lowerBound * length, b = sel.upperBound * length
+                    Text("Selection \(formatLength(a, precise: true))–\(formatLength(b, precise: true)) (\(formatLength(b - a, precise: true)))")
+                        .monospacedDigit().foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Clear Selection", systemImage: "xmark.circle", action: clearSelection)
+                        .controlSize(.small)
+                }
+                .font(.callout)
+            }
+            if player.url == url, let error = player.error {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
         }
         .task(id: url) {
             loading = true
+            selection = nil
             let data = await Waveform.load(url)
             guard !Task.isCancelled else { return }
             waveform = data
@@ -60,23 +77,42 @@ struct PlayerPanel: View {
         }
     }
 
+    /// A click on the waveform moves the playhead there: playing keeps playing, paused stays
+    /// paused, and if this file isn't loaded it starts playing from there.
+    private func click(_ fraction: Double) {
+        selection = nil
+        let t = fraction * length
+        if isActive {
+            player.clearRange()
+            player.seek(to: t)
+        } else {
+            player.play(url, from: t)
+        }
+    }
+
+    /// Pause if playing. With a selection, play it (from the paused point if that's inside it);
+    /// otherwise resume, or start from the beginning.
     private func togglePlayback() {
         if player.plays(url) {
-            player.stop()
+            player.pause()
         } else if let sel = selection, length > 0 {
-            player.play(url, from: sel.lowerBound * length, to: sel.upperBound * length)
+            let a = sel.lowerBound * length, b = sel.upperBound * length
+            let t = player.currentTime
+            player.play(url, from: isActive && t >= a && t < b ? t : a, to: b)
+        } else if isActive {
+            player.resume()
         } else {
             player.play(url)
         }
     }
 
+    private func clearSelection() {
+        selection = nil
+        if player.url == url { player.clearRange() }
+    }
+
     private var timeLabel: String {
-        if let sel = selection, length > 0 {
-            let a = sel.lowerBound * length, b = sel.upperBound * length
-            return "Selection \(formatLength(a, precise: true))–\(formatLength(b, precise: true)) "
-                + "(\(formatLength(b - a, precise: true)))"
-        }
-        if isCurrent && player.isPlaying {
+        if isActive {
             return "\(formatLength(player.currentTime, precise: precise)) / \(formatLength(length, precise: precise))"
         }
         return formatLength(length > 0 ? length : nil, precise: precise)
@@ -99,8 +135,47 @@ struct FileChip: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.06)))
-        .onDrag { fileDragItem(url) }
-        .help("Drag into DaVinci Resolve. Resolve uses this original file; nothing is copied.")
+        // An AppKit drag area rather than .onDrag: inside the detail pane's scroll view,
+        // .onDrag's hit area sat a toolbar's height too high, over the player's buttons.
+        .overlay(FileDragArea(url: url, tooltip: "Drag into DaVinci Resolve. Resolve uses this original file; nothing is copied."))
+    }
+}
+
+/// A transparent view that drags a file (the original, by reference) and shows a tooltip.
+struct FileDragArea: NSViewRepresentable {
+    let url: URL
+    let tooltip: String
+
+    func makeNSView(context: Context) -> FileDragView { FileDragView() }
+
+    func updateNSView(_ view: FileDragView, context: Context) {
+        view.url = url
+        view.toolTip = tooltip
+    }
+}
+
+final class FileDragView: NSView, NSDraggingSource {
+    var url: URL?
+    private var mouseDownEvent: NSEvent?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) { mouseDownEvent = event }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let url, let down = mouseDownEvent else { return }
+        mouseDownEvent = nil
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        let p = convert(down.locationInWindow, from: nil)
+        item.setDraggingFrame(NSRect(x: p.x - 16, y: p.y - 16, width: 32, height: 32), contents: icon)
+        beginDraggingSession(with: [item], event: down, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) { mouseDownEvent = nil }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        .copy
     }
 }
 
@@ -126,6 +201,7 @@ struct InfoGrid: View {
                 GridRow {
                     Text(row.label).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
                     Text(row.value).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)   // wrap long paths instead of truncating
                 }
             }
         }
@@ -198,5 +274,19 @@ struct LibraryMenu: View {
             .disabled(!library.isOnline)
         Divider()
         Button("Remove from Earmark…", role: .destructive) { model.confirmRemove(library) }
+    }
+}
+
+/// The detail pane's content, scrolling only when it doesn't fit. Inside a ScrollView under
+/// the toolbar, with AppKit views in it (waveform, drag area), SwiftUI hit-tested the player's
+/// buttons a few points off what's drawn, so clicks on Play or Clear Selection were lost.
+struct DetailScroll<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            content.frame(maxHeight: .infinity, alignment: .top)
+            ScrollView { content }
+        }
     }
 }

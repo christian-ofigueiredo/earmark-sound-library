@@ -300,7 +300,7 @@ struct SoundDetail: View {
 
     var body: some View {
         let online = model.isOnline(libraryId: sound.libraryId)
-        ScrollView {
+        DetailScroll {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(sound.displayName)

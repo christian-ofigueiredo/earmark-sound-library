@@ -1,4 +1,5 @@
 import Accelerate
+import AppKit
 import AVFoundation
 import SwiftUI
 
@@ -55,55 +56,118 @@ enum Waveform {
     }
 }
 
-/// Waveform with a playhead. Click to play from a point; drag to select a range.
-struct WaveformView: View {
+/// Waveform with a playhead, drawn and handled in AppKit so clicks work while it redraws
+/// during playback and on the first click into an inactive window.
+///   click: move the playhead there · drag the playhead: scrub · drag elsewhere: select a range
+struct WaveformView: NSViewRepresentable {
     let peaks: [Float]?
+    /// 0…1, or nil when this file isn't loaded in the player.
     let playhead: Double?
     @Binding var selection: ClosedRange<Double>?
+    /// Click at a point (0…1).
     let onClick: (Double) -> Void
+    /// The playhead dragged to a point; `ended` on mouse up.
+    let onScrub: (Double, _ ended: Bool) -> Void
 
-    var body: some View {
-        GeometryReader { geo in
-            let width = max(geo.size.width, 1)
-            Canvas { ctx, size in
-                if let sel = selection {
-                    let rect = CGRect(x: sel.lowerBound * size.width, y: 0,
-                                      width: max((sel.upperBound - sel.lowerBound) * size.width, 1), height: size.height)
-                    ctx.fill(Path(rect), with: .color(Color.accentColor.opacity(0.22)))
-                }
-                if let peaks, !peaks.isEmpty {
-                    let mid = size.height / 2
-                    let step = size.width / CGFloat(peaks.count)
-                    var bars = Path()
-                    for (i, p) in peaks.enumerated() {
-                        let h = max(0.5, CGFloat(min(p, 1)) * (mid - 2))
-                        bars.addRect(CGRect(x: CGFloat(i) * step, y: mid - h, width: max(step, 0.75), height: h * 2))
-                    }
-                    ctx.fill(bars, with: .color(Color.primary.opacity(0.6)))
-                }
-                if let playhead, playhead.isFinite {
-                    let x = min(max(playhead, 0), 1) * size.width
-                    ctx.fill(Path(CGRect(x: x - 0.75, y: 0, width: 1.5, height: size.height)), with: .color(Color.accentColor))
-                }
-            }
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        guard abs(value.translation.width) > 3 else { return }
-                        let a = clamp(value.startLocation.x / width), b = clamp(value.location.x / width)
-                        selection = min(a, b) ... max(a, b)
-                    }
-                    .onEnded { value in
-                        if abs(value.translation.width) <= 3 {
-                            selection = nil
-                            onClick(clamp(value.location.x / width))
-                        }
-                    }
-            )
+    func makeNSView(context: Context) -> WaveformCanvas { WaveformCanvas() }
+
+    func updateNSView(_ view: WaveformCanvas, context: Context) {
+        view.peaks = peaks
+        view.playhead = playhead
+        view.selection = selection
+        view.onClick = onClick
+        view.onScrub = onScrub
+        view.onSelect = { selection = $0 }
+    }
+}
+
+final class WaveformCanvas: NSView {
+    var peaks: [Float]? { didSet { if oldValue != peaks { needsDisplay = true } } }
+    var playhead: Double? { didSet { if oldValue != playhead { needsDisplay = true } } }
+    var selection: ClosedRange<Double>? { didSet { if oldValue != selection { needsDisplay = true } } }
+    var onClick: (Double) -> Void = { _ in }
+    var onScrub: (Double, Bool) -> Void = { _, _ in }
+    var onSelect: (ClosedRange<Double>?) -> Void = { _ in }
+
+    private enum Drag { case pending(x: CGFloat), selecting(from: CGFloat), scrubbing }
+    private var drag: Drag?
+    /// Last position seen while dragging (a scrub ends there, whatever mouse-up reports).
+    private var lastX: CGFloat = 0
+    /// How close (points) to the playhead a press must be to grab it.
+    private let grab: CGFloat = 6
+
+    override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    private func fraction(_ x: CGFloat) -> Double { min(max(Double(x / max(bounds.width, 1)), 0), 1) }
+    private func location(_ event: NSEvent) -> CGFloat { convert(event.locationInWindow, from: nil).x }
+
+    override func mouseDown(with event: NSEvent) {
+        let x = location(event)
+        lastX = x
+        if let playhead, abs(CGFloat(playhead) * bounds.width - x) <= grab {
+            drag = .scrubbing
+        } else {
+            drag = .pending(x: x)
         }
     }
 
-    private func clamp(_ x: Double) -> Double { min(max(x, 0), 1) }
+    override func mouseDragged(with event: NSEvent) {
+        let x = location(event)
+        lastX = x
+        switch drag {
+        case .scrubbing:
+            onScrub(fraction(x), false)
+        case .pending(let start) where abs(x - start) > 3, .selecting(let start):
+            drag = .selecting(from: start)
+            let a = fraction(start), b = fraction(x)
+            onSelect(min(a, b) ... max(a, b))
+        default:
+            break
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let x = location(event)
+        switch drag {
+        case .scrubbing: onScrub(fraction(lastX), true)
+        case .pending: onClick(fraction(x))
+        default: break
+        }
+        drag = nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let r = bounds
+        NSColor.labelColor.withAlphaComponent(0.05).setFill()
+        NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
+        if let sel = selection {
+            NSColor.controlAccentColor.withAlphaComponent(0.22).setFill()
+            NSRect(x: sel.lowerBound * r.width, y: 0, width: max((sel.upperBound - sel.lowerBound) * r.width, 1), height: r.height).fill()
+        }
+        if let peaks, !peaks.isEmpty {
+            NSColor.labelColor.withAlphaComponent(0.6).setFill()
+            let mid = r.height / 2, step = r.width / CGFloat(peaks.count)
+            for (i, p) in peaks.enumerated() {
+                let h = max(0.5, CGFloat(min(p, 1)) * (mid - 2))
+                NSRect(x: CGFloat(i) * step, y: mid - h, width: max(step, 0.75), height: h * 2).fill()
+            }
+        }
+        if let playhead, playhead.isFinite {
+            let x = CGFloat(min(max(playhead, 0), 1)) * r.width
+            NSColor.controlAccentColor.setFill()
+            NSRect(x: x - 0.75, y: 0, width: 1.5, height: r.height).fill()
+            // A small handle at the top shows the playhead can be dragged.
+            let handle = NSBezierPath()
+            handle.move(to: NSPoint(x: x - 5, y: 0))
+            handle.line(to: NSPoint(x: x + 5, y: 0))
+            handle.line(to: NSPoint(x: x, y: 6))
+            handle.close()
+            handle.fill()
+        }
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .iBeam)
+    }
 }

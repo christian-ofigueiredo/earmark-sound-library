@@ -309,7 +309,7 @@ struct SongDetail: View {
 
     var body: some View {
         let online = model.isOnline(libraryId: song.libraryId)
-        ScrollView {
+        DetailScroll {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(song.displayTitle)

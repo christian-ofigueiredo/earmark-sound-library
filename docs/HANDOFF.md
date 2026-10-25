@@ -222,6 +222,17 @@ Settings → Repository name. Topics/description also have to be set there.
      UCS-labelled sounds, the 5 nearest share the subcategory 56% and the category 66% of
      the time (Phase 0: 53–56% / 69–72%). Clearing it rebuilds the sidebar list (a removed,
      selected row otherwise stayed drawn).
+   - **Player fixes (owner's feedback, 2026-10-25):** play/pause (no pause before), a stop
+     button, time shown while paused, the waveform as an AppKit view (click: move the
+     playhead, playing keeps playing, paused stays paused; drag the playhead: scrub; drag
+     elsewhere: select), Play with a selection plays it, Clear Selection also lets playback
+     run past the range, Space pauses/resumes. **Root cause of the dead buttons** (Play,
+     Clear Selection): inside the detail pane's ScrollView under the toolbar, SwiftUI
+     hit-tested the player's controls several points off what was drawn, and `.onDrag`'s
+     area on the file chip sat a toolbar's height too high, over the player. Now the pane
+     scrolls only when its content doesn't fit (`DetailScroll`) and the file chip drags via
+     an AppKit view (`FileDragArea`). Verified with real mouse clicks (full-screen control);
+     clicks sent to a background window are unreliable for testing SwiftUI controls.
    - Disk: only ~13 GB free on 2026-10-23 evening. Converting PE-AV used ~12 GB in
      `models/build` (could be trimmed to the float32 parts) plus 4.5 GB of installed models;
      45 GB of coremltools temp compiles from crashed runs were deleted. The rest of the drop
