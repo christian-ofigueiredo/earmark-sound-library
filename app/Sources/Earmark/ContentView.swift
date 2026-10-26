@@ -73,6 +73,9 @@ struct StatusBar: View {
                     ProgressView().controlSize(.small)
                 }
                 Text(activity).lineLimit(1).truncationMode(.middle)
+            } else if let guess = model.guessProgress {
+                ProgressView(value: Double(guess.done), total: Double(max(1, guess.total))).frame(width: 120)
+                Text("Guessing categories for folders: \(guess.done) of \(guess.total)").lineLimit(1)
             } else {
                 Text(summary).foregroundStyle(.secondary)
             }

@@ -15,28 +15,81 @@ public struct FolderRule: Codable, FetchableRecord, PersistableRecord, Sendable,
     }
 }
 
+/// A category Earmark guessed for a folder whose sounds have none (the folder's best
+/// suggestion), applied without asking until the user picks one. Stored in Earmark's
+/// database only; made again when `FolderSuggester.version` changes.
+public struct FolderGuess: Codable, FetchableRecord, PersistableRecord, Sendable, Equatable {
+    public var libraryId: Int64
+    /// Relative to the library, as `SoundRecord.folder`.
+    public var folder: String
+    public var catID: String
+    /// The next options, best first, comma-separated ("FEETAnml,FEETCrea").
+    public var alternatives: String
+    /// Why, as the app shows it ("name “footstep” · files “foot walk”").
+    public var reason: String
+    /// Another category fits as well, or nothing but a few similar sounds agree.
+    public var isUnsure: Bool
+    /// How many of the folder's sounds had been analysed (CLAP) when guessing.
+    public var analysed: Int
+    public var version: Int
+    public var createdAt: Date
+
+    public init(libraryId: Int64, folder: String, catID: String, alternatives: [String], reason: String,
+                isUnsure: Bool, analysed: Int, version: Int = FolderSuggester.version, createdAt: Date = Date()) {
+        self.libraryId = libraryId; self.folder = folder; self.catID = catID
+        self.alternatives = alternatives.joined(separator: ","); self.reason = reason; self.isUnsure = isUnsure
+        self.analysed = analysed; self.version = version; self.createdAt = createdAt
+    }
+
+    public var alternativeIDs: [String] { alternatives.split(separator: ",").map(String.init) }
+}
+
 public enum FolderRules {
     public static let source = "your folder rule"
+    public static let guessSource = "Earmark's guess"
 
-    /// Sounds without a category take the rule of their folder, or of the nearest folder
-    /// above it that has one.
-    public static func apply(_ rules: [FolderRule], to sounds: [SoundRecord], catalog: UCSCatalog = .shared) -> [SoundRecord] {
-        guard !rules.isEmpty else { return sounds }
-        var byFolder: [Int64: [String: UCSEntry]] = [:]
-        for r in rules { if let e = catalog.entry(catID: r.catID) { byFolder[r.libraryId, default: [:]][r.folder] = e } }
-        return sounds.map { s in
-            guard s.catID == nil, let folders = byFolder[s.libraryId] else { return s }
+    /// Sounds without a category of their own take the user's rule for their folder or the
+    /// nearest folder above it; failing that, Earmark's guess, found the same way.
+    public static func apply(_ rules: [FolderRule], guesses: [FolderGuess] = [], to sounds: [SoundRecord],
+                             catalog: UCSCatalog = .shared) -> [SoundRecord] {
+        guard !rules.isEmpty || !guesses.isEmpty else { return sounds }
+        func index(_ pairs: [(Int64, String, String)]) -> [Int64: [String: UCSEntry]] {
+            var out: [Int64: [String: UCSEntry]] = [:]
+            for (lib, folder, catID) in pairs { if let e = catalog.entry(catID: catID) { out[lib, default: [:]][folder] = e } }
+            return out
+        }
+        let chosen = index(rules.map { ($0.libraryId, $0.folder, $0.catID) })
+        let guessed = index(guesses.map { ($0.libraryId, $0.folder, $0.catID) })
+        func nearest(_ s: SoundRecord, in folders: [String: UCSEntry]?) -> UCSEntry? {
+            guard let folders else { return nil }
             var folder = s.folder
             while true {
-                if let e = folders[folder] {
-                    var out = s
-                    out.catID = e.catID; out.category = e.category; out.subcategory = e.subcategory
-                    out.categorySource = source
-                    return out
-                }
-                guard let slash = folder.lastIndex(of: "/") else { return s }
+                if let e = folders[folder] { return e }
+                guard let slash = folder.lastIndex(of: "/") else { return nil }
                 folder = String(folder[..<slash])
             }
+        }
+        return sounds.map { s in
+            guard s.catID == nil else { return s }
+            var out = s
+            if let e = nearest(s, in: chosen[s.libraryId]) {
+                out.categorySource = source
+                out.catID = e.catID; out.category = e.category; out.subcategory = e.subcategory
+            } else if let e = nearest(s, in: guessed[s.libraryId]) {
+                out.categorySource = guessSource
+                out.catID = e.catID; out.category = e.category; out.subcategory = e.subcategory
+            }
+            return out
+        }
+    }
+
+    /// The folder whose rule (or guess) applies to a sound in `folder`, if any.
+    public static func ruleFolder(for folder: String, in folders: Set<String>) -> String? {
+        var folder = folder
+        while true {
+            if folders.contains(folder) { return folder }
+            guard let slash = folder.lastIndex(of: "/") else { return nil }
+            folder = String(folder[..<slash])
         }
     }
 }
@@ -53,6 +106,18 @@ extension LibraryDatabase {
     public func removeFolderRule(libraryId: Int64, folder: String) throws {
         _ = try dbQueue.write { db in try FolderRule.deleteOne(db, key: ["libraryId": libraryId, "folder": folder]) }
     }
+
+    public func folderGuesses() throws -> [FolderGuess] {
+        try dbQueue.read { db in try FolderGuess.fetchAll(db) }
+    }
+
+    /// Saves new guesses and forgets those of folders that no longer need one.
+    public func updateGuesses(saving guesses: [FolderGuess], removing stale: [(libraryId: Int64, folder: String)]) throws {
+        try dbQueue.write { db in
+            for g in guesses { try g.save(db) }
+            for s in stale { _ = try FolderGuess.deleteOne(db, key: ["libraryId": s.libraryId, "folder": s.folder]) }
+        }
+    }
 }
 
 /// Suggests a UCS category for a folder of uncategorised sounds from three signals: its
@@ -60,6 +125,9 @@ extension LibraryDatabase {
 /// its files share (file names and descriptions), and what its sounds sound like (the
 /// categories of their nearest neighbours that have one).
 public enum FolderSuggester {
+    /// Bumped when suggestions change, so Earmark's guesses are made again.
+    public static let version = 2
+
     public struct Option: Sendable, Equatable {
         public var entry: UCSEntry
         public var score: Double
@@ -72,6 +140,9 @@ public enum FolderSuggester {
         /// The words fit other categories as well and the sound doesn't settle it
         /// ("Pickups": a synonym of METAL, GLASS, WOOD… / HANDLE): worth listening first.
         public var isUncertain = false
+
+        /// Worth listening to before trusting: uncertain, or nothing but a few similar sounds agree.
+        public var isWeak: Bool { isUncertain || words.isEmpty && fileWords.isEmpty && soundShare < 0.3 }
     }
 
     /// Knobs for measuring the suggestions (`earmark-parity folders`); the app uses `.standard`.
@@ -324,6 +395,25 @@ public enum FolderSuggester {
     public static func nameScores(folder: String, catalog: UCSCatalog) -> [String: (score: Double, words: [String])] {
         scores(folderWords(folder).map { Evidence(word: $0.word, weight: $0.weight, fromName: true) },
                lexicon: .of(catalog)).mapValues { ($0.score, $0.words) }
+    }
+
+    /// `suggest` for a folder's sounds as the library has them: with their files' words and
+    /// designer. `sharedDescriptions`: from `sharedDescriptions(_:)` over the whole library.
+    public static func suggest(folder: String, sounds: [SoundRecord], index: SimilarityIndex?, labels: [Int64: String],
+                               sharedDescriptions: Set<String>, count: Int = 3, tuning: Tuning = .standard) -> [Option] {
+        suggest(folder: folder, soundIds: sounds.compactMap(\.id), index: index, labels: labels,
+                fileWords: fileWords(of: sounds, sharedDescriptions: sharedDescriptions, tuning: tuning),
+                packWords: packWords(of: sounds), count: count, tuning: tuning)
+    }
+
+    /// The categories that came with the files (not the user's rules or Earmark's guesses):
+    /// what the sound signal learns from.
+    public static func labels(_ sounds: [SoundRecord]) -> [Int64: String] {
+        var out: [Int64: String] = [:]
+        for s in sounds where s.categorySource != FolderRules.source && s.categorySource != FolderRules.guessSource {
+            if let id = s.id, let catID = s.catID { out[id] = catID }
+        }
+        return out
     }
 
     /// Share of categorised neighbours per CatID: for up to `sample` of the folder's sounds,

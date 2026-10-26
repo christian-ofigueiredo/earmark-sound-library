@@ -25,12 +25,15 @@ struct LibrarySnapshot: Sendable {
     var songs: [SongRecord]
     var songIndex: SongIndex
     var folderRules: [FolderRule]
+    var folderGuesses: [FolderGuess]
 
     init(_ db: LibraryDatabase) throws {
         libraries = try db.libraries()
         folderRules = try db.folderRules()
-        // Sounds with no category of their own take their folder's rule (Map Folders to Categories).
-        sounds = FolderRules.apply(folderRules, to: try db.sounds())
+        folderGuesses = try db.folderGuesses()
+        // Sounds with no category of their own take their folder's: the user's choice, or
+        // else Earmark's guess (Folder Categories).
+        sounds = FolderRules.apply(folderRules, guesses: folderGuesses, to: try db.sounds())
         soundIndex = SoundIndex(sounds)
         songs = try db.songs()
         songIndex = SongIndex(songs)
@@ -47,6 +50,7 @@ final class AppModel {
     let soundBrowser = SoundBrowser()
     let musicBrowser = MusicBrowser()
     let folderMapper = FolderMapper()
+    let folderGuesser = FolderGuesser()
     let analysis = AnalysisEngine()
 
     var section: AppSection
@@ -60,6 +64,10 @@ final class AppModel {
     private(set) var songs: [SongRecord] = []
     private(set) var songIndex = SongIndex([])
     private(set) var folderRules: [FolderRule] = []
+    private(set) var folderGuesses: [FolderGuess] = []
+    /// Earmark guessing categories for folders (status bar).
+    var guessProgress: (done: Int, total: Int)?
+    @ObservationIgnored private var guessing = false
     /// Bumped on every reload so the browsers refresh their lists.
     private(set) var version = 0
     private(set) var scanning: Set<Int64> = []
@@ -83,6 +91,9 @@ final class AppModel {
         Task {
             await reload()
             analysis.start(model: self)
+            // After the analysis has read which sounds it has done (the guesses note it).
+            guessing = true
+            folderGuesser.update(model: self)
         }
     }
 
@@ -99,8 +110,10 @@ final class AppModel {
             songs = snap.songs
             songIndex = snap.songIndex
             folderRules = snap.folderRules
+            folderGuesses = snap.folderGuesses
             version += 1
             analysis.libraryChanged()
+            if guessing { folderGuesser.update(model: self) }
         } catch {
             show(error, title: "Couldn't read Earmark's database")
         }
@@ -405,6 +418,7 @@ final class AppModel {
         }
     }
 
+    /// Back to Earmark's guess (or no category, if it has none for the folder).
     func removeFolderRule(_ rule: FolderRule) {
         guard let db = database else { return }
         do {

@@ -58,9 +58,8 @@ if args.count >= 3, args[1] == "folders" {
     /// Suggestions as the app makes them (format twins left out, the files' words and designer).
     func suggest(_ members: [SoundRecord], count: Int = 3) -> [FolderSuggester.Option] {
         let shown = members.filter { !twins.contains($0.id ?? -1) }
-        return FolderSuggester.suggest(folder: members[0].folder, soundIds: shown.compactMap(\.id), index: index, labels: labels,
-                                       fileWords: FolderSuggester.fileWords(of: shown, sharedDescriptions: shared, tuning: tuning),
-                                       packWords: FolderSuggester.packWords(of: shown), count: count, tuning: tuning)
+        return FolderSuggester.suggest(folder: members[0].folder, sounds: shown, index: index, labels: labels,
+                                       sharedDescriptions: shared, count: count, tuning: tuning)
     }
     var n = 0, nameTop1 = 0, soundTop1 = 0, top1 = 0, top3 = 0, category = 0
     for (_, members) in groups where members.count >= 5 {
@@ -95,7 +94,7 @@ if args.count >= 3, args[1] == "folders" {
         let options = suggest(members)
         guard let top = options.first else { continue }
         // As the app's "listen first".
-        if top.isUncertain || top.words.isEmpty && top.fileWords.isEmpty && top.soundShare < 0.3 {
+        if top.isWeak {
             weak.folders += 1; weak.sounds += members.count
         }
         else { strong.folders += 1; strong.sounds += members.count }
@@ -164,7 +163,7 @@ if args.count >= 3, args[1] == "folders" {
         let text = options.map { o in
             "\(o.entry.label) [\(o.words.joined(separator: ","))\(o.soundShare > 0 ? String(format: " ♪%.0f%%", o.soundShare * 100) : "")]"
         }.joined(separator: "  |  ")
-        let weak = options.first.map { $0.isUncertain || $0.words.isEmpty && $0.fileWords.isEmpty && $0.soundShare < 0.3 } ?? false
+        let weak = options.first?.isWeak ?? false
         // --tops: one tab-separated line per folder, for comparing two versions.
         if args.contains("--tops") { print("TOP\t" + members[0].folder + "\t" + (options.first?.entry.catID ?? "-") + "\t" + text); continue }
         print(String(format: "%4d  ", members.count) + members[0].folder.split(separator: "/").suffix(2).joined(separator: "/") + "  →  " + text

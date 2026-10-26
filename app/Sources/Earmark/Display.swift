@@ -70,6 +70,8 @@ struct SoundIndex: Sendable {
     var libraryCounts: [Int64: Int] = [:]
     var categories: [SidebarNode] = []
     var uncategorised = 0
+    /// Sounds whose category is Earmark's guess for their folder.
+    var guessed = 0
     /// MP3/WAV (etc.) copies of the same sound: only the best one is listed.
     var twins = FormatTwins.Groups()
     /// Sounds in the list, i.e. not counting hidden twins.
@@ -84,6 +86,7 @@ struct SoundIndex: Sendable {
             haystacks.append(s.searchText)
             if let id = s.id, twins.hidden.contains(id) { continue }
             shownCount += 1
+            if s.categorySource == FolderRules.guessSource { guessed += 1 }
             libraryCounts[s.libraryId, default: 0] += 1
             if let category = s.category, let catID = s.catID {
                 byCategory[category, default: [:]][catID, default: (s.subcategory ?? catID, 0)].count += 1

@@ -2,9 +2,10 @@ import AppKit
 import EarmarkCore
 import SwiftUI
 
-/// Map Folders to Categories: the user picks a UCS category for folders whose sounds have
-/// none, helped by suggestions from the folder's name and from what its sounds sound like.
-/// Nothing is saved until the user ticks a folder and saves; files are never changed.
+/// Folder Categories: Earmark's guesses for folders whose sounds have no category (made by
+/// `FolderGuesser`, applied without asking), the user's own choices, and folders Earmark
+/// couldn't guess. Changing a guess saves the user's choice at once; for the folders left
+/// uncategorised the user ticks suggestions and saves. Files are never changed.
 @MainActor @Observable
 final class FolderMapper {
     struct Key: Hashable, Sendable, Identifiable {
@@ -20,6 +21,14 @@ final class FolderMapper {
         var soundIds: [Int64]
     }
 
+    /// A folder Earmark gave a category of its own.
+    struct GuessRow: Identifiable {
+        var id: Key { Key(libraryId: guess.libraryId, folder: guess.folder) }
+        var guess: FolderGuess
+        /// Sounds that take their category from this guess.
+        var soundIds: [Int64]
+    }
+
     /// A folder the user has given a category.
     struct MappedRow: Identifiable {
         var id: Key { Key(libraryId: rule.libraryId, folder: rule.folder) }
@@ -28,11 +37,12 @@ final class FolderMapper {
         var soundIds: [Int64]
     }
 
-    enum Tab: Hashable { case toMap, mapped }
+    enum Tab: Hashable { case guessed, mapped, toMap }
 
-    var tab = Tab.toMap
+    var tab = Tab.guessed
     var search = ""
     var selection: Set<Key> = []
+    var guessedSelection: Set<Key> = []
     var mappedSelection: Set<Key> = []
     /// Folders ticked to be saved.
     var ticked: Set<Key> = []
@@ -40,6 +50,7 @@ final class FolderMapper {
     var choosing: Key?
 
     private(set) var rows: [Row] = []
+    private(set) var guessed: [GuessRow] = []
     private(set) var mapped: [MappedRow] = []
     private(set) var suggestions: [Key: [FolderSuggester.Option]] = [:]
     /// The folder a sample is playing from.
@@ -53,6 +64,7 @@ final class FolderMapper {
     @ObservationIgnored private var suggesting: Task<Void, Never>?
 
     var visibleRows: [Row] { filter(rows, \.id.folder) }
+    var visibleGuessed: [GuessRow] { filter(guessed, \.guess.folder) }
     var visibleMapped: [MappedRow] { filter(mapped, \.rule.folder) }
 
     private func filter<T>(_ items: [T], _ folder: KeyPath<T, String>) -> [T] {
@@ -67,6 +79,13 @@ final class FolderMapper {
     func catID(for key: Key) -> String? { picked[key] ?? suggestions[key]?.first?.entry.catID }
 
     func isMapped(_ key: Key) -> Bool { mapped.contains { $0.id == key } }
+
+    func isGuessed(_ key: Key) -> Bool { guessed.contains { $0.id == key } }
+
+    /// The folder's category as it stands: the user's, Earmark's guess, or the one picked here.
+    func currentCatID(_ key: Key) -> String? {
+        mapped.first { $0.id == key }?.rule.catID ?? guessed.first { $0.id == key }?.guess.catID ?? catID(for: key)
+    }
 
     /// Folders still waiting for suggestions.
     var pending: Int { rows.count { suggestions[$0.id] == nil } }
@@ -86,10 +105,14 @@ final class FolderMapper {
 
     /// Shows one folder (from a sound's detail pane).
     func focus(_ key: Key) {
-        tab = isMapped(key) ? .mapped : .toMap
+        tab = isMapped(key) ? .mapped : isGuessed(key) ? .guessed : .toMap
         search = key.folder
         focused = key
-        if tab == .toMap { selection = [key] } else { mappedSelection = [key] }
+        switch tab {
+        case .toMap: selection = [key]
+        case .guessed: guessedSelection = [key]
+        case .mapped: mappedSelection = [key]
+        }
     }
 
     /// Selecting one folder plays a sound from it (to review with the arrow keys).
@@ -113,7 +136,8 @@ final class FolderMapper {
             model.player.stop()
             return
         }
-        let ids = rows.first { $0.id == key }?.soundIds ?? mapped.first { $0.id == key }?.soundIds ?? []
+        let ids = rows.first { $0.id == key }?.soundIds ?? guessed.first { $0.id == key }?.soundIds
+            ?? mapped.first { $0.id == key }?.soundIds ?? []
         guard !ids.isEmpty, model.isOnline(libraryId: key.libraryId) else { return }
         var id = ids.randomElement()!
         while ids.count > 1, id == lastSample[key] { id = ids.randomElement()! }
@@ -132,21 +156,31 @@ final class FolderMapper {
         builtFor = model.version
         let hidden = model.soundIndex.twins.hidden
         var open: [Key: [Int64]] = [:]
-        var ruled: [Key: [Int64]] = [:]
+        var ruled: [Key: [Int64]] = [:], guessedIds: [Key: [Int64]] = [:]
         let rules = Set(model.folderRules.map { Key(libraryId: $0.libraryId, folder: $0.folder) })
+        let ruleFolders = Dictionary(grouping: model.folderRules, by: \.libraryId).mapValues { Set($0.map(\.folder)) }
+        let guessFolders = Dictionary(grouping: model.folderGuesses, by: \.libraryId).mapValues { Set($0.map(\.folder)) }
         for s in model.sounds {
             guard let id = s.id, !hidden.contains(id) else { continue }
             if s.catID == nil {
                 open[Key(libraryId: s.libraryId, folder: s.folder), default: []].append(id)
-            } else if s.categorySource == FolderRules.source {
+            } else if s.categorySource == FolderRules.source,
+                      let folder = FolderRules.ruleFolder(for: s.folder, in: ruleFolders[s.libraryId] ?? []) {
                 // The nearest rule at or above the sound's folder is the one that applied.
-                var folder = s.folder
-                while !rules.contains(Key(libraryId: s.libraryId, folder: folder)), let slash = folder.lastIndex(of: "/") {
-                    folder = String(folder[..<slash])
-                }
                 ruled[Key(libraryId: s.libraryId, folder: folder), default: []].append(id)
+            } else if s.categorySource == FolderRules.guessSource,
+                      let folder = FolderRules.ruleFolder(for: s.folder, in: guessFolders[s.libraryId] ?? []) {
+                guessedIds[Key(libraryId: s.libraryId, folder: folder), default: []].append(id)
             }
         }
+        // Only guesses some sound takes (not those behind a choice of the user's), the unsure first.
+        guessed = model.folderGuesses.compactMap { g in
+            guessedIds[Key(libraryId: g.libraryId, folder: g.folder)].map { GuessRow(guess: g, soundIds: $0) }
+        }.sorted {
+            $0.guess.isUnsure != $1.guess.isUnsure ? $0.guess.isUnsure
+                : $0.soundIds.count != $1.soundIds.count ? $0.soundIds.count > $1.soundIds.count : $0.guess.folder < $1.guess.folder
+        }
+        guessedSelection.formIntersection(guessed.map(\.id))
         rows = open.map { Row(id: $0.key, soundIds: $0.value) }.sorted {
             $0.soundIds.count != $1.soundIds.count ? $0.soundIds.count > $1.soundIds.count : $0.id.folder < $1.id.folder
         }
@@ -163,12 +197,8 @@ final class FolderMapper {
     private func startSuggesting(_ model: AppModel) {
         suggesting?.cancel()
         guard pending > 0 else { return }
-        // Only categories that came with the files teach the suggestions, not the user's rules.
-        var labels: [Int64: String] = [:]
-        for s in model.sounds where s.categorySource != FolderRules.source {
-            if let id = s.id, let catID = s.catID { labels[id] = catID }
-        }
-        let known = labels
+        // Only categories that came with the files teach the suggestions.
+        let known = FolderSuggester.labels(model.sounds)
         let all = model.sounds
         suggesting = Task { [weak self] in
             let index = try? await model.similarityIndex()
@@ -176,9 +206,8 @@ final class FolderMapper {
             while !Task.isCancelled, let row = self?.nextToSuggest() {
                 let sounds = row.soundIds.compactMap { model.sound(id: $0) }
                 let options = await Task.detached(priority: .userInitiated) {
-                    FolderSuggester.suggest(folder: row.id.folder, soundIds: row.soundIds, index: index, labels: known,
-                                            fileWords: FolderSuggester.fileWords(of: sounds, sharedDescriptions: shared),
-                                            packWords: FolderSuggester.packWords(of: sounds))
+                    FolderSuggester.suggest(folder: row.id.folder, sounds: sounds, index: index, labels: known,
+                                            sharedDescriptions: shared)
                 }.value
                 guard let self, !Task.isCancelled else { return }
                 self.suggestions[row.id] = options
@@ -214,11 +243,6 @@ final class FolderMapper {
         return parts.isEmpty ? "similar sounds are in this category" : parts.joined(separator: " · ")
     }
 
-    /// Nothing but a few similar sounds agree, or the words fit other categories as well:
-    /// worth listening before saving.
-    static func isWeak(_ option: FolderSuggester.Option) -> Bool {
-        option.isUncertain || option.words.isEmpty && option.fileWords.isEmpty && option.soundShare < 0.3
-    }
 }
 
 struct FolderMapView: View {
@@ -229,14 +253,18 @@ struct FolderMapView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Picker("Show", selection: $mapper.tab) {
+                    Text("Guessed by Earmark (\(mapper.guessed.count))").tag(FolderMapper.Tab.guessed)
+                    Text("Your Choices (\(mapper.mapped.count))").tag(FolderMapper.Tab.mapped)
                     Text("Not Categorised (\(mapper.rows.count))").tag(FolderMapper.Tab.toMap)
-                    Text("Your Folder Categories (\(mapper.mapped.count))").tag(FolderMapper.Tab.mapped)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
                 Spacer()
-                if mapper.pending > 0 {
+                if let guess = model.guessProgress {
+                    ProgressView().controlSize(.small)
+                    Text("Guessing: \(guess.done) of \(guess.total) folders").foregroundStyle(.secondary)
+                } else if mapper.tab == .toMap, mapper.pending > 0 {
                     ProgressView().controlSize(.small)
                     Text("Suggesting categories: \(mapper.pending) folders to go")
                         .foregroundStyle(.secondary)
@@ -245,12 +273,13 @@ struct FolderMapView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             switch mapper.tab {
-            case .toMap: FoldersToMapTable()
+            case .guessed: GuessedFoldersTable()
             case .mapped: MappedFoldersTable()
+            case .toMap: FoldersToMapTable()
             }
             Divider()
             HStack(spacing: 12) {
-                Text("Sounds without a category take their folder's. A category from the file itself always wins. Earmark keeps this in its own database; your files aren't changed.")
+                Text("Sounds without a category take their folder's: yours, or else Earmark's guess. A category from the file itself always wins. Earmark keeps this in its own database; your files aren't changed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -276,8 +305,8 @@ struct FolderMapView: View {
             if mapper.playing != nil { model.player.stop() }
         }
         .sheet(item: $mapper.choosing) { key in
-            UCSChooser(folder: key.folder, current: mapper.catID(for: key)) { catID in
-                if mapper.isMapped(key) {
+            UCSChooser(folder: key.folder, current: mapper.currentCatID(key)) { catID in
+                if mapper.isMapped(key) || mapper.isGuessed(key) {
                     model.saveFolderRules([FolderRule(libraryId: key.libraryId, folder: key.folder, catID: catID)])
                 } else {
                     mapper.pick(catID, for: key)
@@ -349,6 +378,58 @@ struct FoldersToMapTable: View {
     }
 }
 
+struct GuessedFoldersTable: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var mapper = model.folderMapper
+        Table(of: FolderMapper.GuessRow.self, selection: $mapper.guessedSelection) {
+            TableColumn("Folder") { row in
+                FolderPath(folder: row.guess.folder)
+            }
+            .width(min: 200, ideal: 340)
+            TableColumn("Sounds") { row in
+                Text(row.soundIds.count.formatted()).monospacedDigit()
+            }
+            .width(min: 50, ideal: 56, max: 80)
+            TableColumn("Category") { row in GuessCategoryMenu(model: model, guess: row.guess) }
+                .width(min: 180, ideal: 230)
+            TableColumn("Why") { row in
+                Text(row.guess.reason + (row.guess.isUnsure ? " — listen first" : ""))
+                    .foregroundStyle(row.guess.isUnsure ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .help(row.guess.reason)
+            }
+            .width(min: 160, ideal: 260)
+            TableColumn("") { row in SampleButton(model: model, key: row.id) }
+                .width(24)
+        } rows: {
+            ForEach(mapper.visibleGuessed) { TableRow($0) }
+        }
+        .contextMenu(forSelectionType: FolderMapper.Key.self) { keys in
+            if keys.count == 1, let key = keys.first {
+                Button("Change Category…") { mapper.choosing = key }
+                Button("Play a Sound") { mapper.playSample(key, model: model) }
+                FolderFinderButton(model: model, key: key)
+            }
+        } primaryAction: { keys in
+            if keys.count == 1, let key = keys.first { mapper.playSample(key, model: model) }
+        }
+        .onChange(of: mapper.guessedSelection) {
+            if mapper.guessedSelection.count == 1, let key = mapper.guessedSelection.first { mapper.playSample(key, model: model) }
+        }
+        .overlay {
+            if mapper.guessed.isEmpty {
+                ContentUnavailableView("No Guesses", systemImage: "wand.and.stars",
+                                       description: Text(model.guessProgress == nil
+                                           ? "Every folder has a category from its files or from you."
+                                           : "Earmark is guessing categories for your folders…"))
+            } else if mapper.visibleGuessed.isEmpty {
+                ContentUnavailableView.search(text: mapper.search)
+            }
+        }
+    }
+}
+
 struct MappedFoldersTable: View {
     @Environment(AppModel.self) private var model
 
@@ -375,7 +456,7 @@ struct MappedFoldersTable: View {
             TableColumn("") { row in
                 Button("Remove") { model.removeFolderRule(row.rule) }
                     .buttonStyle(.link)
-                    .help("Its sounds go back to Not Categorised Yet")
+                    .help("Its sounds go back to Earmark's guess")
             }
             .width(60)
             TableColumn("") { row in SampleButton(model: model, key: row.id) }
@@ -395,8 +476,8 @@ struct MappedFoldersTable: View {
         }
         .overlay {
             if mapper.mapped.isEmpty {
-                ContentUnavailableView("No Folder Categories Yet", systemImage: "folder",
-                                       description: Text("Folders you give a category appear here."))
+                ContentUnavailableView("No Choices of Yours Yet", systemImage: "folder",
+                                       description: Text("Folders you give a category, or whose guess you change, appear here."))
             } else if mapper.visibleMapped.isEmpty {
                 ContentUnavailableView.search(text: mapper.search)
             }
@@ -406,6 +487,26 @@ struct MappedFoldersTable: View {
 
 // The views in table cells and context menus are given the model rather than reading it from
 // the environment: a table can update the cell of a row it has just removed, outside the window.
+
+/// Earmark's guess and its runners-up; choosing one saves it as the user's choice.
+struct GuessCategoryMenu: View {
+    let model: AppModel
+    let guess: FolderGuess
+
+    var body: some View {
+        Menu(FolderMapper.title(guess.catID)) {
+            Toggle(FolderMapper.title(guess.catID), isOn: .constant(true))
+            ForEach(guess.alternativeIDs, id: \.self) { catID in
+                Button(FolderMapper.title(catID)) {
+                    model.saveFolderRules([FolderRule(libraryId: guess.libraryId, folder: guess.folder, catID: catID)])
+                }
+            }
+            Divider()
+            Button("Other…") { model.folderMapper.choosing = FolderMapper.Key(libraryId: guess.libraryId, folder: guess.folder) }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
 
 /// The suggested categories for a folder, with Other… for the whole UCS list.
 struct FolderCategoryMenu: View {
@@ -445,8 +546,8 @@ struct FolderReason: View {
         if let options = mapper.suggestions[key] {
             let current = mapper.catID(for: key)
             if let option = options.first(where: { $0.entry.catID == current }) {
-                Text(FolderMapper.reason(option) + (FolderMapper.isWeak(option) ? " — listen first" : ""))
-                    .foregroundStyle(FolderMapper.isWeak(option) ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                Text(FolderMapper.reason(option) + (option.isWeak ? " — listen first" : ""))
+                    .foregroundStyle(option.isWeak ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
                     .help("Words of the folder name, and words most of its files share (names, descriptions), that match "
                         + "this category, and the share of the most similar sounds (from other folders, with a category from "
                         + "their files) that are in it.")
@@ -576,7 +677,7 @@ struct UCSChooser: View {
     }
 }
 
-/// Opens the Map Folders to Categories window (menus, sidebar).
+/// Opens the Folder Categories window (menus, sidebar).
 struct MapFoldersButton: View {
     @Environment(\.openWindow) private var openWindow
 
@@ -584,7 +685,7 @@ struct MapFoldersButton: View {
         Button {
             openWindow(id: FolderMapView.windowID)
         } label: {
-            Label("Map Folders to Categories…", systemImage: "folder.badge.gearshape")
+            Label("Folder Categories…", systemImage: "folder.badge.gearshape")
         }
     }
 }

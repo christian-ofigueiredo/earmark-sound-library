@@ -246,7 +246,7 @@ Settings → Repository name. Topics/description also have to be set there.
      Next if more speed is needed: several CPU model instances for the short windows (same
      part, so the mmapped weights may be shared; check memory), or measure why short windows
      are 3× slower beside the GPU.
-   - **Map Folders to Categories, 2026-10-25** (File menu, the sidebar under Not Categorised
+   - **Map Folders to Categories, 2026-10-25** (now Folder Categories, see below; File menu, the sidebar under Not Categorised
      Yet, or "Choose a Category for Its Folder…" on an uncategorised sound): lists the folders
      whose sounds have no category, largest first (214 folders, 23,879 sounds on SoundFX).
      Each row has a suggestion from `FolderSuggester`, the top 3 plus Other… (the whole UCS
@@ -261,6 +261,22 @@ Settings → Repository name. Topics/description also have to be set there.
      Change… and Remove. Suggestions are computed while the window is open, folders on screen
      first. Tested in the app (tick, pick, Other…, save, change, remove, open from a sound);
      the test rules were removed, so the owner's database has none yet.
+   - **Automatic folder categories, 2026-10-26** (owner: "I want everything automated… I'd
+     rather change it later"): `FolderGuesser` (app) gives every folder whose sounds have no
+     category its best suggestion, without asking, in the background after the library is
+     read (status bar "Guessing categories for folders: n of N"; 214 folders in ~40 s). Guesses
+     live in `folderGuess` (schema v6: CatID, runners-up, reason, unsure flag, how many sounds
+     were analysed, `FolderSuggester.version`) and are made again when the version is bumped
+     (bump it whenever suggestions change), when many more of the folder's sounds have been
+     analysed, or for new folders after a scan; guesses of folders that no longer need one are
+     dropped. Precedence on load (`FolderRules.apply`): the file's own category, then the
+     user's choice for the folder or one above it, then Earmark's guess. The window is now
+     **Folder Categories** (File menu, sidebar): tabs Guessed by Earmark (unsure first; the
+     category menu saves the user's choice at once), Your Choices (Change…/Remove; Remove goes
+     back to the guess) and Not Categorised (folders with no guess, tick and save as before).
+     Sidebar: "Guessed by Earmark" lists the guessed sounds (23,879 on SoundFX); the detail
+     pane says "Guessed by Earmark" (orange "unsure") with Change…. The sound signal only
+     learns from categories that came with the files (`FolderSuggester.labels`).
    - **Folder suggestions improved, 2026-10-26** (owner asked about vendor names, Street
      Basketball and Pickups). Signals: the folder's name; the words at least 30% of its files
      share (file name, FXName, description, keywords; of a UCS file name only the FXName;

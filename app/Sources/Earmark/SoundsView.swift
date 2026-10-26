@@ -9,6 +9,8 @@ enum SoundScope: Hashable, Sendable {
     case category(String)
     case catID(String)
     case uncategorised
+    /// Sounds whose category is Earmark's guess for their folder.
+    case guessed
     /// The sounds most like this one (Find Similar Sounds).
     case similar(Int64)
 }
@@ -82,6 +84,7 @@ final class SoundBrowser {
             case .category(let c): if s.category != c { return false }
             case .catID(let c): if s.catID != c { return false }
             case .uncategorised: if s.catID != nil { return false }
+            case .guessed: if s.categorySource != FolderRules.guessSource { return false }
             case .similar(let source):
                 guard let id = s.id, id == source || similar?.scores[id] != nil else { return false }
             }
@@ -189,6 +192,12 @@ struct SoundSidebar: View {
                     OutlineGroup(model.soundIndex.categories, children: \.children) { node in
                         Text(node.title).badge(node.count).tag(node.id)
                     }
+                    if model.soundIndex.guessed > 0 {
+                        Label("Guessed by Earmark", systemImage: "wand.and.stars")
+                            .badge(model.soundIndex.guessed)
+                            .tag(SoundScope.guessed)
+                            .help("Sounds whose category Earmark guessed from their folder: change any in Folder Categories")
+                    }
                     Label("Not Categorised Yet", systemImage: "questionmark.folder")
                         .badge(model.soundIndex.uncategorised)
                         .tag(SoundScope.uncategorised)
@@ -292,17 +301,28 @@ struct SoundDetail: View {
     @Environment(\.openWindow) private var openWindow
     let sound: SoundRecord
 
-    /// Opens Map Folders to Categories on this sound's folder (or the rule that categorised it).
-    private func mapFolder() {
-        var key = FolderMapper.Key(libraryId: sound.libraryId, folder: sound.folder)
-        if sound.categorySource == FolderRules.source {
-            var folder = sound.folder
-            while !model.folderRules.contains(where: { $0.libraryId == sound.libraryId && $0.folder == folder }),
-                  let slash = folder.lastIndex(of: "/") { folder = String(folder[..<slash]) }
-            key.folder = folder
+    /// The folder whose choice or guess gave this sound its category (or its own folder).
+    private var ruleKey: FolderMapper.Key {
+        let folders: [String] = switch sound.categorySource {
+        case FolderRules.source: model.folderRules.filter { $0.libraryId == sound.libraryId }.map(\.folder)
+        case FolderRules.guessSource: model.folderGuesses.filter { $0.libraryId == sound.libraryId }.map(\.folder)
+        default: []
         }
-        model.folderMapper.focus(key)
+        return FolderMapper.Key(libraryId: sound.libraryId,
+                                folder: FolderRules.ruleFolder(for: sound.folder, in: Set(folders)) ?? sound.folder)
+    }
+
+    /// Opens Folder Categories on this sound's folder (or the one that categorised it).
+    private func mapFolder() {
+        model.folderMapper.focus(ruleKey)
         openWindow(id: FolderMapView.windowID)
+    }
+
+    /// Why Earmark guessed this sound's category, if it did.
+    private var guess: FolderGuess? {
+        guard sound.categorySource == FolderRules.guessSource else { return nil }
+        let key = ruleKey
+        return model.folderGuesses.first { $0.libraryId == key.libraryId && $0.folder == key.folder }
     }
 
     /// Which embeddings this sound has ("CLAP, PE-AV"), or nil.
@@ -330,7 +350,15 @@ struct SoundDetail: View {
                                 Text(catID).font(.caption.monospaced()).foregroundStyle(.secondary)
                             }
                         }
-                        if let source = sound.categorySource {
+                        if let guess {
+                            HStack(spacing: 6) {
+                                Text(guess.isUnsure ? "Guessed by Earmark, unsure" : "Guessed by Earmark")
+                                    .font(.caption)
+                                    .foregroundStyle(guess.isUnsure ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                                    .help("From its folder: \(guess.reason)")
+                                Button("Change…", action: mapFolder).buttonStyle(.link).font(.caption)
+                            }
+                        } else if let source = sound.categorySource {
                             HStack(spacing: 6) {
                                 Text("Category from \(source)").font(.caption).foregroundStyle(.secondary)
                                 if source == FolderRules.source {

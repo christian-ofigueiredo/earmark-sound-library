@@ -251,6 +251,20 @@ public final class LibraryDatabase: Sendable {
                 t.primaryKey(["libraryId", "folder"])
             }
         }
+        m.registerMigration("v6-folder-guesses") { db in
+            try db.create(table: "folderGuess") { t in
+                t.column("libraryId", .integer).notNull()
+                t.column("folder", .text).notNull()
+                t.column("catID", .text).notNull()
+                t.column("alternatives", .text).notNull()
+                t.column("reason", .text).notNull()
+                t.column("isUnsure", .boolean).notNull()
+                t.column("analysed", .integer).notNull()
+                t.column("version", .integer).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.primaryKey(["libraryId", "folder"])
+            }
+        }
         return m
     }
 
@@ -286,6 +300,8 @@ public final class LibraryDatabase: Sendable {
                 INSERT OR REPLACE INTO retiredSound (fingerprint, soundId)
                 SELECT fingerprint, id FROM sound WHERE libraryId = ? AND fingerprint IS NOT NULL
                 """, arguments: [id])
+            // Earmark's guesses are remade if the folder comes back; the user's rules stay.
+            try db.execute(sql: "DELETE FROM folderGuess WHERE libraryId = ?", arguments: [id])
             _ = try Library.deleteOne(db, key: id)
         }
     }

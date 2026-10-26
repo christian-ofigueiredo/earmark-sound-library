@@ -218,6 +218,38 @@ import Testing
         #expect(try db.folderRules().isEmpty)
     }
 
+    @Test func guessesFillWhatNeitherFilesNorTheUserCategorised() async throws {
+        let db = try LibraryDatabase(path: nil)
+        let root = TestFiles.tempDir()
+        TestFiles.write(TestFiles.wav(seconds: 1), to: root.appendingPathComponent("Pack/Hits/a.wav"))
+        TestFiles.write(TestFiles.wav(seconds: 2), to: root.appendingPathComponent("Pack/Hits/Metal/b.wav"))
+        TestFiles.write(TestFiles.wav(seconds: 3), to: root.appendingPathComponent("Pack/Whooshes/c.wav"))
+        TestFiles.write(TestFiles.wav(seconds: 4), to: root.appendingPathComponent("Pack/Whooshes/WHSH_Vendor_X_Y.wav"))
+        let lib = try db.addLibrary(kind: .sounds, path: root.path, bookmark: nil)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        func guess(_ folder: String, _ catID: String) -> FolderGuess {
+            FolderGuess(libraryId: lib.id!, folder: folder, catID: catID, alternatives: ["DSGNMisc"], reason: "test",
+                        isUnsure: false, analysed: 0)
+        }
+        try db.updateGuesses(saving: [guess("Pack/Hits/Metal", "METLImpt"), guess("Pack/Whooshes", "DSGNWhsh")], removing: [])
+        try db.save([FolderRule(libraryId: lib.id!, folder: "Pack/Hits", catID: "DSGNImpt")])
+        let sounds = FolderRules.apply(try db.folderRules(), guesses: try db.folderGuesses(), to: try db.sounds())
+        func s(_ name: String) -> SoundRecord { sounds.first { $0.fileName == name }! }
+        #expect(s("a.wav").catID == "DSGNImpt")                                   // the user's choice
+        #expect(s("b.wav").catID == "DSGNImpt", "a choice above beats a guess below")
+        #expect(s("c.wav").catID == "DSGNWhsh" && s("c.wav").categorySource == FolderRules.guessSource)
+        #expect(s("WHSH_Vendor_X_Y.wav").catID == "WHSH")                          // the file's own wins
+        #expect(try db.folderGuesses().first { $0.folder == "Pack/Whooshes" }?.alternativeIDs == ["DSGNMisc"])
+        // Removing the choice brings the guess back; a stale guess is forgotten.
+        try db.removeFolderRule(libraryId: lib.id!, folder: "Pack/Hits")
+        try db.updateGuesses(saving: [], removing: [(lib.id!, "Pack/Whooshes")])
+        let after = FolderRules.apply(try db.folderRules(), guesses: try db.folderGuesses(), to: try db.sounds())
+        #expect(after.first { $0.fileName == "b.wav" }?.catID == "METLImpt")
+        #expect(after.first { $0.fileName == "c.wav" }?.catID == nil)
+        // Labels for the sound signal leave out both kinds of folder category.
+        #expect(Set(FolderSuggester.labels(sounds).values) == ["WHSH"])
+    }
+
     @Test func folderNamesPointToUCS() {
         let catalog = UCSCatalog.shared
         func best(_ folder: String) -> String? {
