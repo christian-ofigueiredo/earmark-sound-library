@@ -264,12 +264,13 @@ struct SongDetailPane: View {
     var body: some View {
         let ids = model.musicBrowser.selection
         if ids.count == 1, let song = model.song(id: ids.first ?? nil) {
-            SongDetail(song: song).id(song.id)
+            SongDetail(song: song).id(song.id).transition(.identity)
         } else if ids.count > 1 {
-            ContentUnavailableView("\(ids.count) Songs Selected", systemImage: "square.stack")
+            ContentUnavailableView("\(ids.count) Songs Selected", systemImage: "square.stack").transition(.identity)
         } else {
             ContentUnavailableView("No Song Selected", systemImage: "music.note",
                                    description: Text("Select a song to hear it and see its tempo and key."))
+                .transition(.identity)
         }
     }
 }

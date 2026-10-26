@@ -274,12 +274,13 @@ struct SoundDetailPane: View {
     var body: some View {
         let ids = model.soundBrowser.selection
         if ids.count == 1, let sound = model.sound(id: ids.first ?? nil) {
-            SoundDetail(sound: sound).id(sound.id)
+            SoundDetail(sound: sound).id(sound.id).transition(.identity)
         } else if ids.count > 1 {
-            ContentUnavailableView("\(ids.count) Sounds Selected", systemImage: "square.stack")
+            ContentUnavailableView("\(ids.count) Sounds Selected", systemImage: "square.stack").transition(.identity)
         } else {
             ContentUnavailableView("No Sound Selected", systemImage: "waveform",
                                    description: Text("Select a sound to hear it. Drag it into DaVinci Resolve to use it."))
+                .transition(.identity)
         }
     }
 }

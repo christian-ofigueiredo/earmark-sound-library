@@ -17,12 +17,13 @@ struct ContentView: View {
             }
         }
         .toolbar {
-            // The switch is its own Liquid Glass control, not on the toolbar's shared glass.
+            // The switch is its own Liquid Glass control, not on the toolbar's shared glass, with
+            // auto-play right after it (alone, the toolbar's flexible spaces left it floating).
             if #available(macOS 26, *) {
-                ToolbarItem(placement: .principal) { SectionSwitch() }
+                ToolbarItem(placement: .principal) { HStack(spacing: 8) { SectionSwitch(); AutoPlayToggle() } }
                     .sharedBackgroundVisibility(.hidden)
             } else {
-                ToolbarItem(placement: .principal) { SectionSwitch() }
+                ToolbarItem(placement: .principal) { HStack(spacing: 8) { SectionSwitch(); AutoPlayToggle() } }
             }
         }
         .onChange(of: model.section) { _, section in
@@ -84,24 +85,8 @@ struct LibraryView: View {
             // view below, and SwiftUI's own tables (Folder Categories) would pay for it per cell.
             .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
             .inspector(isPresented: .constant(true)) {
-                VStack(spacing: 0) {
-                    NowPlayingBar()
-                    ZStack {
-                        // The hidden pane's own AppKit views (waveform, file drag) let clicks through.
-                        SoundDetailPane().environment(\.sectionShown, !music).shown(!music)
-                        SongDetailPane().environment(\.sectionShown, music).shown(music)
-                    }
-                }
-                .inspectorColumnWidth(min: 300, ideal: 380, max: 600)
-            }
-        }
-        .toolbar {
-            ToolbarItem {
-                let on = music ? autoplayMusic : autoplaySounds
-                Toggle(isOn: Binding(get: { on }, set: { if music { autoplayMusic = $0 } else { autoplaySounds = $0 } })) {
-                    Label("Auto-play", systemImage: on ? "play.circle.fill" : "play.circle")
-                }
-                .help(music ? "Play songs as you select them" : "Play sounds as you select them")
+                DetailColumn(music: music)
+                    .inspectorColumnWidth(min: 300, ideal: 380, max: 600)
             }
         }
         .onChange(of: model.section) { _, section in
@@ -124,6 +109,45 @@ struct LibraryView: View {
             model.player.play(s.url)
         }
     }
+}
+
+/// The detail pane: what's playing on top while it's something else, then the shown
+/// section's details. The strip slides down into place and the details slide down with it
+/// (up, when it goes).
+struct DetailColumn: View {
+    @Environment(AppModel.self) private var model
+    let music: Bool
+    /// The strip's height with its margins, measured once shown.
+    @State private var stripHeight: CGFloat = 76
+    /// Where the details are drawn, from where they were to 0, as the strip comes or goes.
+    @State private var slide: CGFloat = 0
+
+    var body: some View {
+        let playing = NowPlaying.elsewhere(in: model)
+        VStack(spacing: 0) {
+            if let playing {
+                NowPlayingBar(item: playing)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(1)   // over the details while they slide
+            }
+            ZStack {
+                // The hidden pane's own AppKit views (waveform, file drag) let clicks through.
+                SoundDetailPane().environment(\.sectionShown, !music).shown(!music)
+                SongDetailPane().environment(\.sectionShown, music).shown(music)
+            }
+            .offset(y: slide)
+        }
+        .animation(Self.motion, value: playing != nil)
+        .onChange(of: playing != nil) { _, shown in
+            // The details usually change too (another row selected), so there's no old
+            // position for SwiftUI to animate from: start them where the old ones were.
+            slide = shown ? -stripHeight : stripHeight
+            DispatchQueue.main.async { withAnimation(Self.motion) { slide = 0 } }
+        }
+    }
+
+    private static let motion = Animation.snappy(duration: 0.3)
 }
 
 extension View {
@@ -174,6 +198,42 @@ extension View {
             }
             for view in hidden { view.isHidden = true }
         }
+    }
+}
+
+/// Play sounds (or songs) as you select them, each section with its own setting: a round
+/// button after the section switch, blue glass while on.
+struct AutoPlayToggle: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage("autoplaySounds") private var autoplaySounds = false
+    @AppStorage("autoplayMusic") private var autoplayMusic = false
+
+    var body: some View {
+        let music = model.section == .music
+        let on = music ? autoplayMusic : autoplaySounds
+        Button {
+            if music { autoplayMusic.toggle() } else { autoplaySounds.toggle() }
+        } label: {
+            if #available(macOS 26, *) {
+                // Drawn like the switch: its glass, and its blue pill while on.
+                Image(systemName: on ? "play.circle.fill" : "play.circle")
+                    .font(.title3)
+                    .foregroundStyle(on ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                    .frame(width: 34, height: 34)
+                    .background { if on { Circle().fill(Color.blue.gradient) } }
+                    .glassEffect(on ? .regular.tint(.blue).interactive() : .regular.interactive(), in: .circle)
+                    .contentShape(Circle())
+            } else {
+                Label("Auto-play", systemImage: on ? "play.circle.fill" : "play.circle")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            }
+        }
+        .buttonStyle(.plain)
+        .help(music ? "Auto-play: play songs as you select them" : "Auto-play: play sounds as you select them")
+        .accessibilityLabel("Auto-play")
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityValue(on ? "On" : "Off")
     }
 }
 

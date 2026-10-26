@@ -399,7 +399,16 @@ Settings → Repository name. Topics/description also have to be set there.
   and Show, which selects it and scrolls to it (`reveal`), clearing the search, sidebar
   choice and music filters if they hide it. The playing item is found by its path
   (`AppModel.playingSound/playingSong`); the time is its own small view, as it changes 40
-  times a second. Switching section still stops playback.
+  times a second. Switching section still stops playback. The strip slides down from the
+  top and the details slide with it (`DetailColumn`, 0.3 s; owner asked). The details are
+  usually new views (another row selected), so neither layout animation nor an insertion
+  transition moves them (a `.transition` on the detail view didn't run at all): they're
+  offset by the strip's height and animated back to 0 instead.
+- **Auto-play button**: in the toolbar it sat halfway between the section switch and the
+  search field, as SwiftUI puts flexible spaces on both sides of a toolbar item there
+  (`ToolbarSpacer`, `.primaryAction` and moving it to the inspector's toolbar changed
+  nothing). The owner chose to attach it to the switch: `AutoPlayToggle`, in the principal
+  item with `SectionSwitch`, drawn like it (light glass, the blue pill while on).
 - **Sidebar rows added or removed while selected** (owner, 2026-10-26: "Similar to…" text
   doubled, its ✕ needed two clicks). Adding the Similar row and selecting it in the same
   update left a copy of the row drawn over it: the text twice, in the selected (bold) and
