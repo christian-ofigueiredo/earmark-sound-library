@@ -13,3 +13,6 @@ app/build/
 # Core ML conversion (models/)
 models/.venv/
 models/build/
+
+# The owner's library data used for measuring (folder_truth.tsv etc.); never committed.
+local/

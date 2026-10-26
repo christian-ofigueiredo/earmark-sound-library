@@ -169,11 +169,16 @@ final class FolderMapper {
             if let id = s.id, let catID = s.catID { labels[id] = catID }
         }
         let known = labels
+        let all = model.sounds
         suggesting = Task { [weak self] in
             let index = try? await model.similarityIndex()
+            let shared = await Task.detached(priority: .userInitiated) { FolderSuggester.sharedDescriptions(all) }.value
             while !Task.isCancelled, let row = self?.nextToSuggest() {
+                let sounds = row.soundIds.compactMap { model.sound(id: $0) }
                 let options = await Task.detached(priority: .userInitiated) {
-                    FolderSuggester.suggest(folder: row.id.folder, soundIds: row.soundIds, index: index, labels: known)
+                    FolderSuggester.suggest(folder: row.id.folder, soundIds: row.soundIds, index: index, labels: known,
+                                            fileWords: FolderSuggester.fileWords(of: sounds, sharedDescriptions: shared),
+                                            packWords: FolderSuggester.packWords(of: sounds))
                 }.value
                 guard let self, !Task.isCancelled else { return }
                 self.suggestions[row.id] = options
@@ -199,17 +204,21 @@ final class FolderMapper {
         catID.flatMap { UCSCatalog.shared.entry(catID: $0)?.label.capitalized } ?? "Choose…"
     }
 
-    /// Why a category is suggested: words of the folder name, and how many of the most
-    /// similar sounds (with a category from their files) are in it.
+    /// Why a category is suggested: words of the folder name, words most of its files share,
+    /// and how many of the most similar sounds (with a category from their files) are in it.
     static func reason(_ option: FolderSuggester.Option) -> String {
         var parts: [String] = []
         if !option.words.isEmpty { parts.append("name “\(option.words.joined(separator: " "))”") }
+        if !option.fileWords.isEmpty { parts.append("files “\(option.fileWords.prefix(3).joined(separator: " "))”") }
         if option.soundShare >= 0.1 { parts.append("\(Int((option.soundShare * 100).rounded()))% of similar sounds") }
         return parts.isEmpty ? "similar sounds are in this category" : parts.joined(separator: " · ")
     }
 
-    /// No word of the name and few similar sounds agree: worth listening before saving.
-    static func isWeak(_ option: FolderSuggester.Option) -> Bool { option.words.isEmpty && option.soundShare < 0.3 }
+    /// Nothing but a few similar sounds agree, or the words fit other categories as well:
+    /// worth listening before saving.
+    static func isWeak(_ option: FolderSuggester.Option) -> Bool {
+        option.isUncertain || option.words.isEmpty && option.fileWords.isEmpty && option.soundShare < 0.3
+    }
 }
 
 struct FolderMapView: View {
@@ -438,8 +447,9 @@ struct FolderReason: View {
             if let option = options.first(where: { $0.entry.catID == current }) {
                 Text(FolderMapper.reason(option) + (FolderMapper.isWeak(option) ? " — listen first" : ""))
                     .foregroundStyle(FolderMapper.isWeak(option) ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                    .help("Words of the folder name that match this category, and the share of the most similar sounds "
-                        + "(from other folders, with a category from their files) that are in it.")
+                    .help("Words of the folder name, and words most of its files share (names, descriptions), that match "
+                        + "this category, and the share of the most similar sounds (from other folders, with a category from "
+                        + "their files) that are in it.")
             } else if current != nil {
                 Text("Your choice").foregroundStyle(.secondary)
             } else {

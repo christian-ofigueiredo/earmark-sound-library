@@ -249,24 +249,48 @@ Settings → Repository name. Topics/description also have to be set there.
    - **Map Folders to Categories, 2026-10-25** (File menu, the sidebar under Not Categorised
      Yet, or "Choose a Category for Its Folder…" on an uncategorised sound): lists the folders
      whose sounds have no category, largest first (214 folders, 23,879 sounds on SoundFX).
-     Each row has a suggestion from `FolderSuggester` (folder name + what its sounds sound
-     like via CLAP neighbours with a category from their files; 79% top 1, 86% top 3, 91%
-     category on 43 labelled folders), the top 3 plus Other… (the whole UCS list, searchable
-     by name, CatID and synonyms), the reason ("name “footstep” · 62% of similar sounds",
-     orange "listen first" when neither name nor sound agree), and a play button (a different
-     sound each click; selecting a row plays one, so the arrow keys review folders).
+     Each row has a suggestion from `FolderSuggester`, the top 3 plus Other… (the whole UCS
+     list, searchable by name, CatID and synonyms), the reason ("name “footstep” · files
+     “foot walk” · 62% of similar sounds", orange "listen first" when nothing but a few
+     similar sounds agree or another category is named just as well), and a play button (a
+     different sound each click; selecting a row plays one, so the arrow keys review folders).
      Nothing is saved until a folder is ticked (Space ticks the selected rows) and Save
      Categories is pressed. Rules live in `folderRule` (schema v5) and apply on load to sounds
      with no category of their own, from the nearest folder with a rule
      (`categorySource` = "your folder rule"); "Your Folder Categories" lists them with
-     Change… and Remove. Suggestions take ~0.3–0.7 s per folder, computed while the window
-     is open, folders on screen first. `earmark-parity folders <copy of library.sqlite>`
-     prints the accuracy and how many folders/sounds get a supported suggestion (210 of 214
-     folders, 22,715 sounds). Tested in the app (tick, pick, Other…, save, change, remove,
-     open from a sound); the test rules were removed, so the owner's database has none yet.
-     Weak spots seen: vendor names in parent folders count as words ("Lens Distortions"
-     suggests DESIGNED / DISTORTION as a 2nd option); "Street Basketball" suggests AMBIENCE
-     ("street") over SPORTS / COURT; "Pickups" (Foley) suggests METAL / HANDLE.
+     Change… and Remove. Suggestions are computed while the window is open, folders on screen
+     first. Tested in the app (tick, pick, Other…, save, change, remove, open from a sound);
+     the test rules were removed, so the owner's database has none yet.
+   - **Folder suggestions improved, 2026-10-26** (owner asked about vendor names, Street
+     Basketball and Pickups). Signals: the folder's name; the words at least 30% of its files
+     share (file name, FXName, description, keywords; of a UCS file name only the FXName;
+     descriptions many folders share, a vendor's collection names like "Sports & Recreation",
+     at 0.35; describing words like "Short", "Key A#" skipped); the sound (CLAP neighbours with
+     a category from their files). Rules added: vendor/pack words (the sounds' designer, the
+     library's top folder above a deeper folder) count only when the sound agrees; a word in
+     3+ subcategories of a category gives all of them the same points; the parent's category
+     lock is released when the folder repeats it and names another ("Creature Footsteps") or
+     most files name a subcategory of another ("Male_ShortSet" files → VOICES / MALE; not a
+     category, those are often materials: "Footsteps/Snow - Crunchy" stays FOOTSTEPS); MISC/GENERAL loses only to evidence for the subcategories at the
+     top; ARCHIVED is never suggested; the last of the 3 options comes from another category
+     when the others share one; words split as UCS spells them (StreetBall, Sci-Fi → scifi,
+     Braaams → braam, Whooshes → whoosh). Tried and dropped (measured worse): discounting a
+     word by how many categories use it, "misc" as a stop word, a bonus for words in the UCS
+     explanation, ignoring file words that repeat the name.
+     **Accuracy** (`earmark-parity folders <copy of library.sqlite> --truth local/folder_truth.tsv`):
+     43 vendor-labelled folders 79% top 1, 91% top 3, 91% category (was 79/86/91); 107
+     uncategorised folders checked by hand 66% top 1, 80% top 3, 79% category (was
+     47/63/70). The hand-checked list is the owner's library data: `local/` (git-ignored),
+     judged from folder and file names without listening, alternatives allowed. 23 of 214
+     folders are flagged "listen first". `--explain 0 <folder text>` shows each signal;
+     `EARMARK_TUNING="pack=0,file=0.3,…"` switches parts off to measure them. Cases asked
+     about: Boom Library packs no longer get DESIGNED / BOOM from the vendor's name, and Lens
+     Distortions' risers no longer offer DISTORTION; Street Basketball went from AMBIENCE /
+     MARKET to AMBIENCE / SPORT, not SPORTS / COURT (basketball is a synonym in five
+     categories and nothing in the files separates them; Basketball, Baseball and Football
+     have SPORTS in the top 3, flagged); Pickups is still METAL / HANDLE, now flagged "listen
+     first" (game pickups; nothing points to GAMES / VIDEO). `SimilarityIndex.nearest` uses
+     `vDSP_mmul` on macOS (the whole evaluation went from 195 s to 43 s).
    - Disk: only ~13 GB free on 2026-10-23 evening. Converting PE-AV used ~12 GB in
      `models/build` (could be trimmed to the float32 parts) plus 4.5 GB of installed models;
      45 GB of coremltools temp compiles from crashed runs were deleted. The rest of the drop

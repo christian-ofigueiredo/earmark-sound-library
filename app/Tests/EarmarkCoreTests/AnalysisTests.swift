@@ -244,6 +244,89 @@ import Testing
         #expect(top("Pack/TSK-06/Crowds") == "CRWDMisc")
     }
 
+    @Test func wordsAreSpelledAsUCSSpellsThem() {
+        #expect(FolderSuggester.words("StreetBall_HitPad2") == ["street", "ball", "hit", "pad"])
+        #expect(FolderSuggester.words("Sci-Fi Loops").contains("scifi"))          // UCS: SCIFI; "loop" is a format
+        #expect(!FolderSuggester.words("Sci-Fi Loops").contains("loop"))
+        #expect(FolderSuggester.words("SCI FI WEAPONS").contains("scifi"))
+        #expect(FolderSuggester.words("Powerful Braaams").contains("braam"))      // UCS: BRAAM
+        #expect(FolderSuggester.words("Whooshes & Glitches, Boxes") == ["whoosh", "glitch", "box"])
+        #expect(FolderSuggester.words("MA_SoundsByGFXSounds_CameraShutter").contains("camera"))
+    }
+
+    @Test func vendorNamesCountOnlyWhenTheSoundAgrees() {
+        func top(_ folder: String, pack: Set<String> = [], files: [String: Double] = [:]) -> FolderSuggester.Option? {
+            FolderSuggester.suggest(folder: folder, soundIds: [], index: nil, labels: [:], fileWords: files, packWords: pack).first
+        }
+        // The designer ("BOOM Library") isn't DESIGNED / BOOM.
+        #expect(top("Boom.Library.Neon", pack: ["boom"], files: ["whoosh": 0.6])?.entry.category != "DESIGNED"
+            || top("Boom.Library.Neon", pack: ["boom"], files: ["whoosh": 0.6])?.entry.catID != "DSGNBoom")
+        #expect(top("Boom.Library.Neon")?.entry.catID == "DSGNBoom")              // without the designer it would be
+        // The library's top folder above a deeper folder is the pack's name.
+        let tube = FolderSuggester.suggest(folder: "Lens Distortions - Anticipation SFX/WAV/01 - Risers/Risers - Tube",
+                                           soundIds: [], index: nil, labels: [:])
+        #expect(tube.first?.entry.catID == "DSGNRise")
+        #expect(!tube.contains { $0.entry.catID == "DSGNDist" }, "\(tube.map(\.entry.catID))")
+    }
+
+    @Test func aParentCategoryLocksMaterialsButNotAnotherSubject() {
+        func top(_ folder: String, files: [String: Double] = [:]) -> String? {
+            FolderSuggester.suggest(folder: folder, soundIds: [], index: nil, labels: [:], fileWords: files).first?.entry.catID
+        }
+        #expect(top("Pack/TSK-03/Footsteps/Snow - Crunchy") == "FEETHmn")              // SNOW is a material here
+        #expect(top("Pack/Monsters & Creatures/Creature Footsteps") == "FEETCrea")     // footsteps of creatures
+        // Most files name another subcategory (COMMUNICATIONS / CAMERA): the parent doesn't lock.
+        let camera = FolderSuggester.suggest(folder: "Various/Mechanical/MA_SoundsByGFXSounds_CameraShutter", soundIds: [],
+                                             index: nil, labels: [:], fileWords: ["camera": 1, "shutter": 1])
+        #expect(camera.first?.entry.catID == "COMCam", "\(camera.map(\.entry.catID))")
+        // …but files naming a material keep it locked: footsteps on snow.
+        #expect(top("Pack/TSK-03/Footsteps/Snow - Crunchy", files: ["foot": 1, "snow": 1, "crunchy": 1]) == "FEETHmn")
+        // The last of three options comes from another category when the others share one.
+        let gears = FolderSuggester.suggest(folder: "Pack/Mechanical", soundIds: [], index: nil, labels: [:])
+        #expect(gears.first?.entry.category == "MECHANICAL")
+        #expect(gears.last?.entry.category != "MECHANICAL", "\(gears.map(\.entry.catID))")
+    }
+
+    @Test func theFilesDecideWhenTheNameIsVague() {
+        // "Hockey" is a synonym of six subcategories; the files say it's sticks and pucks on ice.
+        let hockey = FolderSuggester.suggest(folder: "Pack/TSK-06/Hockey", soundIds: [], index: nil, labels: [:],
+                                             fileWords: ["hockey": 1, "skating": 0.5, "ice": 0.4])
+        #expect(hockey.first?.entry.catID == "SPRTWntr", "\(hockey.map { "\($0.entry.catID) \($0.fileWords)" })")
+        #expect(hockey.first?.fileWords.contains("skating") == true)
+    }
+
+    @Test func fileWordsSkipVendorPartsAndKeepCommonWords() {
+        func sound(_ name: String, _ details: String? = nil, folder: String = "Pack/Hits") -> SoundRecord {
+            var s = SoundRecord(libraryId: 1, root: URL(fileURLWithPath: "/L"), scanned: ScannedSound(
+                path: "/L/\(folder)/\(name)", fileSize: 1, modified: Date(), fingerprint: nil,
+                technical: AudioTechnical(), metadata: NormalizedMetadata(), warnings: []))
+            s.details = details
+            return s
+        }
+        // A UCS file name: only the FXName describes the sound, the rest names the vendor and collection.
+        let ucs = (1 ... 4).map { sound("DSGNImpt_Metal Hit \($0)_Ocular Sounds_Deep Impacts_The Complete Ambiences Collection.wav") }
+        let words = FolderSuggester.fileWords(of: ucs)
+        #expect(words["metal"] == 1 && words["hit"] == 1, "\(words)")
+        #expect(words["ambience"] == nil && words["ocular"] == nil, "\(words)")
+        // A description many folders share counts less than the folder's own words.
+        let shared = (1 ... 4).map { sound("Hockey_Puck\($0).wav", "Sports & Recreation") }
+        let w2 = FolderSuggester.fileWords(of: shared, sharedDescriptions: ["Sports & Recreation"])
+        #expect(w2["hockey"] == 1 && (w2["sport"] ?? 0) < 0.5, "\(w2)")
+    }
+
+    @Test func vagueNamesAreFlaggedAndArchivedIsNeverSuggested() {
+        // "Pickup" is a synonym of METAL, GLASS, WOOD… / HANDLE: worth listening first.
+        let pickups = FolderSuggester.suggest(folder: "Pack/TSK-02/Pickups", soundIds: [], index: nil, labels: [:])
+        #expect(pickups.first?.isUncertain == true)
+        let steel = FolderSuggester.suggest(folder: "Pack/TSK-03/Footsteps/Metal - Steel", soundIds: [], index: nil, labels: [:])
+        #expect(steel.first?.isUncertain == false)
+        // ARCHIVED holds production material (ADR, bounces, scenes), not library sounds.
+        let scenes = FolderSuggester.suggest(folder: "Pack/Scene Sequences", soundIds: [], index: nil, labels: [:])
+        #expect(!scenes.contains { $0.entry.category == "ARCHIVED" }, "\(scenes.map(\.entry.catID))")
+        // RAIN calls its base subcategory GENERAL: chosen when nothing points to another one.
+        #expect(FolderSuggester.suggest(folder: "Pack/Rain", soundIds: [], index: nil, labels: [:]).first?.entry.catID == "RAIN")
+    }
+
     @Test func soundPicksTheSubcategoryWhenTheNameOnlyGivesTheCategory() {
         // Folder "Footsteps" (category only); its sounds' neighbours are labelled FEETHmn.
         func v(_ x: Float, _ y: Float) -> [Float] { let n = (x * x + y * y).squareRoot(); return [x / n, y / n] }
