@@ -25,6 +25,8 @@ downloaded by `setup.sh` or on first use, under its own license.
 |---|---|---|
 | `PEAV/PEAVEmbed…PEAVLayers3.mlpackage` (Core ML, 5 parts) | Meta PE-AV large `facebook/pe-av-large`, audio tower and audio head only, converted unchanged except that its rotary position embedding is written as the equivalent pairwise rotation | Apache-2.0, as the original |
 | `CLAPAudio.mlpackage` (Core ML) | LAION CLAP `laion/larger_clap_general`, audio tower and projection, converted unchanged except that its bicubic time resize is written as the equivalent matrix multiply | Apache-2.0, as the original. Converted with coremltools (BSD-3-Clause), which isn't distributed. |
+| `BeatThis.mlpackage` (Core ML) | Beat This! `final0` (CPJKU), the network only (the spectrogram and peak picking are in the app's code), converted unchanged except that its attention and rotary position embedding are written out as the equivalent plain operations | MIT, as the original, with the same note about its training audio |
+| `SKey.mlpackage` (Core ML) | S-KEY (Deezer) at the pinned commit with its constant-Q front end (nnAudio), converted unchanged except that its layer norm and final pooling are written out as the equivalent plain operations | MIT, as the original (nnAudio: MIT) |
 
 ## Python libraries (installed by `setup.sh`, not distributed here)
 

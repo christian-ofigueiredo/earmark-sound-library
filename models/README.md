@@ -13,9 +13,12 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 .venv/bin/python -I convert_peav.py            # build/PEAV/*.mlpackage (5 parts, 4.2 GB)
 .venv/bin/python -I convert_peav.py --fp16     # build/PEAV-fp16/ (for comparison)
 .venv/bin/python -I parity_peav.py --files 300 --reference
+.venv/bin/python -I convert_music.py           # build/BeatThis.mlpackage, build/SKey.mlpackage
+.venv/bin/python -I parity_music.py --songs 20 # PyTorch vs Core ML on Phase 0's audio path
 cd ../app
 swift run -c release earmark-parity clap ../models/build/CLAPAudio.mlpackage ../models/build/clap_reference.json 300
 swift run -c release earmark-parity peav ../models/build/PEAV ../models/build/peav_reference.json 300
+swift run -c release earmark-parity music ../models/build <copy of library.sqlite> 300 7 all
 ```
 
 `parity_clap.py` needs Phase 0's CLAP cache (`~/SoundLab/cache/clap-general.pkl`).
@@ -75,3 +78,42 @@ Running it: **one part at a time over a batch of windows** (`parity_peav.py`, an
 CPU path crashed (segmentation fault) while Resolve was open and swap was nearly full;
 two parts or one at a time is fine. The app runs PE-AV on the GPU, only while the Mac
 is idle: exact on the GPU too, and 3× faster than the CPU.
+
+## Tempo and key results (2026-10-26)
+
+`convert_music.py` makes `BeatThis.mlpackage` (Beat This! `final0`, the checkpoint Phase 0
+ran; 78 MB) and `SKey.mlpackage` (S-KEY with its constant-Q front end; 0.3 MB). Both match
+PyTorch: Beat This! within 0.00001 (logits), S-KEY 0.00000 (probabilities), and on 10 of the
+owner's songs Phase 0's PyTorch path and the Core ML models give the stored BPM, beats per
+bar and key exactly (`parity_music.py`).
+
+The app's Swift pipeline (`EarmarkCore/MusicAnalysis.swift`, `EarmarkML/MusicAnalyzer.swift`),
+300 random songs against the values Phase 0 stored (`earmark-parity music … 300 7 all`):
+
+| | Result |
+|---|---|
+| BPM within 2% | **99.0%** (291/294); equal to 0.01: 93.9% |
+| Key the same | **100%** (299/299); confidence |Δ| median 0.0003, max 0.012 |
+| Steadiness / beats per bar the same | 100% / 100% |
+| Speed (all compute units) | 0.6 s per minute of audio incl. decoding (CPU only: ~1 s) |
+
+The three BPM differences are songs whose tempo varies (the median of the 8-beat tempos
+moves with one beat more or less). One MP3 Apple's decoder can't read.
+
+How it's converted and ported:
+- Beat This!: its rotary embedding (an einsum) and attention (fused SDPA) are written out as
+  the same plain operations, checked equal before converting. One fixed 1500-frame chunk:
+  a flexible length converted but Core ML couldn't plan it. The spectrogram (torchaudio
+  `MelSpectrogram`: `normalized="frame_length"` scales by 1/√1024, not the window's energy),
+  chunking (`split_piece`, `keep_first`), peak picking (`Postprocessor(type="minimal")`) and
+  Phase 0's `summarize_beats` are in Swift, tested against Python (`--fixture`).
+- S-KEY: its layer norm over (C, H, W) and adaptive pooling to (12, 1) are written out
+  (mean and variance over those axes; a mean over time), checked equal. Whole songs, flexible
+  length (2 s–20 min).
+- **The resampler mattered.** Apple's 44.1 → 22.05 kHz converter keeps 10.5–11 kHz ~12 dB
+  louder than soxr "VHQ" (Phase 0), and Beat This!'s mel bands reach 11 kHz: with it, only 88%
+  of songs were within 2% and 46% equal. The app decodes at 44.1 kHz (Apple's MP3 decoding
+  matches libsndfile to −66 dB) and halves the rate with `HalfRate`, a 601-tap Kaiser
+  low-pass fitted to soxr's response (0.01% RMS from soxr on music).
+- `coremltools.convert` changes the PyTorch module's tensors in place: take reference
+  outputs before converting (S-KEY's moved by 0.05 afterwards, the Core ML model didn't).

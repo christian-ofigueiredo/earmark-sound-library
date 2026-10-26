@@ -19,6 +19,23 @@ public struct SongAnalysis: Sendable, Codable, Equatable {
         self.beatsPerBar = beatsPerBar; self.key = key; self.keyConfidence = keyConfidence
         self.keySecondOpinion = keySecondOpinion; self.source = source
     }
+
+    public static let earmarkSource = "Earmark"
+
+    /// Earmark's own analysis of a song (Beat This! and S-KEY, run as Phase 0 ran them), with
+    /// the same readings dropped as from a Phase 0 import.
+    public init(tempo: BeatTracking.Summary, key: KeyDetection.Estimate?) {
+        self.init(bpm: Self.plausible(bpm: tempo.bpm), bpmLow: tempo.bpmRange?.lowerBound,
+                  bpmHigh: tempo.bpmRange?.upperBound, tempoStability: tempo.stability,
+                  beatsPerBar: Self.plausible(beatsPerBar: tempo.beatsPerBar),
+                  key: key?.key, keyConfidence: key?.confidence, source: Self.earmarkSource)
+    }
+
+    /// nil for an impossible tempo (outside 20–400 BPM).
+    static func plausible(bpm: Double?) -> Double? { bpm.flatMap { (20 ... 400).contains($0) ? $0 : nil } }
+
+    /// nil for anything but 2, 3, 4 or 6 beats per bar.
+    static func plausible(beatsPerBar: Int?) -> Int? { beatsPerBar.flatMap { [2, 3, 4, 6].contains($0) ? $0 : nil } }
 }
 
 /// Reads the `music_analysis.json` written by Phase 0's analyze_music.py, so
@@ -66,10 +83,9 @@ public enum Phase0MusicImport {
         guard file.format == nil || file.format == "soundlab-music-analysis" else { throw ImportError.notPhase0Music }
         return file.tracks.map { t in
             let key = t.keyPc.map { MusicKey(pitchClass: $0, minor: t.keyMinor ?? false) }
-            let bpm = t.bpm.flatMap { (20 ... 400).contains($0) ? $0 : nil }  // drop impossible readings
             let analysis = SongAnalysis(
-                bpm: bpm, bpmLow: t.bpmRange?.first, bpmHigh: t.bpmRange?.last, tempoStability: t.tempoStability,
-                beatsPerBar: t.beatsPerBar.flatMap { [2, 3, 4, 6].contains($0) ? $0 : nil },
+                bpm: SongAnalysis.plausible(bpm: t.bpm), bpmLow: t.bpmRange?.first, bpmHigh: t.bpmRange?.last,
+                tempoStability: t.tempoStability, beatsPerBar: SongAnalysis.plausible(beatsPerBar: t.beatsPerBar),
                 key: key, keyConfidence: t.keyConfidence,
                 keySecondOpinion: t.keySecondOpinion.flatMap { MusicKey(parsing: $0) }, source: "Phase 0")
             let name = (t.path ?? t.file).map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""

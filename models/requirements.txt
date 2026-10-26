@@ -6,3 +6,13 @@ coremltools
 numpy
 soundfile
 soxr
+# Tempo and key (convert_music.py, parity_music.py), the versions Phase 0 used
+beat-this==1.1.0
+einops>=0.8
+rotary-embedding-torch==0.9.1
+torchaudio==2.11.0
+nnAudio==0.3.3
+scipy
+# S-KEY isn't on PyPI; install it without its dependencies (they pin old versions), at
+# Phase 0's commit: uv pip install --python .venv/bin/python --no-deps \
+#   "skey @ git+https://github.com/deezer/skey@918b83d273568d5041569bb8068843d19a335726"

@@ -122,6 +122,8 @@ public struct SongRecord: Codable, FetchableRecord, MutablePersistableRecord, Se
     public var url: URL { URL(fileURLWithPath: path) }
     public var displayTitle: String { title?.isEmpty == false ? title! : url.deletingPathExtension().lastPathComponent }
     public var key: MusicKey? { keyPitchClass.map { MusicKey(pitchClass: $0, minor: keyMinor ?? false) } }
+    /// Analysed by Phase 0 or by Earmark (which may have found no beat or key: silent, or very short).
+    public var isAnalysed: Bool { analysisSource != nil || bpm != nil || keyPitchClass != nil }
 
     public mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }
 
@@ -458,6 +460,21 @@ public final class LibraryDatabase: Sendable {
             var q = SongRecord.order(Column("path"))
             if let libraryId { q = q.filter(Column("libraryId") == libraryId) }
             return try q.fetchAll(db)
+        }
+    }
+
+    /// Stores Earmark's own analysis for songs that still have none (a Phase 0 import that
+    /// came in meanwhile wins). Returns the updated songs.
+    public func saveSongAnalysis(_ results: [(songId: Int64, analysis: SongAnalysis)]) throws -> [SongRecord] {
+        try dbQueue.write { db in
+            var updated: [SongRecord] = []
+            for (id, analysis) in results {
+                guard var rec = try SongRecord.fetchOne(db, key: id), rec.analysisSource == nil else { continue }
+                rec.apply(analysis)
+                try rec.update(db)
+                updated.append(rec)
+            }
+            return updated
         }
     }
 

@@ -1,4 +1,4 @@
-# Earmark: handoff (2026-10-23)
+# Earmark: handoff (2026-10-26)
 
 Notes for continuing in a new chat (for example Claude Code on the owner's Mac).
 Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped.
@@ -321,7 +321,32 @@ Settings → Repository name. Topics/description also have to be set there.
      `models/build` (could be trimmed to the float32 parts) plus 4.5 GB of installed models;
      45 GB of coremltools temp compiles from crashed runs were deleted. The rest of the drop
      (from 156 GB) wasn't from this work.
-   - music tempo/key in-app (Beat This! + S-KEY);
+   - ~~Music tempo and key in the app~~ Done, 2026-10-26 (owner approved the plan; see
+     models/README "Tempo and key results"). Beat This! (`final0`) and S-KEY converted to Core
+     ML with exact parity; spectrogram, chunking, peak picking, Phase 0's tempo summary and the
+     key labels ported to Swift (`EarmarkCore/MusicAnalysis.swift`, tested against a Python
+     fixture of generated drum loops), `MusicAnalyzer`/`MusicModelStore` (`EarmarkML`). On 300
+     of the owner's songs vs Phase 0: BPM within 2% 99.0%, key 100%. Songs are decoded at
+     44.1 kHz and halved with `HalfRate` (a filter shaped like soxr's; Apple's converter alone
+     gave 88%). In the app: a lane in `AnalysisEngine` for songs with no analysis at all
+     (Phase 0's are never redone; an import that lands meanwhile wins), one song at a time in
+     one of the governor's worker slots, CPU at background priority while you use the Mac,
+     all compute units only while idle (a song running with the GPU is cancelled and
+     requeued on the CPU when you come back), saved every few seconds with source "Earmark"
+     and the same filters as the Phase 0 import (BPM 20–400; 2, 3, 4 or 6 beats per bar);
+     silent or < 2 s songs are saved with no tempo or key; unreadable files go to
+     `Logs/errors.log`, say so in the detail pane and are tried again after a relaunch. The
+     list, detail pane and the sidebar count update in place (`AppModel.updateSongs`,
+     `songsVersion`), without reloading the library. Models: `~/Library/Application
+     Support/Earmark/Models/BeatThis.mlpackage` and `SKey.mlpackage` (installed on the owner's
+     Mac; compiled beside them on first use). Tested end to end with six generated files in a
+     temporary music folder (removed afterwards; the database matched its backup): 123.0,
+     106.5 (variable 98.8–113.2) and 90.0 BPM as made, silence and a 1 s file saved empty, a
+     corrupt file logged. Not exercised: the gentle path while you work (the owner's setting
+     waits for idle) and the GPU → CPU switch. Open: how the app gets the models (as for
+     CLAP); a song whose file changes keeps its old analysis (as rescans always did); a
+     20-minute song holds ~450 MB while analysed; tempo confidence and the key's runner-up
+     are worked out but not stored (no columns).
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
      only 13–16%).
 5. Phase 4: Resolve Studio bridge for sending only a selected range. Use the scripting
@@ -358,11 +383,24 @@ Settings → Repository name. Topics/description also have to be set there.
   `NSHostingView`) and the switch went back to ~0.5 s. The search binding is `AppModel.search` (stable), the prompt
   "Search". The switch is a custom Liquid Glass control (`SectionSwitch`:
   `GlassEffectContainer`, a blue-tinted glass pill (no painted fill or gradient, and the
-  same font weight on both segments: the owner found the bold and the gradient dated) moved
-  with `matchedGeometryEffect`, the
+  same font weight on both segments: the owner found the bold and the gradient dated), the
   toolbar's shared glass hidden with `sharedBackgroundVisibility(.hidden)`); before macOS 26,
-  a segmented picker. Blue details: `.tint(.blue)` on both windows, the play button
-  `.glassProminent`, the waveform in system blue (the playhead in the text colour).
+  a segmented picker. **The pill is one view** that moves and resizes to the chosen segment
+  (frames from `onGeometryChange`). It used to be a pill per segment cross-faded with
+  `matchedGeometryEffect`; going to Sound Effects (left) the new pill came in under the old
+  one and the two glass shapes blended mid-way: a stutter in that direction only (owner,
+  2026-10-26), with no dropped frames (measured). The section now changes only after the
+  pill's slide (`SectionSwitch.slide`, 0.28 s): changing it mid-slide (the sound list's
+  layout costs more than the songs') was the first suspect.
+- **One blue hue** (owner, 2026-10-26: in dark mode the waveform, selected row and buttons
+  were blues of different hues; "the angle" must match, brightness may differ). Defined in
+  `SharedViews.swift`: `earmarkSelectionBlue` is the list selection's own colour
+  (`selectedContentBackgroundColor`, #0064E1 light / #0059D1 dark) for things with white on
+  them (selected rows, the section pill, Auto-play on, the player buttons);
+  `earmarkBlue` is the same hue, lighter in dark mode (#388DFF, 4.6:1 on the dark
+  background; the deep blue as text was 2.4:1 and hard to read) for blue text, symbols,
+  buttons (`.tint` on all windows), the waveform (solid) and the playing mark. Both follow
+  the system accent, as the selection does.
 - **The big lists are AppKit tables** (`RecordTable.swift`; owner, 2026-10-26: "fix the 1–2 s
   freeze when the list changes a lot"). SwiftUI's `Table` went through every row on each
   change: clearing a search inserted the 28k rows one by one, AppKit building and measuring

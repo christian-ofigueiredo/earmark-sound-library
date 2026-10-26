@@ -133,7 +133,7 @@ struct SongIndex: Sendable {
             if let id = s.id { position[id] = i }
             haystacks.append(s.searchText)
             libraryCounts[s.libraryId, default: 0] += 1
-            if s.bpm != nil || s.key != nil { analysed += 1 }
+            if s.isAnalysed { analysed += 1 }
         }
     }
 }

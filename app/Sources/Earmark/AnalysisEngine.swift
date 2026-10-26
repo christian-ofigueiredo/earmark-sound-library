@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreML
 import EarmarkCore
 import EarmarkML
 import Foundation
@@ -10,12 +11,15 @@ enum AnalysisStage: String, CaseIterable, Sendable {
     case clap
     /// Runs in batches on the GPU, only while the Mac is idle (see AnalysisEngine.fillPeav()).
     case peav
+    /// Songs, not sounds: tempo and key, one song at a time (see AnalysisEngine.fillSongs()).
+    case tempoKey
 
     var title: String {
         switch self {
         case .loudness: "loudness"
         case .clap: "CLAP embeddings"
         case .peav: "PE-AV embeddings"
+        case .tempoKey: "tempo and key"
         }
     }
 }
@@ -42,6 +46,9 @@ final class AnalysisEngine {
     private(set) var peavUnavailable: String?
     /// After a model error (not a missing model), PE-AV is tried again from this time.
     private var peavRetryAt: Date?
+    /// Why tempo and key analysis isn't running, if it can't ("model not installed", or the last model error).
+    private(set) var musicUnavailable: String?
+    private var musicRetryAt: Date?
 
     var mode: AnalysisGovernor.Mode {
         didSet {
@@ -56,6 +63,8 @@ final class AnalysisEngine {
     let clapModels = ClapModelStore(folder: AppModel.supportFolder.appendingPathComponent("Models", isDirectory: true))
     /// PE-AV's five parts: ~/Library/Application Support/Earmark/Models/PEAV/PEAV*.mlpackage.
     let peavFolder = AppModel.supportFolder.appendingPathComponent("Models/PEAV", isDirectory: true)
+    /// Tempo and key: ~/Library/Application Support/Earmark/Models/BeatThis.mlpackage and SKey.mlpackage.
+    let musicModels = MusicModelStore(folder: AppModel.supportFolder.appendingPathComponent("Models", isDirectory: true))
     /// Sounds per PE-AV batch: each of the five parts (1.1 GB) is loaded once per batch,
     /// so bigger batches spend less time loading. Capped by audio held too (PeavBatch).
     static let peavBatchSize = 256
@@ -72,6 +81,14 @@ final class AnalysisEngine {
     private var peavNext: (task: Task<PeavBatch.Prepared?, Never>, sounds: [SoundRecord])?
     /// A PE-AV batch ran at some point since the last tick (it may have finished in between).
     private var peavRanSinceTick = false
+    /// Songs without tempo and key from Phase 0 or Earmark, analysed one at a time.
+    private var songQueue: [SongRecord] = []
+    private var songJob: (task: Task<Void, Never>, song: SongRecord, units: MLComputeUnits)?
+    /// Songs analysed this session (they may not be saved yet), so they aren't queued again.
+    private var analysedSongs: Set<Int64> = []
+    /// Songs that couldn't be read this session, and why: tried again after a relaunch.
+    private(set) var unreadableSongs: [Int64: String] = [:]
+    private var unsavedSongs: [(songId: Int64, analysis: SongAnalysis)] = []
     private var unsavedFacts: [SoundFacts] = []
     private var unsavedEmbeddings: [SoundEmbedding] = []
     private var loop: Task<Void, Never>?
@@ -115,14 +132,16 @@ final class AnalysisEngine {
             case .loudness: true
             case .clap: clapUnavailable != "model not installed"
             case .peav: peavUnavailable != "model not installed"
+            case .tempoKey: musicUnavailable != "model not installed"
             }
         }
     }
 
     /// Share done (0…1) of each stage that isn't finished, in stage order.
     var stageProgress: [(stage: AnalysisStage, done: Double)] {
-        let total = max(1, model?.soundIndex.shownCount ?? 0)
+        let sounds = max(1, model?.soundIndex.shownCount ?? 0), songs = max(1, model?.songs.count ?? 0)
         return activeStages.compactMap { stage in
+            let total = stage == .tempoKey ? songs : sounds
             let left = remainingByStage[stage] ?? 0
             return left > 0 ? (stage, max(0, 1 - Double(left) / Double(total))) : nil
         }
@@ -149,11 +168,15 @@ final class AnalysisEngine {
     }
 
     var statusText: String {
-        let left = remaining + inProgress
-        let problems = [clapUnavailable.map { "CLAP \($0)" }, peavUnavailable.map { "PE-AV \($0)" }].compactMap { $0 }
+        let sounds = remaining + inProgress, songs = remainingByStage[.tempoKey] ?? 0
+        let left = sounds + songs
+        let problems = [clapUnavailable.map { "CLAP \($0)" }, peavUnavailable.map { "PE-AV \($0)" },
+                        musicUnavailable.map { "tempo and key \($0)" }].compactMap { $0 }
         let missingModel = problems.isEmpty ? "" : " · " + problems.joined(separator: " · ")
         guard left > 0 else { return facts.isEmpty ? "" : "Analysis up to date" + missingModel }
-        let count = "\(left.formatted()) sound\(left == 1 ? "" : "s") to analyse"
+        let count = [sounds > 0 ? "\(sounds.formatted()) sound\(sounds == 1 ? "" : "s")" : nil,
+                     songs > 0 ? "\(songs.formatted()) song\(songs == 1 ? "" : "s")" : nil]
+            .compactMap { $0 }.joined(separator: " and ") + " to analyse"
         let doing = stageProgress.map { "\($0.stage.title) \(Int(($0.done * 100).rounded(.down)))%" }.joined(separator: ", ")
         let eta = !pace.isPaused ? timeLeft.map { " · \(Self.describe($0)) left" } ?? "" : ""
         let what = (doing.isEmpty ? count : "\(count) (\(doing))") + eta
@@ -229,6 +252,22 @@ final class AnalysisEngine {
         // came together and left the other idle. Reversed so popLast() takes the front.
         peavQueue = Self.interleaved(pending.filter { ($0.duration ?? 0) >= 10 },
                                      pending.filter { ($0.duration ?? 0) < 10 }).reversed()
+        // Songs with no tempo and key from anyone yet (Phase 0's are never redone).
+        let songsLeft = model.songs.filter { s in
+            guard let id = s.id else { return false }
+            return !s.isAnalysed && !analysedSongs.contains(id) && unreadableSongs[id] == nil
+        }
+        if !musicModels.isInstalled {
+            musicUnavailable = songsLeft.isEmpty ? nil : "model not installed"
+        } else if musicRetryAt.map({ Date() >= $0 }) ?? true {
+            musicUnavailable = nil
+            musicRetryAt = nil
+        }
+        let musicOnline = Set(model.musicLibraries.filter(\.isOnline).compactMap(\.id))
+        // Reversed so popLast() works through them in list order.
+        songQueue = musicUnavailable != nil ? [] : songsLeft.reversed().filter { s in
+            musicOnline.contains(s.libraryId) && s.id != songJob?.song.id
+        }
         countRemaining()
     }
 
@@ -262,11 +301,12 @@ final class AnalysisEngine {
         for job in queue { for stage in job.stages { byStage[stage, default: 0] += 1 } }
         for job in running.values { for stage in job.stages { byStage[stage, default: 0] += 1 } }
         byStage[.peav] = peavQueue.count + (peavBatch?.sounds.count ?? 0) + (peavNext?.sounds.count ?? 0)
+        byStage[.tempoKey] = songQueue.count + (songJob != nil ? 1 : 0)
         remainingByStage = byStage.filter { $0.value > 0 }
     }
 
     private func tick() {
-        if let retry = peavRetryAt, Date() >= retry { rebuildQueue() }
+        if [peavRetryAt, musicRetryAt].contains(where: { $0.map { Date() >= $0 } ?? false }) { rebuildQueue() }
         // A PE-AV batch running since the last tick means Earmark itself used the GPU.
         let signals = monitor.sample(ownGPUWork: peavBatch != nil || peavRanSinceTick)
         peavRanSinceTick = peavBatch != nil
@@ -296,6 +336,13 @@ final class AnalysisEngine {
                 peavQueue.append(contentsOf: batch.sounds.reversed())
             }
         }
+        // A song running with the GPU when the Mac is no longer idle, or with no worker left:
+        // stop it; it starts again (on the CPU) when there's room.
+        if let job = songJob, pace.workers == 0 || (job.units != .cpuOnly && !Self.gpuAllowed(pace)) {
+            job.task.cancel()
+            songJob = nil
+            songQueue.append(job.song)
+        }
         // Over the limit (the Mac got busy): stop the newest files; they go back in the queue.
         while running.count > cpuWorkers, let (id, job) = running.max(by: { $0.key < $1.key }) {
             job.task.cancel()
@@ -309,14 +356,17 @@ final class AnalysisEngine {
            pace.isPaused || !queue.contains(where: { $0.stages.contains(.clap) }) {
             clapModels.unload()
         }
+        if musicModels.isLoaded, songJob == nil, pace.isPaused || songQueue.isEmpty { musicModels.unload() }
         updateActivity()
     }
 
-    /// Per-sound workers: the PE-AV batch, while it runs, takes one of the pace's slots.
-    private var cpuWorkers: Int { max(0, pace.workers - (peavBatch != nil ? 1 : 0)) }
+    /// Per-sound workers: the PE-AV batch and the song being analysed, while they run, each take
+    /// one of the pace's slots.
+    private var cpuWorkers: Int { max(0, pace.workers - (peavBatch != nil ? 1 : 0) - (songJob != nil ? 1 : 0)) }
 
     private func fill() {
         fillPeav()
+        fillSongs()
         while running.count < cpuWorkers, let job = queue.popLast() {
             guard let id = job.sound.id else { continue }
             let url = job.sound.url, fingerprint = job.sound.fingerprint, stages = job.stages, models = clapModels
@@ -329,6 +379,22 @@ final class AnalysisEngine {
             running[id] = (task, job.sound, stages)
         }
         countRemaining()
+    }
+
+    /// Starts the next song's tempo and key when a worker is free (songs before sounds: there
+    /// are fewer, and each takes a few seconds): on the CPU at low priority while you use the
+    /// Mac, with the GPU too while it's idle.
+    private func fillSongs() {
+        guard songJob == nil, musicUnavailable == nil, pace.workers - (peavBatch != nil ? 1 : 0) > 0,
+              let song = songQueue.popLast(), let id = song.id else { return }
+        let units: MLComputeUnits = Self.gpuAllowed(pace) ? .all : .cpuOnly
+        let priority: TaskPriority = pace.reason == .userActive ? .background : .utility
+        let models = musicModels, url = song.url
+        let task = Task.detached(priority: priority) { [weak self] in
+            guard let result = SongAnalyzer.run(songId: id, url: url, models: models, units: units) else { return }
+            await self?.finishedSong(result)
+        }
+        songJob = (task, song, units)
     }
 
     /// Starts the next PE-AV batch when the Mac is idle and none is running, and has the
@@ -413,6 +479,34 @@ final class AnalysisEngine {
         }
     }
 
+    private func finishedSong(_ result: SongAnalyzer.Result) {
+        guard let job = songJob, job.song.id == result.songId else { return }   // cancelled meanwhile
+        songJob = nil
+        defer {
+            if unsavedSongs.count >= 5 { save() }
+            fill()
+        }
+        if let problem = result.modelProblem {
+            // Often temporary: wait, then try again, rather than stopping for good.
+            log.error("Tempo and key: \(problem)")
+            musicUnavailable = "paused after an error, retrying in 10 min: \(problem.prefix(80))"
+            musicRetryAt = Date().addingTimeInterval(600)
+            rebuildQueue()
+            return
+        }
+        if let error = result.error {
+            // A read error because the drive went away isn't the file's fault: analyse it next time.
+            guard model?.isOnline(libraryId: job.song.libraryId) ?? false else { return }
+            log.error("Tempo and key, \(job.song.path): \(error)")
+            unreadableSongs[result.songId] = error
+            return
+        }
+        if let analysis = result.analysis {
+            analysedSongs.insert(result.songId)
+            unsavedSongs.append((result.songId, analysis))
+        }
+    }
+
     private func finished(_ result: SoundAnalyzer.Result) {
         guard running.removeValue(forKey: result.soundId) != nil else { return }   // cancelled meanwhile
         defer {
@@ -439,6 +533,7 @@ final class AnalysisEngine {
     }
 
     private func save() {
+        saveSongs()
         guard let db = model?.database, !unsavedFacts.isEmpty || !unsavedEmbeddings.isEmpty else { return }
         let f = unsavedFacts, e = unsavedEmbeddings
         unsavedFacts = []
@@ -449,8 +544,19 @@ final class AnalysisEngine {
         }
     }
 
+    /// Stores the songs' tempo and key, then shows them (the song list, detail pane and count).
+    private func saveSongs() {
+        guard let db = model?.database, !unsavedSongs.isEmpty else { return }
+        let results = unsavedSongs
+        unsavedSongs = []
+        Task { [weak self] in
+            let updated = (try? await Task.detached(priority: .utility) { try db.saveSongAnalysis(results) }.value) ?? []
+            self?.model?.updateSongs(updated)
+        }
+    }
+
     private func updateActivity() {
-        let working = !running.isEmpty || peavBatch != nil
+        let working = !running.isEmpty || peavBatch != nil || songJob != nil
         if working, activity == nil {
             activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep],
                                                              reason: "Analysing sounds")
@@ -468,6 +574,8 @@ final class AnalysisEngine {
         peavBatch = nil
         peavNext?.task.cancel()
         peavNext = nil
+        songJob?.task.cancel()
+        songJob = nil
         save()
     }
 }
@@ -572,6 +680,40 @@ enum PeavBatch {
             result.modelProblem = error.localizedDescription
         }
         return result
+    }
+}
+
+/// Works out one song's tempo and key. Runs off the main thread; opens the file read-only.
+enum SongAnalyzer {
+    struct Result: Sendable {
+        var songId: Int64
+        var analysis: SongAnalysis?
+        /// The file couldn't be read or analysed.
+        var error: String?
+        /// Set when the models themselves couldn't be loaded (not this song's fault).
+        var modelProblem: String?
+    }
+
+    /// nil when cancelled (the song stays in the queue).
+    static func run(songId: Int64, url: URL, models: MusicModelStore, units: MLComputeUnits) -> Result? {
+        let analyzer: MusicAnalyzer
+        do {
+            analyzer = try models.get(units)
+        } catch {
+            return Result(songId: songId, modelProblem: error.localizedDescription)
+        }
+        do {
+            let audio = try MusicAnalyzer.decode(url: url)
+            if Task.isCancelled { return nil }
+            guard let found = try analyzer.analyse(audio22k: audio, isCancelled: { Task.isCancelled }) else {
+                if Task.isCancelled { return nil }
+                // Silent or shorter than 2 s: nothing to find, and nothing to try again.
+                return Result(songId: songId, analysis: SongAnalysis(source: SongAnalysis.earmarkSource))
+            }
+            return Result(songId: songId, analysis: SongAnalysis(tempo: found.tempo, key: found.key))
+        } catch {
+            return Result(songId: songId, error: error.localizedDescription)
+        }
     }
 }
 

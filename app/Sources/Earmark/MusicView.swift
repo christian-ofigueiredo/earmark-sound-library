@@ -298,17 +298,27 @@ struct SongDetail: View {
                 } else {
                     OfflineNotice(library: model.library(id: song.libraryId))
                 }
-                if song.bpm == nil && song.key == nil {
-                    Text("Not analysed yet. Import the Phase 0 results (File ▸ Import Phase 0 Music Analysis…). "
-                        + "Earmark will analyse new songs itself in a later version.")
+                if let id = song.id, let why = model.analysis.unreadableSongs[id] {
+                    Text("Earmark couldn't read this file to work out its tempo and key. It tries again next time it opens.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .help(why)
+                } else if !song.isAnalysed {
+                    Text(model.analysis.musicUnavailable == "model not installed"
+                         ? "Not analysed yet. Earmark's tempo and key models aren't installed; you can import "
+                           + "Phase 0's results instead (File ▸ Import Phase 0 Music Analysis…)."
+                         : "Not analysed yet. Earmark works out its tempo and key in the background.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     HStack(alignment: .top, spacing: 28) {
                         tempo
                         key
                     }
                     Button("Find Songs That Mix With This") { model.musicBrowser.findMixes(for: song) }
+                        .disabled(song.bpm == nil && song.key == nil)
                 }
                 InfoGrid([
                     ("Album", song.album),

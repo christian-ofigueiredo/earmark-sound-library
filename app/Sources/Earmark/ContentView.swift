@@ -103,7 +103,7 @@ struct LibraryView: View {
             DispatchQueue.main.async { SectionViews.sync(showing: model.section, faded: false, animated: false) }
         }
         .task(id: sounds.filterKey(version: model.version)) { await sounds.refresh(from: model) }
-        .task(id: songs.filterKey(version: model.version)) { songs.refresh(from: model) }
+        .task(id: songs.filterKey(version: model.songsVersion)) { songs.refresh(from: model) }
         .onChange(of: sounds.selection) { _, ids in
             guard autoplaySounds, !music, ids.count == 1, let s = model.sound(id: ids.first ?? nil),
                   model.isOnline(libraryId: s.libraryId) else { return }

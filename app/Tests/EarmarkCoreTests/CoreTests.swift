@@ -268,6 +268,32 @@ import Testing
         #expect(try db.songs().map(\.bpm) == [83.0])
     }
 
+    @Test func savesEarmarksSongAnalysisWithoutOverwritingPhase0() throws {
+        let db = try LibraryDatabase(path: nil)
+        let lib = try db.addLibrary(kind: .music, path: "/Music/Liked", bookmark: nil)
+        try db.replaceSongs(libraryId: lib.id!, root: URL(fileURLWithPath: "/Music/Liked"), files: [
+            SongFile(path: "/Music/Liked/a.mp3", fileSize: 1, modified: Date()),
+            SongFile(path: "/Music/Liked/b.mp3", fileSize: 2, modified: Date()),
+            SongFile(path: "/Music/Liked/c.mp3", fileSize: 3, modified: Date()),
+        ])
+        var songs = try db.songs()
+        _ = try db.applySongAnalysis([.init(path: "/Music/Liked/b.mp3", fileName: "b.mp3", size: 2,
+                                            analysis: SongAnalysis(bpm: 90, source: "Phase 0"))])
+        let tempo = BeatTracking.Summary(beats: [], downbeats: [], bpm: 11.4, bpmRange: 10 ... 12, stability: "variable",
+                                         beatsPerBar: 1, confidence: 0.4)
+        let key = KeyDetection.Estimate(key: MusicKey(pitchClass: 9, minor: true), confidence: 0.8,
+                                        runnerUp: MusicKey(pitchClass: 0, minor: false), runnerUpConfidence: 0.1)
+        let ours = SongAnalysis(tempo: tempo, key: key)
+        #expect(ours.bpm == nil && ours.beatsPerBar == nil)   // dropped, as from a Phase 0 import
+        #expect(ours.key?.name == "A minor" && ours.source == "Earmark")
+        let updated = try db.saveSongAnalysis(songs.map { ($0.id!, ours) } + [(songs[2].id!, SongAnalysis(source: "Earmark"))])
+        #expect(updated.map(\.fileName) == ["a.mp3", "c.mp3"])   // b keeps Phase 0's; c only once
+        songs = try db.songs()
+        #expect(songs.map(\.analysisSource) == ["Earmark", "Phase 0", "Earmark"])
+        #expect(songs[1].bpm == 90 && songs[0].keyConfidence == 0.8)
+        #expect(songs.allSatisfy { $0.isAnalysed })
+    }
+
     @Test func rejectsOtherJSON() {
         #expect(throws: (any Error).self) { try Phase0MusicImport.read(Data(#"{"format": "something-else", "tracks": []}"#.utf8)) }
     }

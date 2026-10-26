@@ -85,6 +85,8 @@ final class AppModel {
     @ObservationIgnored private var guessing = false
     /// Bumped on every reload so the browsers refresh their lists.
     private(set) var version = 0
+    /// Bumped whenever the songs change (a reload, or Earmark's own tempo and key coming in).
+    private(set) var songsVersion = 0
     private(set) var scanning: Set<Int64> = []
     private(set) var activity: String?
     private(set) var progress: Double?
@@ -162,11 +164,23 @@ final class AppModel {
             folderRules = snap.folderRules
             folderGuesses = snap.folderGuesses
             version += 1
+            songsVersion += 1
             analysis.libraryChanged()
             if guessing { folderGuesser.update(model: self) }
         } catch {
             show(error, title: "Couldn't read Earmark's database")
         }
+    }
+
+    /// Songs whose analysis changed (Earmark's own tempo and key), updated in place without
+    /// reading the whole library again.
+    func updateSongs(_ updated: [SongRecord]) {
+        guard !updated.isEmpty else { return }
+        for rec in updated {
+            if let id = rec.id, let i = songIndex.position[id] { songs[i] = rec }
+        }
+        songIndex = SongIndex(songs)
+        songsVersion += 1
     }
 
     func sound(id: SoundRecord.ID) -> SoundRecord? {

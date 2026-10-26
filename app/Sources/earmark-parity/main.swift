@@ -1,3 +1,4 @@
+import CoreML
 import EarmarkCore
 import EarmarkML
 import Foundation
@@ -169,6 +170,107 @@ if args.count >= 3, args[1] == "folders" {
         print(String(format: "%4d  ", members.count) + members[0].folder.split(separator: "/").suffix(2).joined(separator: "/") + "  →  " + text
               + (weak ? "  ⚠︎ listen first" : ""))
     }
+    exit(0)
+}
+
+// Tempo and key, checked against the values Phase 0 stored for the same songs:
+//   earmark-parity music <folder with BeatThis/SKey.mlpackage> <copy of library.sqlite> [songs=300] [seed=1] [cpu|gpu|all]
+// The app's decode of one song, as raw float32 (mono 22.05 kHz): earmark-parity decode <file> <out.f32>
+if args.count >= 4, args[1] == "decode" {
+    let audio = try MusicAnalyzer.decode(url: URL(fileURLWithPath: args[2]))
+    try audio.withUnsafeBytes { try Data($0).write(to: URL(fileURLWithPath: args[3])) }
+    print("\(audio.count) samples")
+    exit(0)
+}
+
+// One song already decoded (raw float32, mono 22.05 kHz), to tell decoding apart from the rest:
+//   earmark-parity music-raw <models folder> <audio.f32>   (writes the spectrogram to <audio>.spect.f32)
+if args.count >= 4, args[1] == "music-raw" {
+    let raw = try Data(contentsOf: URL(fileURLWithPath: args[3]))
+    let audio = raw.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+    let analyzer = try MusicAnalyzer(folder: URL(fileURLWithPath: args[2]))
+    let spect = BeatThisAudio.spectrogram(audio)
+    try spect.withUnsafeBytes { try Data($0).write(to: URL(fileURLWithPath: args[3] + ".spect.f32")) }
+    guard let r = try analyzer.analyse(audio22k: audio) else { print("silent or short"); exit(0) }
+    print("BPM \(r.tempo.bpm ?? 0), \(r.tempo.beats.count) beats, \(r.tempo.beatsPerBar ?? 0) per bar, key \(r.key?.key.name ?? "-")")
+    exit(0)
+}
+
+if args.count >= 4, args[1] == "music" {
+    let units: MLComputeUnits = switch args.count > 6 && !args[6].hasPrefix("--") ? args[6] : "cpu" {
+    case "gpu": .cpuAndGPU
+    case "all": .all
+    default: .cpuOnly
+    }
+    let analyzer = try MusicAnalyzer(folder: URL(fileURLWithPath: args[2]), computeUnits: units)
+    let db = try LibraryDatabase(path: args[3])
+    let count = args.count > 4 ? Int(args[4]) ?? 300 : 300
+    var rng = SplitMix(state: args.count > 5 ? UInt64(args[5]) ?? 1 : 1)
+    let songs = try db.songs().filter { $0.analysisSource == "Phase 0" && FileManager.default.fileExists(atPath: $0.path) }
+        .sorted { $0.path < $1.path }.shuffled(using: &rng).prefix(count)
+    var n = 0, bpmClose = 0, bpmBoth = 0, bpmExact = 0, octave = 0, steady = 0, bars = 0, barsBoth = 0
+    var keySame = 0, keyBoth = 0, keyRelative = 0, keyFifth = 0
+    var confidenceDiff: [Double] = [], timings: [String: Double] = [:], decodeTime = 0.0, audioSeconds = 0.0
+    var misses: [String] = []
+    let started = Date()
+    for song in songs {
+        let t0 = Date()
+        let audio: [Float]
+        do {
+            audio = try MusicAnalyzer.decode(url: song.url)
+        } catch {
+            print("skip (\(error.localizedDescription)): \(song.path)")
+            continue
+        }
+        decodeTime += Date().timeIntervalSince(t0)
+        guard let r = try analyzer.analyse(audio22k: audio) else { print("skip (silent or short): \(song.path)"); continue }
+        n += 1
+        audioSeconds += r.seconds
+        for (k, v) in r.timings { timings[k, default: 0] += v }
+        let name = song.url.lastPathComponent
+        // --songs: one line per song, for comparing with models/parity_music.py --paths.
+        if args.contains("--songs") {
+            print("SONG\t\(song.path)\t\(r.tempo.bpm.map { String(format: "%.2f", $0) } ?? "-")\t\(song.bpm.map { String(format: "%.2f", $0) } ?? "-")\t"
+                  + "\(r.tempo.beatsPerBar.map(String.init) ?? "-")\t\(r.key?.key.shortName ?? "-")\t\(r.tempo.beats.count)")
+        }
+        if let a = r.tempo.bpm, let b = song.bpm {
+            bpmBoth += 1
+            let ratio = a / b
+            if abs(ratio - 1) <= 0.02 { bpmClose += 1 } else {
+                if [0.5, 2, 2.0 / 3, 1.5].contains(where: { abs(ratio / $0 - 1) <= 0.02 }) { octave += 1 }
+                misses.append(String(format: "  BPM %.2f vs %.2f (%@ vs %@): %@", a, b, r.tempo.stability, song.tempoStability ?? "-", name))
+            }
+            if abs(a - b) < 0.015 { bpmExact += 1 }
+        } else if r.tempo.bpm != nil || song.bpm != nil {
+            misses.append("  BPM \(r.tempo.bpm.map { String(format: "%.2f", $0) } ?? "none") vs \(song.bpm.map { String(format: "%.2f", $0) } ?? "none"): \(name)")
+        }
+        if r.tempo.stability == song.tempoStability { steady += 1 }
+        if let b = song.beatsPerBar {
+            barsBoth += 1
+            if r.tempo.beatsPerBar == b { bars += 1 }
+        }
+        if let a = r.key?.key, let b = song.key {
+            keyBoth += 1
+            if a == b { keySame += 1 } else {
+                if a == b.relative { keyRelative += 1 } else if b.mixesWith.contains(a) { keyFifth += 1 }
+                misses.append(String(format: "  key %@ %.2f vs %@ %.2f: %@", a.name, r.key!.confidence, b.name, song.keyConfidence ?? 0, name))
+            }
+            if let c = song.keyConfidence { confidenceDiff.append(abs(r.key!.confidence - c)) }
+        }
+        if n % 25 == 0 { print("\(n)/\(songs.count)") }
+    }
+    func pct(_ k: Int, _ of: Int) -> String { String(format: "%.1f%% (%d/%d)", 100 * Double(k) / Double(max(1, of)), k, of) }
+    let wall = Date().timeIntervalSince(started)
+    print(String(format: "\n%d songs, %.0f min of audio in %.0f s (decode %.0f s, spectrogram %.0f s, beats %.0f s, key %.0f s)",
+                 n, audioSeconds / 60, wall, decodeTime, timings["spectrogram"] ?? 0, timings["beats"] ?? 0, timings["key"] ?? 0))
+    print("BPM within 2%: \(pct(bpmClose, bpmBoth)), equal to 0.01: \(pct(bpmExact, bpmBoth)); the rest half/double/×1.5: \(octave)")
+    print("Steadiness the same: \(pct(steady, n)); beats per bar the same: \(pct(bars, barsBoth))")
+    print("Key the same: \(pct(keySame, keyBoth)); relative major/minor \(keyRelative), a fifth away \(keyFifth)")
+    if !confidenceDiff.isEmpty {
+        let s = confidenceDiff.sorted()
+        print(String(format: "Key confidence |Δ|: median %.4f, p95 %.4f, max %.4f", s[s.count / 2], s[s.count * 95 / 100], s.last!))
+    }
+    if !misses.isEmpty { print("\nDifferences:"); misses.forEach { print($0) } }
     exit(0)
 }
 
