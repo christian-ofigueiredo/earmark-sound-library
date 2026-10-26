@@ -123,6 +123,85 @@ struct PlayerPanel: View {
 }
 
 /// The original file, ready to drag into Resolve or Finder.
+/// What's playing, at the top of the detail pane while it shows something else (owner,
+/// 2026-10-26: after selecting another row, the playing one was hard to find). Show selects
+/// it again and scrolls the list to it.
+struct NowPlayingBar: View {
+    @Environment(AppModel.self) private var model
+
+    private struct Item {
+        var name: String
+        var duration: Double?
+        var precise: Bool
+        var reveal: () -> Void
+    }
+
+    var body: some View {
+        let player = model.player
+        if let item = current, let url = player.url {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .foregroundStyle(player.isPlaying ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .accessibilityLabel(player.isPlaying ? "Playing" : "Paused")
+                    (Text("Now playing: ").foregroundStyle(.secondary) + Text(item.name).fontWeight(.medium))
+                        .lineLimit(1)
+                }
+                HStack(spacing: 6) {
+                    NowPlayingTime(duration: item.duration, precise: item.precise)
+                    Spacer(minLength: 4)
+                    Button {
+                        player.toggle(url)
+                    } label: {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").frame(width: 12)
+                    }
+                    .help(player.isPlaying ? "Pause" : "Play")
+                    Button {
+                        player.stop()
+                    } label: {
+                        Image(systemName: "stop.fill").frame(width: 12)
+                    }
+                    .help("Stop and go back to the start")
+                    Button("Show", action: item.reveal)
+                        .help("Select it in the list")
+                }
+                .controlSize(.small)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.1)))
+            .padding([.horizontal, .top], 12)
+        }
+    }
+
+    /// The sound or song the player has, unless the detail pane is already showing it.
+    private var current: Item? {
+        switch model.section {
+        case .sounds:
+            let browser = model.soundBrowser
+            guard let sound = model.playingSound, browser.selection != [sound.id] else { return nil }
+            return Item(name: sound.displayName, duration: sound.duration, precise: true) { browser.reveal(sound.id) }
+        case .music:
+            let browser = model.musicBrowser
+            guard let song = model.playingSong, browser.selection != [song.id] else { return nil }
+            return Item(name: song.displayTitle, duration: song.duration, precise: false) { browser.reveal(song.id) }
+        }
+    }
+}
+
+/// The playing time: its own view, as it changes many times a second.
+private struct NowPlayingTime: View {
+    @Environment(AppModel.self) private var model
+    let duration: Double?
+    let precise: Bool
+
+    var body: some View {
+        Text("\(formatLength(model.player.currentTime, precise: precise)) / \(formatLength(duration, precise: precise))")
+            .font(.caption)
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+    }
+}
+
 struct FileChip: View {
     let url: URL
 

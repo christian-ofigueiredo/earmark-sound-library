@@ -154,6 +154,18 @@ final class AppModel {
         return songIndex.position[id].map { songs[$0] }
     }
 
+    /// The sound the player has (playing or paused), if it's a sound.
+    var playingSound: SoundRecord? {
+        guard player.state != .stopped, let path = player.url?.path else { return nil }
+        return sounds.first { $0.path == path }
+    }
+
+    /// The song the player has (playing or paused), if it's a song.
+    var playingSong: SongRecord? {
+        guard player.state != .stopped, let path = player.url?.path else { return nil }
+        return songs.first { $0.path == path }
+    }
+
     func library(id: Int64) -> Library? {
         soundLibraries.first { $0.id == id } ?? musicLibraries.first { $0.id == id }
     }

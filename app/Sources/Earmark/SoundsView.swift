@@ -36,6 +36,18 @@ final class SoundBrowser {
 
     /// Counts the refreshes of `visible`, so the list knows when to reload.
     private(set) var generation = 0
+    /// Bumped by `reveal`: the list scrolls to the selection.
+    private(set) var revealRequest = 0
+
+    /// Selects this sound and scrolls the list to it, showing all sounds if the list hides it.
+    func reveal(_ id: SoundRecord.ID) {
+        if !visible.contains(where: { $0.id == id }) {
+            search = ""
+            scope = .all
+        }
+        selection = [id]
+        revealRequest += 1
+    }
 
     // The sidebar's Similar row is never added or removed while it's selected: done in one
     // update, the sidebar left a copy of the row drawn over it (its text doubled, in the
@@ -194,12 +206,14 @@ struct SoundTable: View {
     var body: some View {
         @Bindable var browser = model.soundBrowser
         let shown = model.section == .sounds
+        let playing = model.playingSound
         RecordTable(rows: browser.visible, rowsVersion: browser.generation, filter: browser.filterKey(version: 0),
                     columns: Self.columns(browser), hiddenColumns: browser.isShowingSimilar ? [] : ["match"],
                     selection: $browser.selection, sortOrder: $browser.sortOrder, shown: shown,
                     autosaveName: "Sounds", accessibilityLabel: "Sounds", url: \.url,
                     menu: { ids in menu(for: ids) },
-                    primaryAction: { ids in if let s = model.sound(id: ids.first ?? nil) { model.player.toggle(s.url) } })
+                    primaryAction: { ids in if let s = model.sound(id: ids.first ?? nil) { model.player.toggle(s.url) } },
+                    playing: playing?.id, playingPaused: !model.player.isPlaying, revealRequest: browser.revealRequest)
         .overlay {
             Group {
                 if model.soundLibraries.isEmpty {
@@ -226,7 +240,7 @@ struct SoundTable: View {
             RecordColumn(id: "match", title: "Match", minWidth: 50, width: 56, maxWidth: 70, digits: true,
                          secondary: true, canHide: false) { browser.matchText($0) },
             RecordColumn(id: "name", title: "Name", width: 240, sort: KeyPathComparator(\.displayName),
-                         canHide: false, typeSelect: true) { $0.displayName },
+                         canHide: false, typeSelect: true, marksPlaying: true) { $0.displayName },
             RecordColumn(id: "category", title: "Category", width: 170, sort: KeyPathComparator(\.categoryText)) { $0.categoryText },
             RecordColumn(id: "length", title: "Length", minWidth: 50, width: 64, maxWidth: 90,
                          sort: KeyPathComparator(\.durationValue), digits: true) { formatLength($0.duration) },

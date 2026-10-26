@@ -18,6 +18,8 @@ struct RecordColumn<Record> {
     var canHide = true
     /// Typing a name selects the row whose text in this column starts with it.
     var typeSelect = false
+    /// The playing row shows a speaker before its text here.
+    var marksPlaying = false
     let text: (Record) -> String
 }
 
@@ -51,6 +53,11 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
     var menu: (Set<Record.ID>) -> [RecordMenuItem]
     /// Double-click, Return and Space.
     var primaryAction: (Set<Record.ID>) -> Void
+    /// The row playing or paused, marked with a speaker (blue playing, grey paused).
+    var playing: Record.ID?
+    var playingPaused = false
+    /// Bumped to scroll the list to the selection (Show, in the detail pane's Now Playing).
+    var revealRequest = 0
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -124,6 +131,11 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
         } else if coordinator.selectedIDs != selection {
             coordinator.select(selection)
         }
+        coordinator.showPlaying(playing, paused: playingPaused)
+        if revealRequest != coordinator.revealed {
+            coordinator.revealed = revealRequest
+            if let row = table.selectedRowIndexes.first { table.scrollRowToVisible(row) }
+        }
         table.isShownSection = shown
         if shown {
             if scroll.isHidden { scroll.isHidden = false }
@@ -148,11 +160,14 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
         weak var table: NSTableView?
         weak var headerMenu: NSMenu?
         var wasShown = false
+        var revealed = 0
         private(set) var version = Int.min
         private var rows: [Record] = []
         /// Row of each ID, made when a selection needs it.
         private var positions: [Record.ID: Int]?
         private var reloadedFilter: AnyHashable?
+        private var playingID: Record.ID?
+        private var playingPaused = false
         /// Set while the table is changed from the bindings, so it doesn't write them back.
         private var updating = false
 
@@ -181,17 +196,31 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
 
         func select(_ ids: Set<Record.ID>) {
             guard let table else { return }
-            var indexes = IndexSet()
-            if !ids.isEmpty {
-                if positions == nil {
-                    positions = Dictionary(rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
-                }
-                for id in ids { if let row = positions?[id] { indexes.insert(row) } }
-            }
+            let indexes = IndexSet(ids.compactMap(row(of:)))
             guard indexes != table.selectedRowIndexes else { return }
             updating = true
             table.selectRowIndexes(indexes, byExtendingSelection: false)
             updating = false
+        }
+
+        private func row(of id: Record.ID) -> Int? {
+            if positions == nil {
+                positions = Dictionary(rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+            }
+            return positions?[id]
+        }
+
+        /// Redraws the speaker on the rows that gain or lose it.
+        func showPlaying(_ id: Record.ID?, paused: Bool) {
+            guard let table, id != playingID || paused != playingPaused else { return }
+            let before = playingID
+            playingID = id
+            playingPaused = paused
+            let changed = IndexSet([before, id].compactMap { $0 }.compactMap(row(of:)))
+            let columns = IndexSet(table.tableColumns.indices.filter {
+                specs[table.tableColumns[$0].identifier.rawValue]?.marksPlaying == true
+            })
+            if !changed.isEmpty, !columns.isEmpty { table.reloadData(forRowIndexes: changed, columnIndexes: columns) }
         }
 
         func showSort(_ order: [KeyPathComparator<Record>]) {
@@ -225,8 +254,11 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard let tableColumn, row < rows.count, let spec = specs[tableColumn.identifier.rawValue] else { return nil }
             let cell = tableView.makeView(withIdentifier: tableColumn.identifier, owner: nil) as? TextCell
-                ?? TextCell(identifier: tableColumn.identifier)
+                ?? TextCell(identifier: tableColumn.identifier, marks: spec.marksPlaying)
             cell.show(spec.text(rows[row]), digits: spec.digits, secondary: spec.secondary)
+            if spec.marksPlaying {
+                cell.showMark(playingID != nil && rows[row].id == playingID ? (playingPaused ? .paused : .playing) : nil)
+            }
             return cell
         }
 
@@ -347,12 +379,17 @@ final class KeyTableView: NSTableView {
     }
 }
 
-/// A row's text in one column.
+/// A row's text in one column, after the playing speaker in the column that shows it.
 final class TextCell: NSTableCellView {
+    enum Mark { case playing, paused }
+
     private static let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
     private static let digitsFont = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    private var markView: NSImageView?
+    private var mark: Mark?
 
-    init(identifier: NSUserInterfaceItemIdentifier) {
+    /// `marks`: room for the speaker before the text, on every row so the names line up.
+    init(identifier: NSUserInterfaceItemIdentifier, marks: Bool = false) {
         super.init(frame: .zero)
         self.identifier = identifier
         let label = NSTextField(labelWithString: "")
@@ -362,8 +399,24 @@ final class TextCell: NSTableCellView {
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(label)
         textField = label
+        var leading = label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2)
+        if marks {
+            let speaker = NSImageView()
+            speaker.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: nil)
+            speaker.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+            speaker.translatesAutoresizingMaskIntoConstraints = false
+            speaker.isHidden = true
+            addSubview(speaker)
+            markView = speaker
+            NSLayoutConstraint.activate([
+                speaker.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+                speaker.widthAnchor.constraint(equalToConstant: 18),
+                speaker.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            leading = label.leadingAnchor.constraint(equalTo: speaker.trailingAnchor, constant: 3)
+        }
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            leading,
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
@@ -376,6 +429,24 @@ final class TextCell: NSTableCellView {
         label.stringValue = text
         label.font = digits ? Self.digitsFont : Self.font
         label.textColor = secondary ? .secondaryLabelColor : .labelColor
+    }
+
+    func showMark(_ mark: Mark?) {
+        self.mark = mark
+        markView?.isHidden = mark == nil
+        markView?.setAccessibilityLabel(mark == .paused ? "Paused" : "Playing")
+        tintMark()
+    }
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { tintMark() }
+    }
+
+    /// Blue while playing, grey while paused; white on the selection's colour.
+    private func tintMark() {
+        guard let markView, let mark else { return }
+        markView.contentTintColor = backgroundStyle == .emphasized ? .alternateSelectedControlTextColor
+            : mark == .playing ? .systemBlue : .secondaryLabelColor
     }
 }
 

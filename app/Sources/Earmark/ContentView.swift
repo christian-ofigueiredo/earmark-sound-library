@@ -84,10 +84,13 @@ struct LibraryView: View {
             // view below, and SwiftUI's own tables (Folder Categories) would pay for it per cell.
             .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
             .inspector(isPresented: .constant(true)) {
-                ZStack {
-                    // The hidden pane's own AppKit views (waveform, file drag) let clicks through.
-                    SoundDetailPane().environment(\.sectionShown, !music).shown(!music)
-                    SongDetailPane().environment(\.sectionShown, music).shown(music)
+                VStack(spacing: 0) {
+                    NowPlayingBar()
+                    ZStack {
+                        // The hidden pane's own AppKit views (waveform, file drag) let clicks through.
+                        SoundDetailPane().environment(\.sectionShown, !music).shown(!music)
+                        SongDetailPane().environment(\.sectionShown, music).shown(music)
+                    }
                 }
                 .inspectorColumnWidth(min: 300, ideal: 380, max: 600)
             }

@@ -24,6 +24,19 @@ final class MusicBrowser {
     private(set) var visible: [SongRecord] = []
     /// Counts the refreshes of `visible`, so the list knows when to reload.
     private(set) var generation = 0
+    /// Bumped by `reveal`: the list scrolls to the selection.
+    private(set) var revealRequest = 0
+
+    /// Selects this song and scrolls the list to it, showing all songs if the list hides it.
+    func reveal(_ id: SongRecord.ID) {
+        if !visible.contains(where: { $0.id == id }) {
+            search = ""
+            scope = .all
+            clearFilters()
+        }
+        selection = [id]
+        revealRequest += 1
+    }
 
     struct FilterKey: Hashable {
         var scope: MusicScope?
@@ -178,11 +191,13 @@ struct SongTable: View {
     var body: some View {
         @Bindable var browser = model.musicBrowser
         let shown = model.section == .music
+        let playing = model.playingSong
         RecordTable(rows: browser.visible, rowsVersion: browser.generation, filter: browser.filterKey(version: 0),
                     columns: Self.columns, selection: $browser.selection, sortOrder: $browser.sortOrder,
                     shown: shown, autosaveName: "Songs", accessibilityLabel: "Songs", url: \.url,
                     menu: { ids in menu(for: ids) },
-                    primaryAction: { ids in if let s = model.song(id: ids.first ?? nil) { model.player.toggle(s.url) } })
+                    primaryAction: { ids in if let s = model.song(id: ids.first ?? nil) { model.player.toggle(s.url) } },
+                    playing: playing?.id, playingPaused: !model.player.isPlaying, revealRequest: browser.revealRequest)
         .overlay {
             Group {
                 if model.musicLibraries.isEmpty {
@@ -210,7 +225,7 @@ struct SongTable: View {
 
     private static let columns: [RecordColumn<SongRecord>] = [
         RecordColumn(id: "title", title: "Title", width: 240, sort: KeyPathComparator(\.displayTitle),
-                     canHide: false, typeSelect: true) { $0.displayTitle },
+                     canHide: false, typeSelect: true, marksPlaying: true) { $0.displayTitle },
         RecordColumn(id: "artist", title: "Artist", width: 170, sort: KeyPathComparator(\.artistText)) { $0.artistText },
         RecordColumn(id: "bpm", title: "BPM", minWidth: 40, width: 52, maxWidth: 70, sort: KeyPathComparator(\.bpmValue),
                      digits: true) { $0.bpm.map(formatBPM) ?? "" },

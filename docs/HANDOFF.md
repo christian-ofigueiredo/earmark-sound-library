@@ -391,6 +391,15 @@ Settings → Repository name. Topics/description also have to be set there.
   scrolling, sorting, search and clearing it, the row and header menus, Find Similar Sounds
   (Match column), the detail pane's play and waveform. The owner checked dragging rows into
   Resolve: works.
+- **What's playing** (owner, 2026-10-26: after selecting another row, the playing one was
+  lost; the owner chose the design). The playing row's name has a speaker before it, blue
+  while playing, grey while paused, white on the selection (`RecordTable` `playing`,
+  `RecordColumn.marksPlaying`; only the rows that change are redrawn). While the detail
+  pane shows something else, `NowPlayingBar` sits at its top: name, time, play/pause, stop
+  and Show, which selects it and scrolls to it (`reveal`), clearing the search, sidebar
+  choice and music filters if they hide it. The playing item is found by its path
+  (`AppModel.playingSound/playingSong`); the time is its own small view, as it changes 40
+  times a second. Switching section still stops playback.
 - **Sidebar rows added or removed while selected** (owner, 2026-10-26: "Similar to…" text
   doubled, its ✕ needed two clicks). Adding the Similar row and selecting it in the same
   update left a copy of the row drawn over it: the text twice, in the selected (bold) and
