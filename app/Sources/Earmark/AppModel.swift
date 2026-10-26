@@ -64,6 +64,8 @@ final class AppModel {
     let folderGuesser = FolderGuesser()
     let analysis = AnalysisEngine()
 
+    /// The library has been read once since launch (the sidebars are built then).
+    private(set) var hasLoaded = false
     /// The section on screen. Both sections stay built (`LibraryView`).
     private(set) var section: AppSection
     /// The section the switch shows: it changes first, then `section` once the content has
@@ -117,6 +119,7 @@ final class AppModel {
         player.gain = { [weak self] url in self?.previewGain(for: url) ?? 0 }
         Task {
             await reload()
+            hasLoaded = true
             analysis.start(model: self)
             // After the analysis has read which sounds it has done (the guesses note it).
             guessing = true

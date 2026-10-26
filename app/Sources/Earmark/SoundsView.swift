@@ -137,8 +137,16 @@ struct SoundSidebar: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        // Built once the library has been read, so its rows arrive all at once. Built before,
+        // the ~60 category rows were inserted into the list on screen a few seconds after
+        // launch, and AppKit logged "a reentrant operation in its NSTableView delegate" while
+        // SwiftUI's list measured them (owner, 2026-10-26; found with the debugger).
+        if model.hasLoaded { list } else { Color.clear }
+    }
+
+    private var list: some View {
         @Bindable var browser = model.soundBrowser
-        List(selection: $browser.scope) {
+        return List(selection: $browser.scope) {
             Label("All Sounds", systemImage: "square.grid.2x2")
                 .badge(model.soundIndex.shownCount)
                 .tag(SoundScope.all)

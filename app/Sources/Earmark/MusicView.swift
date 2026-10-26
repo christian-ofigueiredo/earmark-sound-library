@@ -115,8 +115,13 @@ struct MusicSidebar: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        // Built once the library has been read, as the sound sidebar (see SoundSidebar).
+        if model.hasLoaded { list } else { Color.clear }
+    }
+
+    private var list: some View {
         @Bindable var browser = model.musicBrowser
-        List(selection: $browser.scope) {
+        return List(selection: $browser.scope) {
             Label("All Music", systemImage: "music.note.list")
                 .badge(model.songs.count)
                 .tag(MusicScope.all)

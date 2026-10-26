@@ -98,6 +98,10 @@ struct LibraryView: View {
         .onChange(of: model.sectionFaded) { _, faded in
             SectionViews.sync(showing: model.section, faded: faded, animated: true)
         }
+        .onChange(of: model.hasLoaded) {
+            // The sidebars' lists exist from now on: hide the other section's.
+            DispatchQueue.main.async { SectionViews.sync(showing: model.section, faded: model.sectionFaded, animated: false) }
+        }
         .onAppear {
             // As soon as the window has its lists (the next turn of the run loop).
             DispatchQueue.main.async { SectionViews.sync(showing: model.section, faded: false, animated: false) }

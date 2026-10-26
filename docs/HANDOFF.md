@@ -495,11 +495,17 @@ Settings → Repository name. Topics/description also have to be set there.
   (`ToolbarSpacer`, `.primaryAction` and moving it to the inspector's toolbar changed
   nothing). The owner chose to attach it to the switch: `AutoPlayToggle`, in the principal
   item with `SectionSwitch`, drawn like it (light glass, the blue pill while on).
-- **Open: "Application performed a reentrant operation in its NSTableView delegate"** is
-  logged once a few seconds after launch, while the library loads (since before
-  2026-10-26). Not from `RecordTable` (instrumented: none of its changes happen inside its
-  own callbacks), so most likely a SwiftUI sidebar list updating while it loads. AppKit says
-  it will become an assert in a future macOS: worth finding.
+- **Fixed: "Application performed a reentrant operation in its NSTableView delegate"**,
+  logged once a few seconds after launch. Found with lldb (break on `NSLog`; the message
+  comes from `-[NSTableRowHeightData _cacheRowSpansInRange:heightProvider:]`): SwiftUI's own
+  sidebar list (`OutlineListCoordinator.diffRows` → `endUpdates`) inserting the sound
+  sidebar's ~60 category rows into the list on screen when the library loaded (7 → 67 rows);
+  AppKit's automatic row heights re-entered their cache while keeping the top row in place.
+  No Earmark code on the stack. Now both sidebars are built only once the library has been
+  read (`AppModel.hasLoaded`), so their rows arrive with the list, and `SectionViews` hides
+  the other section's sidebar again once they exist. Checked: no warning in a minute after
+  launch, nor when the Similar row is added and cleared. Finding which list: a breakpoint on
+  `-[NSTableView endUpdates]` printing `numberOfRows` (after `expr -l objc -- @import AppKit`).
 - **Sidebar rows added or removed while selected** (owner, 2026-10-26: "Similar to…" text
   doubled, its ✕ needed two clicks). Adding the Similar row and selecting it in the same
   update left a copy of the row drawn over it: the text twice, in the selected (bold) and
