@@ -71,8 +71,8 @@ Settings → Repository name. Topics/description also have to be set there.
     launch.
   - `SoundsView.swift`: sidebar (libraries with offline state, UCS categories →
     subcategories, uncategorised), sortable searchable table, detail pane. Rows drag into
-    Resolve (`NSItemProvider(object: url as NSURL)`); Space or double-click plays;
-    auto-play toggle.
+    Resolve (the file URL); Space, Return or double-click plays; auto-play toggle.
+  - `RecordTable.swift`: the sound and song lists, an AppKit table (see Gotchas).
   - `MusicView.swift`: folders, BPM range filter with half/double time, key filter with
     compatible (Camelot) keys, "Or relative" column, "Find songs that mix with this".
   - `SharedViews.swift`, `Waveform.swift` (AVAudioFile peaks via vDSP; click to play from
@@ -347,43 +347,52 @@ Settings → Repository name. Topics/description also have to be set there.
   sections stay built in one split view (`LibraryView`: each column a ZStack of both), the
   search field and auto-play button are shared and follow the section, and
   `AppModel.show(_:)` changes section at once while `SectionSwitch` animates its pill on its
-  own. A switch costs ~80 ms of main thread, nearly all SwiftUI working out the window's
-  minimum size (`NSHostingView.minSize`) after the state change; the section's own work
-  (`SectionViews.sync`) is 1–4 ms.
+  own. A switch costs ~80–100 ms of main thread, mostly SwiftUI working out the window's
+  minimum size (`NSHostingView.minSize`) and laying out after the state change.
   Don't hide a section with `.disabled`, `.allowsHitTesting`, `.accessibilityHidden` or
   `.focused`, and don't give `.searchable` a binding or prompt that changes with the section:
-  each changes the environment of every table cell (each its own `NSHostingView`) and the
-  switch went back to ~0.5 s. The search binding is `AppModel.search` (stable), the prompt
+  with SwiftUI tables, each changed the environment of every cell (each its own
+  `NSHostingView`) and the switch went back to ~0.5 s. The search binding is `AppModel.search` (stable), the prompt
   "Search". The switch is a custom Liquid Glass control (`SectionSwitch`:
   `GlassEffectContainer`, a blue tinted glass pill moved with `matchedGeometryEffect`, the
   toolbar's shared glass hidden with `sharedBackgroundVisibility(.hidden)`); before macOS 26,
   a segmented picker. Blue details: `.tint(.blue)` on both windows, the play button
   `.glassProminent`, the waveform in system blue (the playhead in the text colour).
+- **The big lists are AppKit tables** (`RecordTable.swift`; owner, 2026-10-26: "fix the 1–2 s
+  freeze when the list changes a lot"). SwiftUI's `Table` went through every row on each
+  change: clearing a search inserted the 28k rows one by one, AppKit building and measuring
+  a row view for each (automatic row heights): ~1.5 s a change. Fixed row heights halved it,
+  but SwiftUI's own pass over the rows (`TableRowForEachState`) still took ~0.4 s. Now
+  `RecordTable` (an `NSViewRepresentable` around an `NSTableView` with plain text cells)
+  reloads when the browser's `generation` changes: ~30–50 ms a change, only the rows on
+  screen. It keeps what the SwiftUI table did: header sort (`KeyPathComparator`s, so
+  `FastSort` and the filter keys are unchanged), column widths, order and hidden columns
+  saved (`autosaveName`), a header menu to hide columns, multi-selection bound to the
+  browser, the row menu (on the clicked row, or the selection if it's in it), double-click,
+  Return and Space to play, dragging rows as file URLs (Resolve), type-to-find on the name.
+  A reload with a new filter (scope, search, sort) scrolls to the selection or the top;
+  one from new data keeps the scroll. Folder Categories still uses SwiftUI tables (small).
 - **Clicks and keys with both sections built** (owner, 2026-10-26: "↑↓ and Space don't
   work"). SwiftUI's opacity doesn't stop AppKit sending the hidden section's views clicks,
   scrolling and keys, and SwiftUI hit-tests its views in the order they were made (the music
-  ones last, so on top), whatever their order in AppKit or `zIndex`; reordering `subviews`
-  doesn't help. What works (`SectionViews` and `SectionEventRouter` in `ContentView.swift`):
-  the hidden sidebar and the music BPM fields get `isHidden` in AppKit (few rows to lay out
-  again: cheap). The big lists can't (hiding or moving one re-tiles its rows, ~0.1–0.3 s a
-  switch), so the hidden one gets `alphaValue = 0` (SwiftUI opacity on a table updates every
-  row, ~75 ms) and a local event monitor passes the clicks, drags and scrolling that land on
-  it to the shown list; a click redirected to a sidebar row did nothing, hence `isHidden`
-  there. The shown list gets the keyboard at launch and 0.35 s after a switch (after the
-  animation: `makeFirstResponder` makes SwiftUI walk the cells), and at once if a key comes
-  first. The detail panes' own AppKit views (waveform, file drag) let clicks through while
-  their section is hidden (`sectionShown`); SwiftUI controls at opacity 0 don't take clicks.
-  Each section's bars fade whole, bar material included (`edgeBar(_:shown:)`): the hidden
-  music filter bar's material hid the sound list's column headers and status bar. Space only
-  acts in the section shown. Checked with real clicks and keys in both sections: rows, ↑↓,
-  Space, ⌘1/⌘2 then keys at once, sidebar rows, BPM fields, scrolling, right-click menu,
-  detail pane play and waveform. Not checked: double-click on a row (the test tool's
-  double-click didn't play in either section, redirected or not; Return, the same action,
-  works).
+  ones last, so on top), whatever their order in AppKit or `zIndex`. So the hidden section's
+  views are hidden in AppKit: the lists by `RecordTable` (`shown`), the sidebar and the BPM
+  fields by `SectionViews`. Never hide a view that has the keyboard during SwiftUI's update:
+  AppKit then looks for the next key view, and SwiftUI, asked from inside its update, never
+  answered (the app hung at 100% CPU). Views are shown at once and hidden just after the
+  update, once the keyboard has moved. The shown list takes the keyboard at launch and after
+  a switch unless the search field or the sidebar has it; a key that reaches the old list
+  first is passed on. The detail panes' own AppKit views (waveform, file drag) let clicks
+  through while their section is hidden (`sectionShown`); SwiftUI controls at opacity 0
+  don't take clicks. Each section's bars fade whole, bar material included
+  (`edgeBar(_:shown:)`). Checked with real clicks and keys in both sections: rows, ↑↓,
+  Space, Return, double-click, switching then keys at once, sidebar rows, BPM fields,
+  scrolling, sorting, search and clearing it, the row and header menus, Find Similar Sounds
+  (Match column), the detail pane's play and waveform. Not checked: dragging a row into
+  Resolve.
 - **Sorting** was ~3.4 s on the main thread for 28k sounds (`displayName` built a URL per
   comparison; localized compare). `FastSort` (`Display.swift`) builds the sort keys once,
-  and `SoundBrowser.refresh` filters and sorts off the main thread. Still slow: a big change
-  of `visible` makes SwiftUI's `Table` diff its rows (~1–2 s for 28k, e.g. clearing a search).
+  and `SoundBrowser.refresh` filters and sorts off the main thread.
 - When measuring with `sample`, clicks made through the accessibility tools cost the app a
   lot themselves (AX queries, and layout they trigger): measure with the app acting on its own
   (a temporary launch argument that switches sections on a timer worked well). On the second

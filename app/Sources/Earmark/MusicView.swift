@@ -22,6 +22,8 @@ final class MusicBrowser {
     /// Match the key's Camelot neighbours and its relative, not just the key itself.
     var compatibleKeys = true
     private(set) var visible: [SongRecord] = []
+    /// Counts the refreshes of `visible`, so the list knows when to reload.
+    private(set) var generation = 0
 
     struct FilterKey: Hashable {
         var scope: MusicScope?
@@ -86,6 +88,7 @@ final class MusicBrowser {
             return matchesTempo(s.bpm) && matchesKey(s.key) && terms.allSatisfy { haystacks[i].contains($0) }
         }
         visible = FastSort.sorted(found.map { songs[$0] }, by: sortOrder)
+        generation += 1
         // Drop selected songs the new filter hides, so the detail pane doesn't show them.
         let kept = selection.intersection(visible.map(\.id))
         if kept != selection { selection = kept }
@@ -174,78 +177,69 @@ struct SongTable: View {
 
     var body: some View {
         @Bindable var browser = model.musicBrowser
-        Table(of: SongRecord.self, selection: $browser.selection, sortOrder: $browser.sortOrder) {
-            TableColumn("Title", value: \.displayTitle)
-            TableColumn("Artist", value: \.artistText)
-            TableColumn("BPM", value: \.bpmValue) { s in
-                Text(s.bpm.map(formatBPM) ?? "").monospacedDigit()
-            }
-            .width(min: 40, ideal: 52, max: 70)
-            TableColumn("Key", value: \.keyOrder) { s in
-                Text(s.key?.name ?? "")
-            }
-            .width(min: 70, ideal: 86)
-            TableColumn("Camelot", value: \.keyOrder) { s in
-                Text(s.key?.camelot ?? "").monospacedDigit()
-            }
-            .width(min: 48, ideal: 58, max: 70)
-            TableColumn("Or Relative", value: \.relativeOrder) { s in
-                Text(s.key?.relative.name ?? "").foregroundStyle(.secondary)
-            }
-            .width(min: 70, ideal: 86)
-            TableColumn("Length", value: \.durationValue) { s in
-                Text(formatLength(s.duration, precise: false)).monospacedDigit()
-            }
-            .width(min: 44, ideal: 54, max: 70)
-            TableColumn("Folder", value: \.folder)
-        } rows: {
-            ForEach(browser.visible) { s in
-                TableRow(s).itemProvider { fileDragItem(s.url) }
-            }
-        }
-        .contextMenu(forSelectionType: SongRecord.ID.self) { ids in
-            let picked = ids.compactMap { model.song(id: $0) }
-            if picked.count == 1, let s = picked.first {
-                Button("Play") { model.player.play(s.url) }
-                Button("Find Songs That Mix With This") { browser.findMixes(for: s) }
-                    .disabled(s.key == nil && s.bpm == nil)
-                Divider()
-            }
-            if !picked.isEmpty {
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(picked.map(\.url)) }
-                Button(picked.count == 1 ? "Copy Path" : "Copy Paths") {
-                    copyToPasteboard(picked.map(\.path).joined(separator: "\n"))
-                }
-            }
-        } primaryAction: { ids in
-            if let s = model.song(id: ids.first ?? nil) { model.player.toggle(s.url) }
-        }
-        .onKeyPress(.space) {
-            // Both sections stay built; only the one shown takes Space.
-            guard model.section == .music, let s = model.song(id: browser.selection.first ?? nil) else { return .ignored }
-            model.player.toggle(s.url)
-            return .handled
-        }
+        let shown = model.section == .music
+        RecordTable(rows: browser.visible, rowsVersion: browser.generation, filter: browser.filterKey(version: 0),
+                    columns: Self.columns, selection: $browser.selection, sortOrder: $browser.sortOrder,
+                    shown: shown, autosaveName: "Songs", accessibilityLabel: "Songs", url: \.url,
+                    menu: { ids in menu(for: ids) },
+                    primaryAction: { ids in if let s = model.song(id: ids.first ?? nil) { model.player.toggle(s.url) } })
         .overlay {
-            if model.musicLibraries.isEmpty {
-                ContentUnavailableView {
-                    Label("No Music Folders Yet", systemImage: "music.note")
-                } description: {
-                    Text("Add a music folder, then import the tempo and key results from Phase 0. "
-                        + "Earmark only reads the files.")
-                } actions: {
-                    Button("Add Music Folder…") { model.chooseLibrary(.music) }
-                }
-            } else if browser.visible.isEmpty && !browser.search.isEmpty {
-                ContentUnavailableView.search(text: browser.search)
-            } else if browser.visible.isEmpty && browser.hasFilters {
-                ContentUnavailableView {
-                    Label("No Songs Match", systemImage: "line.3.horizontal.decrease.circle")
-                } actions: {
-                    Button("Clear Filters") { browser.clearFilters() }
+            Group {
+                if model.musicLibraries.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Music Folders Yet", systemImage: "music.note")
+                    } description: {
+                        Text("Add a music folder, then import the tempo and key results from Phase 0. "
+                            + "Earmark only reads the files.")
+                    } actions: {
+                        Button("Add Music Folder…") { model.chooseLibrary(.music) }
+                    }
+                } else if browser.visible.isEmpty && !browser.search.isEmpty {
+                    ContentUnavailableView.search(text: browser.search)
+                } else if browser.visible.isEmpty && browser.hasFilters {
+                    ContentUnavailableView {
+                        Label("No Songs Match", systemImage: "line.3.horizontal.decrease.circle")
+                    } actions: {
+                        Button("Clear Filters") { browser.clearFilters() }
+                    }
                 }
             }
+            .shown(shown)
         }
+    }
+
+    private static let columns: [RecordColumn<SongRecord>] = [
+        RecordColumn(id: "title", title: "Title", width: 240, sort: KeyPathComparator(\.displayTitle),
+                     canHide: false, typeSelect: true) { $0.displayTitle },
+        RecordColumn(id: "artist", title: "Artist", width: 170, sort: KeyPathComparator(\.artistText)) { $0.artistText },
+        RecordColumn(id: "bpm", title: "BPM", minWidth: 40, width: 52, maxWidth: 70, sort: KeyPathComparator(\.bpmValue),
+                     digits: true) { $0.bpm.map(formatBPM) ?? "" },
+        RecordColumn(id: "key", title: "Key", minWidth: 70, width: 86, sort: KeyPathComparator(\.keyOrder)) { $0.key?.name ?? "" },
+        RecordColumn(id: "camelot", title: "Camelot", minWidth: 48, width: 58, maxWidth: 70,
+                     sort: KeyPathComparator(\.keyOrder), digits: true) { $0.key?.camelot ?? "" },
+        RecordColumn(id: "relative", title: "Or Relative", minWidth: 70, width: 86, sort: KeyPathComparator(\.relativeOrder),
+                     secondary: true) { $0.key?.relative.name ?? "" },
+        RecordColumn(id: "length", title: "Length", minWidth: 44, width: 54, maxWidth: 70,
+                     sort: KeyPathComparator(\.durationValue), digits: true) { formatLength($0.duration, precise: false) },
+        RecordColumn(id: "folder", title: "Folder", width: 200, sort: KeyPathComparator(\.folder)) { $0.folder },
+    ]
+
+    private func menu(for ids: Set<SongRecord.ID>) -> [RecordMenuItem] {
+        let browser = model.musicBrowser
+        let picked = ids.compactMap { model.song(id: $0) }
+        var items: [RecordMenuItem] = []
+        if picked.count == 1, let s = picked.first {
+            items.append(.action("Play") { model.player.play(s.url) })
+            items.append(.action("Find Songs That Mix With This", enabled: s.key != nil || s.bpm != nil) { browser.findMixes(for: s) })
+            items.append(.divider)
+        }
+        if !picked.isEmpty {
+            items.append(.action("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(picked.map(\.url)) })
+            items.append(.action(picked.count == 1 ? "Copy Path" : "Copy Paths") {
+                copyToPasteboard(picked.map(\.path).joined(separator: "\n"))
+            })
+        }
+        return items
     }
 }
 

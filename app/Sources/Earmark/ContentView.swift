@@ -66,8 +66,7 @@ struct LibraryView: View {
         // The detail pane is an inspector rather than a third split column: a three-column
         // NavigationSplitView ignores the content column's width and squeezes the table.
         NavigationSplitView {
-            // Lists are made transparent in AppKit (`SectionViews`), not with SwiftUI's opacity,
-            // which makes SwiftUI update every row of a table (~75 ms a switch).
+            // The hidden sidebar is hidden in AppKit (`SectionViews`).
             ZStack {
                 SoundSidebar()
                 MusicSidebar()
@@ -82,7 +81,7 @@ struct LibraryView: View {
                     .edgeBar(.bottom, shown: music) { StatusBar() }
             }
             // One stable binding: anything that changes here with the section reaches every
-            // table cell (each its own hosting view) and makes the switch slow.
+            // view below, and SwiftUI's own tables (Folder Categories) would pay for it per cell.
             .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
             .inspector(isPresented: .constant(true)) {
                 ZStack {
@@ -103,20 +102,15 @@ struct LibraryView: View {
             }
         }
         .onChange(of: model.section) { _, section in
-            SectionViews.sync(showing: section, focus: false)
-            // The shown list takes the keyboard once the switch has animated, so the switch
-            // doesn't wait for it; a key pressed sooner moves it there at once.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if model.section == section { SectionEventRouter.shared.focusShownList() }
-            }
+            SectionViews.sync(showing: section)
         }
         .onChange(of: model.soundBrowser.sidebarGeneration) {
             // The sounds sidebar was rebuilt (a new AppKit list).
-            SectionViews.sync(showing: model.section, focus: false)
+            SectionViews.sync(showing: model.section)
         }
         .onAppear {
             // As soon as the window has its lists (the next turn of the run loop).
-            DispatchQueue.main.async { SectionViews.sync(showing: model.section, focus: true) }
+            DispatchQueue.main.async { SectionViews.sync(showing: model.section) }
         }
         .task(id: sounds.filterKey(version: model.version)) { await sounds.refresh(from: model) }
         .task(id: songs.filterKey(version: model.version)) { songs.refresh(from: model) }
@@ -134,153 +128,53 @@ struct LibraryView: View {
 }
 
 extension View {
-    /// Keeps a section built but out of sight while the other is shown; `SectionViews` makes
-    /// its AppKit lists let clicks through. Only opacity: `.disabled`, `.allowsHitTesting`,
-    /// `.focused` and the like change the environment of every table cell (each its own hosting
-    /// view) and cost ~0.4 s a switch, and hiding or moving a list makes AppKit rebuild its rows
-    /// when it comes back (~0.1–0.3 s).
+    /// Keeps part of a section built but out of sight while the other is shown. Only opacity:
+    /// SwiftUI controls at opacity 0 don't take clicks, but AppKit views do (`SectionViews`,
+    /// `RecordTable`, `sectionShown`).
     func shown(_ visible: Bool) -> some View {
         opacity(visible ? 1 : 0)
     }
 }
 
-/// The two sections' AppKit views overlap (both stay built and laid out, so a switch costs
-/// ~20 ms), and SwiftUI's opacity doesn't stop AppKit from sending the hidden ones clicks,
-/// scrolling and keys; SwiftUI also hit-tests its views in the order they were made, whatever
-/// their order in AppKit. So the hidden section's sidebar and filter fields are hidden in AppKit
-/// (a few rows to lay out again: cheap). Its big list only turns transparent, as hiding it
-/// would rebuild its rows on every switch (~0.1–0.3 s); `SectionEventRouter` passes the list's
-/// clicks to the shown one, and gives the shown list the keyboard, so ↑↓ and Space work.
+/// The two sections' views overlap (both stay built and laid out, so a switch is quick), and
+/// SwiftUI's opacity doesn't stop AppKit from sending the hidden ones clicks, scrolling and
+/// keys; SwiftUI also hit-tests its views in the order they were made, whatever their order
+/// in AppKit. So the hidden section's sidebar and BPM fields are hidden in AppKit (a few rows
+/// to lay out again: cheap). The big lists hide themselves (`RecordTable`).
 @MainActor enum SectionViews {
-    static func sync(showing section: AppSection, focus: Bool) {
+    static func sync(showing section: AppSection) {
         guard let window = NSApp.windows.first(where: { $0.title == "Earmark" && $0.contentView != nil }),
               let content = window.contentView else { return }
-        var tables: [(NSScrollView, NSTableView)] = [], sidebars: [NSScrollView] = [], fields: [NSView] = []
+        var sidebars: [NSScrollView] = [], fields: [NSView] = []
         func visit(_ view: NSView) {
-            if let table = view as? NSTableView, let scroll = table.enclosingScrollView {
-                if table is NSOutlineView, table.tableColumns.count == 1 { sidebars.append(scroll) }   // the sidebar lists
-                else { tables.append((scroll, table)) }
+            if let table = view as? NSTableView {
+                // The sidebar lists: one-column outlines. (Nothing inside a list: its cells' labels.)
+                if table is NSOutlineView, table.tableColumns.count == 1, let scroll = table.enclosingScrollView {
+                    sidebars.append(scroll)
+                }
                 return
             }
-            // The music filter bar's BPM fields: the only text fields in the window's content.
+            // The music filter bar's BPM fields: the only other text fields in the window's content.
             if view is NSTextField { fields.append(view); return }
             view.subviews.forEach(visit)
         }
         visit(content)
-        var shownLists: [NSView] = [], hiddenLists: [NSView] = [], shownTable: NSTableView?
-        for (scroll, table) in tables {
-            // Told apart by their columns: Name… for sounds, Title… for music.
-            let titles = table.tableColumns.map(\.title)
-            guard let owner: AppSection = titles.contains("Name") ? .sounds : titles.contains("Title") ? .music : nil else { continue }
-            if owner == section { shownLists.append(scroll); shownTable = table } else { hiddenLists.append(scroll) }
-        }
-        for view in shownLists { view.alphaValue = 1 }
-        for view in hiddenLists { view.alphaValue = 0 }
+        var shown: [NSView] = [], hidden: [NSView] = []
         // The sidebar lists come in the order LibraryView builds them: sounds, then music.
         if sidebars.count == 2 {
-            sidebars[0].isHidden = section != .sounds
-            sidebars[1].isHidden = section != .music
+            shown.append(sidebars[section == .sounds ? 0 : 1])
+            hidden.append(sidebars[section == .sounds ? 1 : 0])
         }
-        for field in fields { field.isHidden = section != .music }
-        SectionEventRouter.shared.update(window: window, hidden: hiddenLists, shown: shownLists, list: shownTable)
-        if focus { SectionEventRouter.shared.focusShownList() }
-    }
-}
-
-private struct EventBox: @unchecked Sendable {
-    let event: NSEvent?
-}
-
-/// Sends the mouse and scroll events that land on the hidden section's list (transparent, but
-/// first in SwiftUI's hit-testing when it was made later) to the shown list underneath, as
-/// AppKit would if the hidden one weren't there, and gives the shown list the keys the hidden
-/// section had. Public API only: a local event monitor, and the views' own handlers.
-@MainActor final class SectionEventRouter {
-    static let shared = SectionEventRouter()
-    private weak var window: NSWindow?
-    private var hidden: [NSView] = []
-    private var shown: [NSView] = []
-    /// The shown section's list, which takes the keys the hidden section had.
-    private weak var list: NSTableView?
-    private var monitor: Any?
-    /// The view a redirected mouse-down went to: its drags and mouse-up follow it, unless the
-    /// list tracked them itself.
-    private weak var tracking: NSView?
-
-    func update(window: NSWindow, hidden: [NSView], shown: [NSView], list: NSTableView?) {
-        self.window = window
-        self.hidden = hidden
-        self.shown = shown
-        self.list = list
-        guard monitor == nil else { return }
-        let types: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown,
-                                            .otherMouseDown, .scrollWheel, .keyDown]
-        // Local monitors run on the main thread; NSEvent isn't Sendable, hence the box.
-        monitor = NSEvent.addLocalMonitorForEvents(matching: types) { event in
-            let box = EventBox(event: event)
-            return MainActor.assumeIsolated { EventBox(event: SectionEventRouter.shared.route(box.event)) }.event
-        }
-    }
-
-    /// Whether the keyboard is with the hidden section, or with nothing in the window.
-    private var focusIsHidden: Bool {
-        guard let window else { return false }
-        guard let responder = window.firstResponder as? NSView else { return true }
-        return hidden.contains { responder.isDescendant(of: $0) }
-    }
-
-    /// Gives the shown list the keyboard, unless it is somewhere else in the shown section (the
-    /// search field, the sidebar). Costs ~50–75 ms (SwiftUI walks the table's cells).
-    func focusShownList() {
-        guard let window, let list, focusIsHidden else { return }
-        window.makeFirstResponder(list)
-    }
-
-    private func route(_ event: NSEvent?) -> NSEvent? {
-        guard let event, let window, event.window === window else { return event }
-        if event.type == .keyDown {
-            // A key pressed before the shown list had the keyboard: it goes there instead.
-            focusShownList()
-            return event
-        }
-        switch event.type {
-        case .leftMouseDown:
-            // A list tracks its own drags (they never reach here): forget an earlier click.
-            tracking = nil
-        case .leftMouseDragged, .leftMouseUp:
-            guard let target = tracking else { return event }
-            if event.type == .leftMouseUp { tracking = nil; target.mouseUp(with: event) } else { target.mouseDragged(with: event) }
-            return nil
-        default: break
-        }
-        guard let content = window.contentView,
-              let hit = content.hitTest(content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow) else { return event }
-        guard hidden.contains(where: { hit.isDescendant(of: $0) }) else { return event }
-        // The shown list under the pointer.
-        guard let target = shown.lazy.compactMap({ view -> NSView? in
-            guard let parent = view.superview else { return nil }
-            return view.hitTest(parent.convert(event.locationInWindow, from: nil))
-        }).first else { return nil }
-        if event.type == .leftMouseDown || event.type == .rightMouseDown {
-            // What the window does before a click: the keyboard goes to the clicked view, or
-            // the nearest one around it that takes it (the list, for a click on a row).
-            var responder: NSView? = target
-            while let view = responder, !view.acceptsFirstResponder,
-                  !shown.contains(where: { $0 === view }) { responder = view.superview }
-            if let responder, responder.acceptsFirstResponder, window.firstResponder !== responder {
-                window.makeFirstResponder(responder)
+        if section == .music { shown += fields } else { hidden += fields }
+        for view in shown { view.isHidden = false }
+        // As `RecordTable` does: hidden after SwiftUI's update, without the keyboard (hiding
+        // the view that has it makes AppKit ask SwiftUI for the next one, which can hang).
+        DispatchQueue.main.async {
+            if let responder = window.firstResponder as? NSView, hidden.contains(where: { responder.isDescendant(of: $0) }) {
+                window.makeFirstResponder(nil)
             }
+            for view in hidden { view.isHidden = true }
         }
-        switch event.type {
-        case .leftMouseDown:
-            tracking = target
-            target.mouseDown(with: event)
-        case .rightMouseDown: target.rightMouseDown(with: event)
-        case .otherMouseDown: target.otherMouseDown(with: event)
-        case .scrollWheel: target.scrollWheel(with: event)
-        default: return event
-        }
-        return nil
     }
 }
 

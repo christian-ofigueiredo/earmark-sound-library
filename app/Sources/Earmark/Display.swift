@@ -23,11 +23,6 @@ func copyToPasteboard(_ text: String) {
     NSPasteboard.general.setString(text, forType: .string)
 }
 
-/// Drag payload for Resolve, Finder and other apps: a reference to the original file.
-func fileDragItem(_ url: URL) -> NSItemProvider {
-    NSItemProvider(object: url as NSURL)
-}
-
 // MARK: sounds
 
 extension SoundRecord {

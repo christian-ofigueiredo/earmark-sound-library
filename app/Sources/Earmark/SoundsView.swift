@@ -37,8 +37,8 @@ final class SoundBrowser {
 
     var isShowingSimilar: Bool { if case .similar = scope { true } else { false } }
 
-    /// Column visibility; the Match column follows the similar scope (see `refresh`).
-    var columns = TableColumnCustomization<SoundRecord>()
+    /// Counts the refreshes of `visible`, so the list knows when to reload.
+    private(set) var generation = 0
 
     func showSimilar(_ result: Similar) {
         similar = result
@@ -81,8 +81,7 @@ final class SoundBrowser {
         }.value
         guard !Task.isCancelled else { return }
         visible = result
-        let matchVisibility: Visibility = isShowingSimilar ? .visible : .hidden
-        if columns[visibility: "match"] != matchVisibility { columns[visibility: "match"] = matchVisibility }
+        generation += 1
         // Drop selected sounds the new filter hides, so the detail pane doesn't show them.
         let kept = selection.intersection(visible.map(\.id))
         if kept != selection { selection = kept }
@@ -192,67 +191,64 @@ struct SoundTable: View {
 
     var body: some View {
         @Bindable var browser = model.soundBrowser
-        Table(of: SoundRecord.self, selection: $browser.selection, sortOrder: $browser.sortOrder,
-              columnCustomization: $browser.columns) {
-            // Shown only for Find Similar Sounds (conditional columns need macOS 14.4).
-            TableColumn("Match") { s in Text(browser.matchText(s)).monospacedDigit().foregroundStyle(.secondary) }
-                .width(min: 50, ideal: 56, max: 70)
-                .customizationID("match")
-                .defaultVisibility(.hidden)
-            TableColumn("Name", value: \.displayName)
-                .customizationID("name")
-            TableColumn("Category", value: \.categoryText)
-            TableColumn("Length", value: \.durationValue) { s in
-                Text(formatLength(s.duration)).monospacedDigit()
-            }
-            .width(min: 50, ideal: 64, max: 90)
-            TableColumn("Folder", value: \.folder)
-            TableColumn("Format", value: \.formatText)
-                .width(min: 80, ideal: 150)
-        } rows: {
-            ForEach(browser.visible) { s in
-                TableRow(s).itemProvider { fileDragItem(s.url) }
-            }
-        }
-        .contextMenu(forSelectionType: SoundRecord.ID.self) { ids in
-            let picked = ids.compactMap { model.sound(id: $0) }
-            if picked.count == 1, let s = picked.first {
-                Button("Play") { model.player.play(s.url) }
-                Button("Find Similar Sounds") { model.findSimilar(to: s) }
-                    .disabled(!model.canFindSimilar(s))
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([s.url]) }
-            } else if !picked.isEmpty {
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(picked.map(\.url)) }
-            }
-            if !picked.isEmpty {
-                Button(picked.count == 1 ? "Copy Path" : "Copy Paths") {
-                    copyToPasteboard(picked.map(\.path).joined(separator: "\n"))
-                }
-            }
-        } primaryAction: { ids in
-            if let s = model.sound(id: ids.first ?? nil) { model.player.toggle(s.url) }
-        }
-        .onKeyPress(.space) {
-            // Both sections stay built; only the one shown takes Space.
-            guard model.section == .sounds, let s = model.sound(id: browser.selection.first ?? nil) else { return .ignored }
-            model.player.toggle(s.url)
-            return .handled
-        }
+        let shown = model.section == .sounds
+        RecordTable(rows: browser.visible, rowsVersion: browser.generation, filter: browser.filterKey(version: 0),
+                    columns: Self.columns(browser), hiddenColumns: browser.isShowingSimilar ? [] : ["match"],
+                    selection: $browser.selection, sortOrder: $browser.sortOrder, shown: shown,
+                    autosaveName: "Sounds", accessibilityLabel: "Sounds", url: \.url,
+                    menu: { ids in menu(for: ids) },
+                    primaryAction: { ids in if let s = model.sound(id: ids.first ?? nil) { model.player.toggle(s.url) } })
         .overlay {
-            if model.soundLibraries.isEmpty {
-                ContentUnavailableView {
-                    Label("No Sound Libraries Yet", systemImage: "waveform")
-                } description: {
-                    Text("Add the folders where your sound effects live. Earmark reads their metadata and never changes them.")
-                } actions: {
-                    Button("Add Sound Library…") { model.chooseLibrary(.sounds) }
+            Group {
+                if model.soundLibraries.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Sound Libraries Yet", systemImage: "waveform")
+                    } description: {
+                        Text("Add the folders where your sound effects live. Earmark reads their metadata and never changes them.")
+                    } actions: {
+                        Button("Add Sound Library…") { model.chooseLibrary(.sounds) }
+                    }
+                } else if browser.visible.isEmpty && !browser.search.isEmpty {
+                    ContentUnavailableView.search(text: browser.search)
+                } else if browser.visible.isEmpty && model.scanning.isEmpty {
+                    ContentUnavailableView("No Sounds Here", systemImage: "tray")
                 }
-            } else if browser.visible.isEmpty && !browser.search.isEmpty {
-                ContentUnavailableView.search(text: browser.search)
-            } else if browser.visible.isEmpty && model.scanning.isEmpty {
-                ContentUnavailableView("No Sounds Here", systemImage: "tray")
             }
+            .shown(shown)
         }
+    }
+
+    private static func columns(_ browser: SoundBrowser) -> [RecordColumn<SoundRecord>] {
+        [
+            // Shown only for Find Similar Sounds.
+            RecordColumn(id: "match", title: "Match", minWidth: 50, width: 56, maxWidth: 70, digits: true,
+                         secondary: true, canHide: false) { browser.matchText($0) },
+            RecordColumn(id: "name", title: "Name", width: 240, sort: KeyPathComparator(\.displayName),
+                         canHide: false, typeSelect: true) { $0.displayName },
+            RecordColumn(id: "category", title: "Category", width: 170, sort: KeyPathComparator(\.categoryText)) { $0.categoryText },
+            RecordColumn(id: "length", title: "Length", minWidth: 50, width: 64, maxWidth: 90,
+                         sort: KeyPathComparator(\.durationValue), digits: true) { formatLength($0.duration) },
+            RecordColumn(id: "folder", title: "Folder", width: 220, sort: KeyPathComparator(\.folder)) { $0.folder },
+            RecordColumn(id: "format", title: "Format", minWidth: 80, width: 150, sort: KeyPathComparator(\.formatText)) { $0.formatText },
+        ]
+    }
+
+    private func menu(for ids: Set<SoundRecord.ID>) -> [RecordMenuItem] {
+        let picked = ids.compactMap { model.sound(id: $0) }
+        var items: [RecordMenuItem] = []
+        if picked.count == 1, let s = picked.first {
+            items.append(.action("Play") { model.player.play(s.url) })
+            items.append(.action("Find Similar Sounds", enabled: model.canFindSimilar(s)) { model.findSimilar(to: s) })
+            items.append(.action("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([s.url]) })
+        } else if !picked.isEmpty {
+            items.append(.action("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(picked.map(\.url)) })
+        }
+        if !picked.isEmpty {
+            items.append(.action(picked.count == 1 ? "Copy Path" : "Copy Paths") {
+                copyToPasteboard(picked.map(\.path).joined(separator: "\n"))
+            })
+        }
+        return items
     }
 }
 
