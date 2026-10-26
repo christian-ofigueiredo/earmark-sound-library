@@ -275,7 +275,8 @@ Settings → Repository name. Topics/description also have to be set there.
      category menu saves the user's choice at once), Your Choices (Change…/Remove; Remove goes
      back to the guess) and Not Categorised (folders with no guess, tick and save as before).
      Sidebar: "Guessed by Earmark" lists the guessed sounds (23,879 on SoundFX); the detail
-     pane says "Guessed by Earmark" (orange "unsure") with Change…. The sound signal only
+     pane says "Guessed by Earmark" with Change… (no "unsure": the owner, 2026-10-26, found
+     it not needed; Folder Categories still marks unsure guesses). The sound signal only
      learns from categories that came with the files (`FolderSuggester.labels`).
    - **Folder suggestions improved, 2026-10-26** (owner asked about vendor names, Street
      Basketball and Pickups). Signals: the folder's name; the words at least 30% of its files
@@ -388,8 +389,8 @@ Settings → Repository name. Topics/description also have to be set there.
   (`edgeBar(_:shown:)`). Checked with real clicks and keys in both sections: rows, ↑↓,
   Space, Return, double-click, switching then keys at once, sidebar rows, BPM fields,
   scrolling, sorting, search and clearing it, the row and header menus, Find Similar Sounds
-  (Match column), the detail pane's play and waveform. Not checked: dragging a row into
-  Resolve.
+  (Match column), the detail pane's play and waveform. The owner checked dragging rows into
+  Resolve: works.
 - **Sidebar rows added or removed while selected** (owner, 2026-10-26: "Similar to…" text
   doubled, its ✕ needed two clicks). Adding the Similar row and selecting it in the same
   update left a copy of the row drawn over it: the text twice, in the selected (bold) and

@@ -326,9 +326,9 @@ struct SoundDetail: View {
                         }
                         if let guess {
                             HStack(spacing: 6) {
-                                Text(guess.isUnsure ? "Guessed by Earmark, unsure" : "Guessed by Earmark")
+                                Text("Guessed by Earmark")
                                     .font(.caption)
-                                    .foregroundStyle(guess.isUnsure ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                                    .foregroundStyle(.secondary)
                                     .help("From its folder: \(guess.reason)")
                                 Button("Change…", action: mapFolder).buttonStyle(.link).font(.caption)
                             }
