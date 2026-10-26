@@ -355,7 +355,9 @@ Settings → Repository name. Topics/description also have to be set there.
   with SwiftUI tables, each changed the environment of every cell (each its own
   `NSHostingView`) and the switch went back to ~0.5 s. The search binding is `AppModel.search` (stable), the prompt
   "Search". The switch is a custom Liquid Glass control (`SectionSwitch`:
-  `GlassEffectContainer`, a blue tinted glass pill moved with `matchedGeometryEffect`, the
+  `GlassEffectContainer`, a blue-tinted glass pill (no painted fill or gradient, and the
+  same font weight on both segments: the owner found the bold and the gradient dated) moved
+  with `matchedGeometryEffect`, the
   toolbar's shared glass hidden with `sharedBackgroundVisibility(.hidden)`); before macOS 26,
   a segmented picker. Blue details: `.tint(.blue)` on both windows, the play button
   `.glassProminent`, the waveform in system blue (the playhead in the text colour).

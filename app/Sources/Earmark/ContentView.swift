@@ -205,6 +205,7 @@ extension View {
 /// button after the section switch, blue glass while on.
 struct AutoPlayToggle: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.controlActiveState) private var activeState
     @AppStorage("autoplaySounds") private var autoplaySounds = false
     @AppStorage("autoplayMusic") private var autoplayMusic = false
 
@@ -215,12 +216,11 @@ struct AutoPlayToggle: View {
             if music { autoplayMusic.toggle() } else { autoplaySounds.toggle() }
         } label: {
             if #available(macOS 26, *) {
-                // Drawn like the switch: its glass, and its blue pill while on.
+                // Drawn like the switch: its glass, tinted blue while on.
                 Image(systemName: on ? "play.circle.fill" : "play.circle")
                     .font(.title3)
-                    .foregroundStyle(on ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                    .foregroundStyle(on && activeState != .inactive ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
                     .frame(width: 34, height: 34)
-                    .background { if on { Circle().fill(Color.blue.gradient) } }
                     .glassEffect(on ? .regular.tint(.blue).interactive() : .regular.interactive(), in: .circle)
                     .contentShape(Circle())
             } else {
@@ -237,10 +237,12 @@ struct AutoPlayToggle: View {
     }
 }
 
-/// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose blue glass pill
-/// slides to the chosen section (`AppModel.show`).
+/// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose blue-tinted glass
+/// pill slides to the chosen section (`AppModel.show`).
 struct SectionSwitch: View {
     @Environment(AppModel.self) private var model
+    /// In an inactive window the system greys the glass's tint: dark text then, not white.
+    @Environment(\.controlActiveState) private var activeState
     @Namespace private var pill
 
     var body: some View {
@@ -271,15 +273,15 @@ struct SectionSwitch: View {
         return Button {
             model.show(section)
         } label: {
+            // The same weight either way (bold made the label jump); the chosen one sits on
+            // blue-tinted glass, the system's way to colour glass (no painted gradient).
             Text(section.title)
-                .font(.body.weight(chosen ? .semibold : .regular))
-                .foregroundStyle(chosen ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                .foregroundStyle(chosen && activeState != .inactive ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
                 .padding(.horizontal, 16)
                 .frame(height: 28)
                 .background {
                     if chosen {
-                        Capsule()
-                            .fill(Color.blue.gradient)
+                        Color.clear
                             .glassEffect(.regular.tint(.blue).interactive(), in: .capsule)
                             .matchedGeometryEffect(id: "pill", in: pill)
                     }
