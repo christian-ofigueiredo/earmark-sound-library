@@ -268,20 +268,29 @@ Settings → Repository name. Topics/description also have to be set there.
      at 0.35; describing words like "Short", "Key A#" skipped); the sound (CLAP neighbours with
      a category from their files). Rules added: vendor/pack words (the sounds' designer, the
      library's top folder above a deeper folder) count only when the sound agrees; a word in
-     3+ subcategories of a category gives all of them the same points; the parent's category
-     lock is released when the folder repeats it and names another ("Creature Footsteps") or
-     most files name a subcategory of another ("Male_ShortSet" files → VOICES / MALE; not a
-     category, those are often materials: "Footsteps/Snow - Crunchy" stays FOOTSTEPS); MISC/GENERAL loses only to evidence for the subcategories at the
+     3+ subcategories of a category gives all of them a synonym's point, and the one named
+     after it keeps its own ("Trucks": TRUCK VAN & SUV); the parent's category lock is
+     released when the folder repeats it and names another ("Creature Footsteps"), or when
+     the parent isn't just the category's name and most files name a subcategory of another
+     ("Human Vocal Full Sets/Male_…" → VOICES / MALE; never on a word that names a category,
+     those are materials: "Footsteps/Glass" stays FOOTSTEPS though DOORS / GLASS exists);
+     under a lock the parent's words name a group, so "Monsters & Creatures/Ghosts" is
+     ETHEREAL, not MONSTER (their synonyms still count: "Footstep" → FOOTSTEPS / HUMAN);
+     sound shares shrink when under a quarter of the neighbour places have a category (three
+     sword neighbours aren't "100% swords"); MISC/GENERAL loses only to evidence for the subcategories at the
      top; ARCHIVED is never suggested; the last of the 3 options comes from another category
      when the others share one; words split as UCS spells them (StreetBall, Sci-Fi → scifi,
-     Braaams → braam, Whooshes → whoosh). Tried and dropped (measured worse): discounting a
+     Braaams → braam, Whooshes → whoosh, Zombies → zombie and zomby). Tried and dropped (measured worse): discounting a
      word by how many categories use it, "misc" as a stop word, a bonus for words in the UCS
      explanation, ignoring file words that repeat the name.
      **Accuracy** (`earmark-parity folders <copy of library.sqlite> --truth local/folder_truth.tsv`):
-     43 vendor-labelled folders 79% top 1, 91% top 3, 91% category (was 79/86/91); 107
-     uncategorised folders checked by hand 66% top 1, 80% top 3, 79% category (was
-     47/63/70). The hand-checked list is the owner's library data: `local/` (git-ignored),
-     judged from folder and file names without listening, alternatives allowed. 23 of 214
+     43 vendor-labelled folders 79% top 1, 93% top 3, 91% category (was 79/86/91); 107
+     uncategorised folders checked by hand 67% top 1, 80% top 3, 79% category (was
+     47/63/70). The hand-checked list had few Footsteps folders, and the first version broke
+     them (files "Foot_Glass_…" released the lock): compare every folder with the last
+     version too (`--list 0 --tops` in a worktree of the old commit and in this one; 2026-10-26:
+     81 changed, 25 fixed and 3 broken among the hand-checked). The hand-checked list is the owner's library data: `local/` (git-ignored),
+     judged from folder and file names without listening, alternatives allowed. 26 of 214
      folders are flagged "listen first". `--explain 0 <folder text>` shows each signal;
      `EARMARK_TUNING="pack=0,file=0.3,…"` switches parts off to measure them. Cases asked
      about: Boom Library packs no longer get DESIGNED / BOOM from the vendor's name, and Lens

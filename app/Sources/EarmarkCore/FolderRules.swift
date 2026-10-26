@@ -94,6 +94,8 @@ public enum FolderSuggester {
         public var minFileShare = 0.3
         /// The last of the options goes to another category when all the others share one.
         public var otherCategoryLast = true
+        /// Sound shares count fully once this share of the nearest-neighbour places have a category.
+        public var soundCoverage = 0.25
 
         public init() {}
         public static let standard = Tuning()
@@ -149,6 +151,8 @@ public enum FolderSuggester {
         var out: [String] = []
         for (i, t) in tokens.enumerated() {
             out.append(stem(t))
+            // "-ies" is "-y" (Batteries) or "-ie" (Zombies, Movies): keep both.
+            if t.count > 4, t.lowercased().hasSuffix("ies") { out.append(String(t.lowercased().dropLast())) }
             if i > 0, ["scifi", "hitech"].contains((tokens[i - 1] + t).lowercased()) { out.append((tokens[i - 1] + t).lowercased()) }
         }
         return (out + joined.map(stem)).filter { $0.count > 1 && !stemmedStopWords.contains($0) }
@@ -231,6 +235,8 @@ public enum FolderSuggester {
         let subcategorySpread: [String: [String: Int]]
         /// Category → its entries.
         let byCategory: [String: [Int]]
+        /// Words of category names ("glass", "metal", "footstep"…).
+        let categoryWords: Set<String>
 
         init(_ catalog: UCSCatalog) {
             entries = catalog.entries.map { e in
@@ -246,6 +252,7 @@ public enum FolderSuggester {
             self.byWord = byWord
             subcategorySpread = spread
             self.byCategory = byCategory
+            categoryWords = Set(entries.flatMap(\.category))
         }
 
         static let shared = Lexicon(.shared)
@@ -257,6 +264,10 @@ public enum FolderSuggester {
         var word: String
         var weight: Double
         var fromName: Bool
+        /// A parent folder's word under its lock: it names a group ("Monsters & Creatures"), not
+        /// a subcategory, so a subcategory named like it gets nothing for it; its synonyms still
+        /// count ("Footstep" is a synonym of FOOTSTEPS / HUMAN, the usual footsteps).
+        var groupName = false
     }
 
     struct NameScore {
@@ -285,23 +296,25 @@ public enum FolderSuggester {
         }
         for ev in evidence {
             guard let hits = lexicon.byWord[ev.word] else { continue }
-            var general: [String: Double] = [:]   // category → best subcategory points
+            var general = Set<String>()   // categories where the word is only a synonym-level hint
             for i in hits {
                 let e = lexicon.entries[i]
                 let c = e.category.contains(ev.word) ? 3.0 : 0
-                let sub = (e.subcategory.contains(ev.word) ? 2.0 : 0) + (e.synonyms.contains(ev.word) ? 1.0 : 0)
+                let named = e.subcategory.contains(ev.word) && !ev.groupName ? 2.0 : 0
+                let sub = named + (e.synonyms.contains(ev.word) ? 1.0 : 0)
                 // A word in 3+ subcategories of one category says only "this category"
                 // ("Automobile" is a synonym of VEHICLES / ALARM, BRAKE, CAR, MISC…): every
-                // subcategory gets the same points, below.
+                // subcategory gets a synonym's point, below; one named after the word keeps
+                // the rest ("Trucks": VEHICLES / TRUCK VAN & SUV).
                 if (lexicon.subcategorySpread[ev.word]?[e.entry.category] ?? 0) >= 3 {
-                    general[e.entry.category] = max(general[e.entry.category] ?? 0, sub)
-                    if c > 0 { add(i, c, categoryPart: c, ev) }
+                    general.insert(e.entry.category)
+                    if c + named > 0 { add(i, c + named, categoryPart: c, ev) }
                 } else {
                     add(i, c + sub, categoryPart: c, ev)
                 }
             }
-            for (category, sub) in general {
-                for i in lexicon.byCategory[category] ?? [] { add(i, sub, categoryPart: sub, ev) }
+            for category in general {
+                for i in lexicon.byCategory[category] ?? [] { add(i, 1, categoryPart: 1, ev) }
             }
         }
         return out
@@ -314,20 +327,27 @@ public enum FolderSuggester {
     }
 
     /// Share of categorised neighbours per CatID: for up to `sample` of the folder's sounds,
-    /// the `k` nearest sounds that have a category (`labels`), weighted by similarity.
+    /// the `k` nearest sounds that have a category (`labels`, among the 4k nearest), weighted
+    /// by similarity. When fewer than `fullAt` of those k places are found, the shares shrink
+    /// in proportion: three neighbours that happen to be swords aren't "100% swords".
     public static func soundShares(soundIds: [Int64], index: SimilarityIndex, labels: [Int64: String],
-                                   k: Int = 10, sample: Int = 40) -> [String: Double] {
+                                   k: Int = 10, sample: Int = 40, fullAt: Double = 0.25) -> [String: Double] {
         let picked = soundIds.count <= sample ? soundIds
             : stride(from: 0, to: soundIds.count, by: max(1, soundIds.count / sample)).map { soundIds[$0] }
         let own = Set(soundIds)
         var votes: [String: Double] = [:]
+        var found = 0, places = 0
         for id in picked where index.contains(id) {
             // Only categorised sounds from other folders can vote.
             let near = index.nearest(to: id, count: k * 4, excluding: own).filter { labels[$0.id] != nil }.prefix(k)
             for n in near { votes[labels[n.id]!, default: 0] += Double(max(0, n.score)) }
+            found += near.count
+            places += k
         }
         let total = votes.values.reduce(0, +)
-        return total > 0 ? votes.mapValues { $0 / total } : [:]
+        guard total > 0 else { return [:] }
+        let coverage = fullAt > 0 ? min(1, Double(found) / (fullAt * Double(places))) : 1
+        return votes.mapValues { coverage * $0 / total }
     }
 
     /// Up to `count` options, best first. Name, files and sound are combined; a name that only
@@ -337,7 +357,7 @@ public enum FolderSuggester {
                                fileWords: [String: Double] = [:], packWords: Set<String> = [],
                                catalog: UCSCatalog = .shared, count: Int = 3, tuning: Tuning = .standard) -> [Option] {
         let lexicon = Lexicon.of(catalog)
-        let allShares = index.map { soundShares(soundIds: soundIds, index: $0, labels: labels) } ?? [:]
+        let allShares = index.map { soundShares(soundIds: soundIds, index: $0, labels: labels, fullAt: tuning.soundCoverage) } ?? [:]
         var categoryShare: [String: Double] = [:]
         for (catID, s) in allShares { if let e = catalog.entry(catID: catID) { categoryShare[e.category, default: 0] += s } }
         // Vendor and pack names: the designer's, and the top folder's when the folder is deeper
@@ -352,7 +372,41 @@ public enum FolderSuggester {
                     || e.category.contains(word) && (categoryShare[e.entry.category] ?? 0) >= 0.25
             }
         }
-        var evidence = folderWords(folder).map { Evidence(word: $0.word, weight: $0.weight, fromName: true) }
+        // A parent folder that names one UCS category decides the category; the folder below
+        // is a variant ("Footsteps/Metal - Steel" is FOOTSTEPS, not METAL).
+        var locked: String?
+        if parts.count >= 2 {
+            func named(_ ws: Set<String>) -> Set<String> {
+                Set(lexicon.entries.filter { !$0.category.isDisjoint(with: ws.subtracting(pack)) }.map(\.entry.category))
+            }
+            let parentWords = Set(words(parts[parts.count - 2])).subtracting(pack)
+            let parent = named(parentWords)
+            if parent.count == 1, let category = parent.first {
+                // A parent that is only the category's name ("Footsteps") holds its folders
+                // whatever their files say ("Leaves", "Swamp"); one with other words that mean
+                // something ("Human Vocal Full Sets") is a looser grouping.
+                let ownName = Set(catalog.subcategories(of: category).first.map { words($0.category) } ?? [])
+                let loose = parentWords.subtracting(ownName).contains { lexicon.byWord[$0] != nil }
+                let leaf = named(Set(words(parts[parts.count - 1])))
+                // Most files name a subcategory of another category, not this one ("Mechanical/
+                // …CameraShutter": COMMUNICATIONS / CAMERA). Not a word that names a category
+                // anywhere: those are materials, which the lock is for ("Footsteps/Glass",
+                // "Foot_Glass_…", even though DOORS and RAIN have a GLASS subcategory).
+                let files = Set(fileWords.filter { $0.value >= 0.5 }.keys).subtracting(lexicon.categoryWords)
+                let filesElsewhere = lexicon.entries.filter { !$0.subcategory.isDisjoint(with: files) }.map(\.entry.category)
+                let released = tuning.leafOverridesParent
+                    && (leaf.contains(category) && leaf.count >= 2
+                        || loose && !filesElsewhere.isEmpty && !filesElsewhere.contains(category))
+                if !released { locked = category }
+            }
+        }
+        // Under a lock the parent's words name a group: the folder's own words, its files and
+        // the sound pick the subcategory ("Monsters & Creatures/Ghosts" is ETHEREAL, not MONSTER).
+        let parentOnly = parts.count >= 2 && locked != nil
+            ? Set(words(parts[parts.count - 2])).subtracting(words(parts[parts.count - 1])) : []
+        var evidence = folderWords(folder).map {
+            Evidence(word: $0.word, weight: $0.weight, fromName: true, groupName: parentOnly.contains($0.word))
+        }
         evidence.removeAll { pack.contains($0.word) && !soundAgrees($0.word) }
         // The files' words decide when the name is vague ("Hockey" is only a synonym, of six
         // subcategories); beside a name that names a category or subcategory they count less.
@@ -368,27 +422,6 @@ public enum FolderSuggester {
         let maxName = detailed.values.map(\.score).max() ?? 0
         var candidates = Set(detailed.keys).union(shares.keys)
         if candidates.isEmpty { return [] }
-        // A parent folder that names one UCS category decides the category; the folder below
-        // is a variant ("Footsteps/Metal - Steel" is FOOTSTEPS, not METAL).
-        var locked: String?
-        if parts.count >= 2 {
-            func named(_ ws: Set<String>) -> Set<String> {
-                Set(lexicon.entries.filter { !$0.category.isDisjoint(with: ws.subtracting(pack)) }.map(\.entry.category))
-            }
-            let parent = named(Set(words(parts[parts.count - 2])))
-            if parent.count == 1, let category = parent.first {
-                let leaf = named(Set(words(parts[parts.count - 1])))
-                // Most files name a subcategory of another category, not this one ("Mechanical/
-                // …CameraShutter": COMMUNICATIONS / CAMERA). Not a category: those are often
-                // materials, which the lock is for ("Footsteps/Snow - Crunchy", "Foot_Snow_…").
-                let files = Set(fileWords.filter { $0.value >= 0.5 }.keys)
-                let filesElsewhere = lexicon.entries.filter { !$0.subcategory.isDisjoint(with: files) }.map(\.entry.category)
-                let released = tuning.leafOverridesParent
-                    && (leaf.contains(category) && leaf.count >= 2
-                        || !filesElsewhere.isEmpty && !filesElsewhere.contains(category))
-                if !released { locked = category }
-            }
-        }
         // Every subcategory of a category the name points to can be chosen by sound.
         for (catID, _) in detailed { if let e = catalog.entry(catID: catID) {
             for sub in catalog.subcategories(of: e.category) { candidates.insert(sub.catID) }

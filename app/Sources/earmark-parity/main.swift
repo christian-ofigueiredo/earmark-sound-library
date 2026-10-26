@@ -49,6 +49,7 @@ if args.count >= 3, args[1] == "folders" {
         case "sharedw": tuning.sharedDescriptionWeight = v
         case "minshare": tuning.minFileShare = v
         case "other": tuning.otherCategoryLast = v != 0
+        case "coverage": tuning.soundCoverage = v
         default: print("unknown tuning \(p[0])")
         }
     }
@@ -164,6 +165,8 @@ if args.count >= 3, args[1] == "folders" {
             "\(o.entry.label) [\(o.words.joined(separator: ","))\(o.soundShare > 0 ? String(format: " ♪%.0f%%", o.soundShare * 100) : "")]"
         }.joined(separator: "  |  ")
         let weak = options.first.map { $0.isUncertain || $0.words.isEmpty && $0.fileWords.isEmpty && $0.soundShare < 0.3 } ?? false
+        // --tops: one tab-separated line per folder, for comparing two versions.
+        if args.contains("--tops") { print("TOP\t" + members[0].folder + "\t" + (options.first?.entry.catID ?? "-") + "\t" + text); continue }
         print(String(format: "%4d  ", members.count) + members[0].folder.split(separator: "/").suffix(2).joined(separator: "/") + "  →  " + text
               + (weak ? "  ⚠︎ listen first" : ""))
     }

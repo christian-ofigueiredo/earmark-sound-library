@@ -251,6 +251,7 @@ import Testing
         #expect(FolderSuggester.words("SCI FI WEAPONS").contains("scifi"))
         #expect(FolderSuggester.words("Powerful Braaams").contains("braam"))      // UCS: BRAAM
         #expect(FolderSuggester.words("Whooshes & Glitches, Boxes") == ["whoosh", "glitch", "box"])
+        #expect(FolderSuggester.words("Zombies").contains("zombie") && FolderSuggester.words("Batteries").contains("battery"))
         #expect(FolderSuggester.words("MA_SoundsByGFXSounds_CameraShutter").contains("camera"))
     }
 
@@ -275,12 +276,17 @@ import Testing
         }
         #expect(top("Pack/TSK-03/Footsteps/Snow - Crunchy") == "FEETHmn")              // SNOW is a material here
         #expect(top("Pack/Monsters & Creatures/Creature Footsteps") == "FEETCrea")     // footsteps of creatures
-        // Most files name another subcategory (COMMUNICATIONS / CAMERA): the parent doesn't lock.
-        let camera = FolderSuggester.suggest(folder: "Various/Mechanical/MA_SoundsByGFXSounds_CameraShutter", soundIds: [],
-                                             index: nil, labels: [:], fileWords: ["camera": 1, "shutter": 1])
-        #expect(camera.first?.entry.catID == "COMCam", "\(camera.map(\.entry.catID))")
+        // A loose parent ("Human Vocal Full Sets": HUMAN, but "vocal" too) gives way when most
+        // files name a subcategory of another category (VOICES / MALE)…
+        let male = FolderSuggester.suggest(folder: "Pack/Human Vocal Full Sets/Male_LongSet_A", soundIds: [],
+                                           index: nil, labels: [:], fileWords: ["male": 1, "grunt": 0.5])
+        #expect(male.first?.entry.catID == "VOXMale", "\(male.map(\.entry.catID))")
+        // …a parent that is just the category's name doesn't: footsteps on leaves (VEGETATION / LEAVES).
+        #expect(top("Pack/TSK-03/Footsteps/Leaves", files: ["foot": 1, "leaf": 1, "leave": 1]) == "FEETHmn")
         // …but files naming a material keep it locked: footsteps on snow.
         #expect(top("Pack/TSK-03/Footsteps/Snow - Crunchy", files: ["foot": 1, "snow": 1, "crunchy": 1]) == "FEETHmn")
+        #expect(top("Pack/TSK-03/Footsteps/Glass", files: ["foot": 1, "glass": 1]) == "FEETHmn")      // DOORS / GLASS exists
+        #expect(top("Pack/TSK-03/Footsteps/Wood - Hollow Deck", files: ["foot": 1, "wood": 1]) == "FEETHmn")
         // The last of three options comes from another category when the others share one.
         let gears = FolderSuggester.suggest(folder: "Pack/Mechanical", soundIds: [], index: nil, labels: [:])
         #expect(gears.first?.entry.category == "MECHANICAL")
