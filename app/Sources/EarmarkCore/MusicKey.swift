@@ -17,6 +17,9 @@ public struct MusicKey: Sendable, Hashable, Codable {
         "F#": 6, "GB": 6, "G": 7, "G#": 8, "AB": 8, "A": 9, "A#": 10, "BB": 10, "B": 11, "CB": 11,
     ]
 
+    /// The 24 keys: the major ones from C up, then the minor ones.
+    public static let all: [MusicKey] = [false, true].flatMap { minor in (0 ..< 12).map { MusicKey(pitchClass: $0, minor: minor) } }
+
     /// "A minor", "Bb major".
     public var name: String {
         "\((minor ? Self.minorNames : Self.majorNames)[pitchClass]) \(minor ? "minor" : "major")"

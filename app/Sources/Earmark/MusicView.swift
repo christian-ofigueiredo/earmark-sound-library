@@ -5,6 +5,8 @@ import SwiftUI
 enum MusicScope: Hashable, Sendable {
     case all
     case library(Int64)
+    /// Songs with a tempo, key or beats per bar set by hand.
+    case corrected
 }
 
 /// What the song list shows: scope, search, tempo/key filters, sort and selection.
@@ -98,6 +100,7 @@ final class MusicBrowser {
         let found = songs.indices.filter { i in
             let s = songs[i]
             if case .library(let id) = scope, s.libraryId != id { return false }
+            if scope == .corrected, s.correction == nil { return false }
             return matchesTempo(s.bpm) && matchesKey(s.key) && terms.allSatisfy { haystacks[i].contains($0) }
         }
         visible = FastSort.sorted(found.map { songs[$0] }, by: sortOrder)
@@ -133,6 +136,10 @@ struct MusicSidebar: View {
                 .foregroundStyle(.secondary)
             }
             Section("Tempo and Key") {
+                // The songs whose tempo, key or beats per bar you set by hand, to review them.
+                Label("Corrected by You", systemImage: "pencil.line")
+                    .badge(model.songIndex.corrected)
+                    .tag(MusicScope.corrected)
                 Text("\(model.songIndex.analysed.formatted()) of \(model.songs.count.formatted()) songs analysed")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -187,6 +194,7 @@ struct MusicFilterBar: View {
 
 struct SongTable: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         @Bindable var browser = model.musicBrowser
@@ -250,6 +258,22 @@ struct SongTable: View {
             items.append(.divider)
         }
         if !picked.isEmpty {
+            // Corrections by hand, for every selected song they apply to (Edit ▸ Undo takes them back).
+            let ids = picked.map(\.id), undo = undoManager, one = picked.count == 1 ? picked.first : nil
+            func run(_ e: SongEdit) -> () -> Void { { model.edit(e, songs: ids, undo: undo) } }
+            func any(_ e: SongEdit) -> Bool { picked.contains { $0.allows(e) } }
+            func keys(_ group: ArraySlice<MusicKey>) -> [RecordMenuItem] {
+                group.map { k in .action("\(k.name) · \(k.camelot)", checked: one?.key == k, run(.setKey(k))) }
+            }
+            items.append(.action("Double Tempo", enabled: any(.doubleTempo), run(.doubleTempo)))
+            items.append(.action("Halve Tempo", enabled: any(.halveTempo), run(.halveTempo)))
+            items.append(.action("Use Relative Key", enabled: any(.relativeKey), run(.relativeKey)))
+            items.append(.submenu("Set Key", keys(MusicKey.all.prefix(12)) + [.divider] + keys(MusicKey.all.suffix(12))))
+            items.append(.submenu("Beats per Bar", [2, 3, 4, 6].map { n in
+                .action("\(n)", checked: one?.beatsPerBar == n, run(.setBeatsPerBar(n)))
+            }))
+            items.append(.action("Revert to Analysed Values", enabled: any(.revertAll), run(.revertAll)))
+            items.append(.divider)
             items.append(.action("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(picked.map(\.url)) })
             items.append(.action(picked.count == 1 ? "Copy Path" : "Copy Paths") {
                 copyToPasteboard(picked.map(\.path).joined(separator: "\n"))
@@ -278,7 +302,10 @@ struct SongDetailPane: View {
 
 struct SongDetail: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.undoManager) private var undoManager
     let song: SongRecord
+    @State private var settingTempo = false
+    @State private var tempoText = ""
 
     var body: some View {
         let online = model.isOnline(libraryId: song.libraryId)
@@ -298,13 +325,14 @@ struct SongDetail: View {
                 } else {
                     OfflineNotice(library: model.library(id: song.libraryId))
                 }
-                if let id = song.id, let why = model.analysis.unreadableSongs[id] {
+                let unreadable = song.id.flatMap { model.analysis.unreadableSongs[$0] }
+                if let why = unreadable {
                     Text("Earmark couldn't read this file to work out its tempo and key. It tries again next time it opens.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .help(why)
-                } else if !song.isAnalysed {
+                } else if !song.isAnalysed && song.correction == nil {
                     Text(model.analysis.musicUnavailable == "model not installed"
                          ? "Not analysed yet. Earmark's tempo and key models aren't installed; you can import "
                            + "Phase 0's results instead (File ▸ Import Phase 0 Music Analysis…)."
@@ -312,7 +340,9 @@ struct SongDetail: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                } else {
+                }
+                // Shown once there's something to show or correct (an unreadable file can be set by hand).
+                if unreadable != nil || song.isAnalysed || song.correction != nil {
                     HStack(alignment: .top, spacing: 28) {
                         tempo
                         key
@@ -323,7 +353,7 @@ struct SongDetail: View {
                 InfoGrid([
                     ("Album", song.album),
                     ("Length", formatLength(song.duration, precise: false)),
-                    ("Analysis", song.analysisSource),
+                    ("Analysis", analysisText),
                     ("Folder", song.folder),
                     ("File", song.fileName),
                 ])
@@ -332,28 +362,105 @@ struct SongDetail: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .alert("Set Tempo", isPresented: $settingTempo) {
+            TextField("BPM", text: $tempoText)
+            Button("Set") { if let bpm = typedTempo { edit(.setTempo(bpm)) } }
+                .disabled(typedTempo == nil)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // The field starts empty (an alert's text field doesn't take a starting value on macOS).
+            Text((song.bpm.map { "Now \(formatBPM($0)) BPM. " } ?? "")
+                 + "Between \(Int(SongEdit.tempoRange.lowerBound)) and \(Int(SongEdit.tempoRange.upperBound)) BPM.")
+        }
+    }
+
+    private func edit(_ e: SongEdit) { model.edit(e, songs: [song.id], undo: undoManager) }
+
+    private var typedTempo: Double? {
+        let text = tempoText.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+        return Double(text).flatMap { SongEdit.tempoRange.contains($0) ? $0 : nil }
+    }
+
+    /// "Phase 0 · tempo and key corrected by you".
+    private var analysisText: String? {
+        guard let c = song.correction else { return song.analysisSource }
+        let parts = [c.correctsTempo ? "tempo" : nil, c.correctsKey ? "key" : nil, c.correctsBeatsPerBar ? "beats per bar" : nil]
+            .compactMap { $0 }
+        let what = parts.count > 1 ? parts.dropLast().joined(separator: ", ") + " and " + parts.last! : parts.joined()
+        return [song.analysisSource, "\(what) corrected by you"].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// "Set by you · Phase 0 found 61.8 BPM".
+    private func setByYou(found: String) -> String {
+        guard song.isAnalysed, let source = song.analysisSource else { return "Set by you" }
+        return "Set by you · \(source) found \(found)"
     }
 
     private var tempo: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("Tempo").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text("Tempo").font(.caption).foregroundStyle(.secondary)
+                ChangeMenu { tempoMenu }
+            }
             Text(song.bpm.map { "\(formatBPM($0)) BPM" } ?? "No steady beat")
                 .font(.title3.weight(.semibold))
                 .monospacedDigit()
+            if song.correction?.correctsTempo == true {
+                Text(setByYou(found: song.analysed?.bpm.map { "\(formatBPM($0)) BPM" } ?? "no steady beat"))
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if song.tempoStability == "variable", let lo = song.bpmLow, let hi = song.bpmHigh {
                 Text("Changes: \(formatBPM(lo))–\(formatBPM(hi))").font(.callout).foregroundStyle(.secondary)
             }
             if let beats = song.beatsPerBar {
-                Text("\(beats) beats per bar").font(.callout).foregroundStyle(.secondary)
+                Text("\(beats) beats per bar" + (song.correction?.correctsBeatsPerBar == true ? " · set by you" : ""))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var tempoMenu: some View {
+        if let bpm = song.bpm {
+            Button("Double: \(formatBPM(bpm * 2)) BPM") { edit(.doubleTempo) }
+                .disabled(!song.allows(.doubleTempo))
+            Button("Half: \(formatBPM(bpm / 2)) BPM") { edit(.halveTempo) }
+                .disabled(!song.allows(.halveTempo))
+        }
+        Button("Set Tempo…") {
+            tempoText = ""
+            settingTempo = true
+        }
+        Picker("Beats per Bar", selection: Binding(get: { song.beatsPerBar }, set: { if let n = $0 { edit(.setBeatsPerBar(n)) } })) {
+            ForEach([2, 3, 4, 6], id: \.self) { Text("\($0)").tag(Optional($0)) }
+        }
+        .pickerStyle(.menu)
+        if let c = song.correction, c.correctsTempo || c.correctsBeatsPerBar {
+            Divider()
+            if c.correctsTempo {
+                Button("Revert to \(song.analysed?.bpm.map { "\(formatBPM($0)) BPM" } ?? "No Steady Beat")") { edit(.revertTempo) }
+            }
+            if c.correctsBeatsPerBar {
+                Button("Revert to \(song.analysed?.beatsPerBar.map { "\($0) Beats per Bar" } ?? "No Beats per Bar")") {
+                    edit(.revertBeatsPerBar)
+                }
             }
         }
     }
 
     private var key: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("Key").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text("Key").font(.caption).foregroundStyle(.secondary)
+                ChangeMenu { keyMenu }
+            }
             if let k = song.key {
                 Text("\(k.name) · \(k.camelot)").font(.title3.weight(.semibold))
+                if song.correction?.correctsKey == true {
+                    Text(setByYou(found: song.analysed?.key.map { "\($0.name) (\($0.camelot))" } ?? "no key"))
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Text("Or \(k.relative.name) (\(k.relative.camelot)), its relative key: same notes, and the most common mix-up.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -362,5 +469,38 @@ struct SongDetail: View {
                 Text("Unknown").font(.title3.weight(.semibold))
             }
         }
+    }
+
+    @ViewBuilder private var keyMenu: some View {
+        if let k = song.key {
+            Button("Use Relative Key: \(k.relative.name) · \(k.relative.camelot)") { edit(.relativeKey) }
+        }
+        Picker("Set Key", selection: Binding(get: { song.key }, set: { if let k = $0 { edit(.setKey(k)) } })) {
+            ForEach(MusicKey.all.prefix(12), id: \.self) { k in Text("\(k.name) · \(k.camelot)").tag(Optional(k)) }
+            Divider()
+            ForEach(MusicKey.all.suffix(12), id: \.self) { k in Text("\(k.name) · \(k.camelot)").tag(Optional(k)) }
+        }
+        .pickerStyle(.menu)
+        if song.correction?.correctsKey == true {
+            Divider()
+            Button("Revert to \(song.analysed?.key?.name ?? "Unknown")") { edit(.revertKey) }
+        }
+    }
+}
+
+/// The small "Change" menu beside a tempo or key the user can correct.
+private struct ChangeMenu<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Menu {
+            content
+        } label: {
+            Text("Change").font(.caption)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Correct it by hand (Edit ▸ Undo takes it back)")
     }
 }

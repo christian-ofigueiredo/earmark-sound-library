@@ -25,7 +25,8 @@ struct RecordColumn<Record> {
 
 /// An entry of a `RecordTable`'s context menu.
 enum RecordMenuItem {
-    case action(String, enabled: Bool = true, () -> Void)
+    case action(String, enabled: Bool = true, checked: Bool = false, () -> Void)
+    case submenu(String, enabled: Bool = true, [RecordMenuItem])
     case divider
 }
 
@@ -319,15 +320,34 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
                 return
             }
             // The clicked row's menu acts on the selection if the row is in it, else on that row.
+            // Opened without a click (VoiceOver, the keyboard), it acts on the selection.
             let row = table.clickedRow
-            guard row >= 0, row < rows.count else { return }
-            let ids = table.selectedRowIndexes.contains(row) ? selectedIDs : [rows[row].id]
-            for entry in parent.menu(ids) {
+            let ids: Set<Record.ID>
+            if row >= 0, row < rows.count {
+                ids = table.selectedRowIndexes.contains(row) ? selectedIDs : [rows[row].id]
+            } else {
+                ids = selectedIDs
+            }
+            guard !ids.isEmpty else { return }
+            Self.add(parent.menu(ids), to: menu)
+        }
+
+        static func add(_ entries: [RecordMenuItem], to menu: NSMenu) {
+            for entry in entries {
                 switch entry {
                 case .divider:
                     menu.addItem(.separator())
-                case .action(let title, let enabled, let action):
+                case .action(let title, let enabled, let checked, let action):
                     let item = ClosureMenuItem(title, action: action)
+                    item.isEnabled = enabled
+                    item.state = checked ? .on : .off
+                    menu.addItem(item)
+                case .submenu(let title, let enabled, let entries):
+                    let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                    let sub = NSMenu(title: title)
+                    sub.autoenablesItems = false
+                    add(entries, to: sub)
+                    item.submenu = sub
                     item.isEnabled = enabled
                     menu.addItem(item)
                 }

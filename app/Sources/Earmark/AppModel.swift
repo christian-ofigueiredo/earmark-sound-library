@@ -32,6 +32,7 @@ struct LibrarySnapshot: Sendable {
     var soundIndex: SoundIndex
     var songs: [SongRecord]
     var songIndex: SongIndex
+    var songCorrections: [String: SongCorrection]
     var folderRules: [FolderRule]
     var folderGuesses: [FolderGuess]
 
@@ -43,7 +44,9 @@ struct LibrarySnapshot: Sendable {
         // else Earmark's guess (Folder Categories).
         sounds = FolderRules.apply(folderRules, guesses: folderGuesses, to: try db.sounds())
         soundIndex = SoundIndex(sounds)
-        songs = try db.songs()
+        // Songs show the tempo, key and beats per bar the user set by hand over what was analysed.
+        songCorrections = Dictionary(try db.songCorrections().map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+        songs = SongCorrections.apply(songCorrections, to: try db.songs())
         songIndex = SongIndex(songs)
     }
 }
@@ -78,6 +81,10 @@ final class AppModel {
     private(set) var soundIndex = SoundIndex([])
     private(set) var songs: [SongRecord] = []
     private(set) var songIndex = SongIndex([])
+    /// Tempo, key and beats per bar set by hand, by file path (already applied to `songs`).
+    private(set) var songCorrections: [String: SongCorrection] = [:]
+    /// Corrections are saved one after another, so quick edits reach the database in order.
+    @ObservationIgnored private var correctionWrites: Task<Void, Never>?
     private(set) var folderRules: [FolderRule] = []
     private(set) var folderGuesses: [FolderGuess] = []
     /// Earmark guessing categories for folders (status bar).
@@ -161,6 +168,7 @@ final class AppModel {
             soundIndex = snap.soundIndex
             songs = snap.songs
             songIndex = snap.songIndex
+            songCorrections = snap.songCorrections
             folderRules = snap.folderRules
             folderGuesses = snap.folderGuesses
             version += 1
@@ -177,10 +185,44 @@ final class AppModel {
     func updateSongs(_ updated: [SongRecord]) {
         guard !updated.isEmpty else { return }
         for rec in updated {
-            if let id = rec.id, let i = songIndex.position[id] { songs[i] = rec }
+            if let id = rec.id, let i = songIndex.position[id] { songs[i] = rec.applying(songCorrections[rec.path]) }
         }
         songIndex = SongIndex(songs)
         songsVersion += 1
+    }
+
+    /// Corrects these songs' tempo, key or beats per bar by hand; Edit ▸ Undo takes it back.
+    /// Only Earmark's database changes, and what was analysed stays (for Revert).
+    func edit(_ edit: SongEdit, songs ids: [SongRecord.ID], undo: UndoManager?) {
+        let picked = ids.compactMap { song(id: $0) }.filter { $0.allows(edit) }
+        guard !picked.isEmpty else { return }
+        let now = Date()
+        setCorrections(picked.map { ($0.path, $0.correction(after: edit, at: now)) }, title: edit.title, undo: undo)
+    }
+
+    private func setCorrections(_ changes: [(path: String, correction: SongCorrection?)], title: String, undo: UndoManager?) {
+        let before = changes.map { (path: $0.path, correction: songCorrections[$0.path]) }
+        for (path, correction) in changes { songCorrections[path] = correction }
+        let paths = Set(changes.map(\.path))
+        for i in songs.indices where paths.contains(songs[i].path) { songs[i] = songs[i].applying(songCorrections[songs[i].path]) }
+        songIndex = SongIndex(songs)
+        songsVersion += 1
+        if let db = database {
+            let previous = correctionWrites
+            correctionWrites = Task { [weak self] in
+                await previous?.value
+                do {
+                    try await Task.detached(priority: .userInitiated) { try db.setSongCorrections(changes) }.value
+                } catch {
+                    self?.show(error, title: "Couldn't save the change")
+                }
+            }
+        }
+        // Undo puts back what was there; its own undo (Redo) puts this back.
+        undo?.registerUndo(withTarget: self) { [weak undo] model in
+            MainActor.assumeIsolated { model.setCorrections(before, title: title, undo: undo) }
+        }
+        undo?.setActionName(title)
     }
 
     func sound(id: SoundRecord.ID) -> SoundRecord? {

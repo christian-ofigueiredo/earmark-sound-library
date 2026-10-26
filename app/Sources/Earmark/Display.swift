@@ -126,6 +126,8 @@ struct SongIndex: Sendable {
     var haystacks: [String] = []
     var libraryCounts: [Int64: Int] = [:]
     var analysed = 0
+    /// Songs with a tempo, key or beats per bar set by hand.
+    var corrected = 0
 
     init(_ songs: [SongRecord]) {
         haystacks.reserveCapacity(songs.count)
@@ -134,6 +136,7 @@ struct SongIndex: Sendable {
             haystacks.append(s.searchText)
             libraryCounts[s.libraryId, default: 0] += 1
             if s.isAnalysed { analysed += 1 }
+            if s.correction != nil { corrected += 1 }
         }
     }
 }

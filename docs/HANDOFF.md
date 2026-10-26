@@ -347,6 +347,26 @@ Settings → Repository name. Topics/description also have to be set there.
      CLAP); a song whose file changes keeps its old analysis (as rescans always did); a
      20-minute song holds ~450 MB while analysed; tempo confidence and the key's runner-up
      are worked out but not stored (no columns).
+   - ~~Tempo and key corrections by hand~~ Done, 2026-10-26 (owner approved the plan). Detail
+     pane: a "Change" menu beside Tempo (Double, Half, Set Tempo…, Beats per Bar ▸, Revert)
+     and Key (Use Relative Key, Set Key ▸ with Camelot codes, Revert); a corrected value says
+     "Set by you · Phase 0 found 123.5 BPM", and Analysis "Phase 0 · tempo corrected by you".
+     The list's row menu does the same for every selected song (Double/Halve Tempo, Use
+     Relative Key, Set Key ▸, Beats per Bar ▸, Revert to Analysed Values). Edit ▸ Undo/Redo
+     (the window's undo manager). Sidebar: Tempo and Key ▸ "Corrected by You". Stored in
+     `songCorrection` (schema v7) by file path, no FK, like folder rules: survives rescans,
+     removing and re-adding the folder, Phase 0 imports and Earmark's analysis, none of which
+     touch it; the song table keeps what was analysed, for Revert. `SongCorrections` (core,
+     7 tests): edits are pure functions (`SongRecord.correction(after:)`); a part set back to
+     the analysed value (Double then Half, relative twice, a typed tempo equal to it) is no
+     longer a correction. Double/Half scale the "Changes" range; a typed tempo hides it. On
+     load the corrections are laid over the songs (`AppModel`, also after Earmark's analysis
+     comes in), so the list, filters, Camelot, sorting, search and Find Songs That Mix use the
+     user's values; `isAnalysed` ignores them. Set Tempo… is an alert whose field starts
+     empty (an alert's text field ignores a starting value on macOS), so its message says
+     the current tempo. The row menu now also opens without a click (VoiceOver), on the
+     selection. Checked in the app on one of the owner's songs (every menu, undo/redo, the
+     sidebar list, a relaunch), then reverted; the database matched its backup.
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
      only 13–16%).
 5. Phase 4: Resolve Studio bridge for sending only a selected range. Use the scripting
@@ -515,3 +535,14 @@ Settings → Repository name. Topics/description also have to be set there.
   clicks failed on the 3-display setup on 2026-10-25 (they landed on the desktop). UI
   scripting works: `osascript` → System Events → `click menu button …`, then
   `click menu item "…" of menu 1 of it`; table rows via `set selected of row N to true`.
+  But System Events' `entire contents` timed out (2 min) with the song list in the window:
+  find controls with a small Swift AX tool that skips `AXTable`/`AXOutline` (and never
+  searches the menu bar). Only the table offers AXShowMenu, and it didn't open the row menu;
+  on 2026-10-26 computer-use clicks on "LU28R55 (2)" didn't land at all, but CGEvent clicks
+  posted from a Swift tool at global coordinates (points, that monitor at 0,0, ×1.758 from the
+  screenshot frame) did. SwiftUI alerts are sheets that window screenshots don't show; reach
+  them with `sheet 1 of window "Earmark"`.
+- `SongRecord`'s bpm/key/beats fields hold the user's corrections in the app's memory
+  (`analysed`/`correction` aren't stored, by `CodingKeys`). Never write a record from
+  `AppModel.songs` back to the database: fetch it fresh, as `saveSongAnalysis` does, or the
+  corrections would overwrite what was analysed.

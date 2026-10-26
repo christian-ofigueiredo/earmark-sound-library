@@ -117,13 +117,27 @@ public struct SongRecord: Codable, FetchableRecord, MutablePersistableRecord, Se
     public var keyMinor: Bool?
     public var keyConfidence: Double?
     public var analysisSource: String?
+    /// Set (in memory only) on a song the user corrected: what was analysed, and the correction
+    /// (SongCorrections). The fields above then hold the user's values.
+    public internal(set) var analysed: AnalysedValues?
+    public internal(set) var correction: SongCorrection?
+
+    /// The stored columns (not `analysed` and `correction`).
+    enum CodingKeys: String, CodingKey {
+        case id, libraryId, path, fileName, folder, fileSize, modifiedAt, title, artist, album, duration
+        case bpm, bpmLow, bpmHigh, tempoStability, beatsPerBar, keyPitchClass, keyMinor, keyConfidence, analysisSource
+    }
 
     public static let databaseTableName = "song"
     public var url: URL { URL(fileURLWithPath: path) }
     public var displayTitle: String { title?.isEmpty == false ? title! : url.deletingPathExtension().lastPathComponent }
     public var key: MusicKey? { keyPitchClass.map { MusicKey(pitchClass: $0, minor: keyMinor ?? false) } }
-    /// Analysed by Phase 0 or by Earmark (which may have found no beat or key: silent, or very short).
-    public var isAnalysed: Bool { analysisSource != nil || bpm != nil || keyPitchClass != nil }
+    /// Analysed by Phase 0 or by Earmark (which may have found no beat or key: silent, or very
+    /// short). The user's corrections don't count.
+    public var isAnalysed: Bool {
+        let s = uncorrected
+        return s.analysisSource != nil || s.bpm != nil || s.keyPitchClass != nil
+    }
 
     public mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }
 
@@ -265,6 +279,19 @@ public final class LibraryDatabase: Sendable {
                 t.column("version", .integer).notNull()
                 t.column("createdAt", .datetime).notNull()
                 t.primaryKey(["libraryId", "folder"])
+            }
+        }
+        // Tempo, key and beats per bar the user set by hand (SongCorrections), by file path.
+        m.registerMigration("v7-song-corrections") { db in
+            try db.create(table: "songCorrection") { t in
+                t.column("path", .text).primaryKey()
+                t.column("bpm", .double)
+                t.column("bpmLow", .double)
+                t.column("bpmHigh", .double)
+                t.column("keyPitchClass", .integer)
+                t.column("keyMinor", .boolean)
+                t.column("beatsPerBar", .integer)
+                t.column("correctedAt", .datetime).notNull()
             }
         }
         return m
