@@ -11,18 +11,18 @@ struct EarmarkApp: App {
         Window("Earmark", id: "main") {
             ContentView()
                 .environment(model)
-                .tint(.blue)
+                .tint(.earmarkBlue)
                 .fixedMinimumSize(CGSize(width: 980, height: 600))
         }
         Settings {
             Preferences()
                 .environment(model)
-                .tint(.blue)
+                .tint(.earmarkBlue)
         }
         Window("Folder Categories", id: FolderMapView.windowID) {
             FolderMapView()
                 .environment(model)
-                .tint(.blue)
+                .tint(.earmarkBlue)
                 .frame(minWidth: 900, minHeight: 480)
         }
         .defaultSize(width: 1100, height: 680)

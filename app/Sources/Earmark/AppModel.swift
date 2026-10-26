@@ -124,9 +124,9 @@ final class AppModel {
     }
 
     /// The section switch, ⌘1/⌘2 and anything else that changes section. The switch's pill
-    /// slides while the content fades out; the section changes while nothing shows (its layout
-    /// is the one costly moment, ~0.1 s); then the new content fades in. Done at once, the
-    /// pill's slide and any fade stuttered over that moment.
+    /// slides while the content fades out; the section changes once both have finished (its
+    /// layout is the one costly moment, ~0.1 s, more for the sound list); then the new content
+    /// fades in. Changed sooner, mid-slide, the pill stuttered going back to Sound Effects.
     func show(_ new: AppSection) {
         guard new != switchSection else { return }
         switchSection = new
@@ -134,7 +134,7 @@ final class AppModel {
         switching = Task { [weak self] in
             guard let self else { return }
             withAnimation(Self.fadeOut) { sectionFaded = true }
-            try? await Task.sleep(for: .milliseconds(170))
+            try? await Task.sleep(for: .milliseconds(Int(SectionSwitch.slide * 1000) + 20))
             guard !Task.isCancelled else { return }
             section = switchSection
             // The new section is laid out before it fades in, so the fade starts smoothly.

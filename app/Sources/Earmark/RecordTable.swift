@@ -456,7 +456,7 @@ final class TextCell: NSTableCellView {
     private func tintMark() {
         guard let markView, let mark else { return }
         markView.contentTintColor = backgroundStyle == .emphasized ? .alternateSelectedControlTextColor
-            : mark == .playing ? .systemBlue : .secondaryLabelColor
+            : mark == .playing ? .earmarkBlue : .secondaryLabelColor
     }
 }
 

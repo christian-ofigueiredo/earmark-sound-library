@@ -245,7 +245,7 @@ struct AutoPlayToggle: View {
                     .font(.title3)
                     .foregroundStyle(on && activeState != .inactive ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
                     .frame(width: 34, height: 34)
-                    .glassEffect(on ? .regular.tint(.blue).interactive() : .regular.interactive(), in: .circle)
+                    .glassEffect(on ? .regular.tint(.earmarkSelectionBlue).interactive() : .regular.interactive(), in: .circle)
                     .contentShape(Circle())
             } else {
                 Label("Auto-play", systemImage: on ? "play.circle.fill" : "play.circle")
@@ -264,10 +264,13 @@ struct AutoPlayToggle: View {
 /// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose blue-tinted glass
 /// pill slides to the chosen section (`AppModel.show`).
 struct SectionSwitch: View {
+    /// How long the pill slides, seconds; the section changes after it (`AppModel.show`).
+    static let slide = 0.28
     @Environment(AppModel.self) private var model
     /// In an inactive window the system greys the glass's tint: dark text then, not white.
     @Environment(\.controlActiveState) private var activeState
-    @Namespace private var pill
+    /// Where each segment is, for the pill to move to.
+    @State private var segments: [AppSection: CGRect] = [:]
 
     var body: some View {
         Group {
@@ -276,9 +279,22 @@ struct SectionSwitch: View {
                     HStack(spacing: 0) {
                         ForEach(AppSection.allCases, id: \.self) { section in segment(section) }
                     }
+                    // One pill that moves and resizes, behind both labels. (Each segment had its
+                    // own pill, cross-faded by a matched geometry effect: going left, the new one
+                    // came in under the old one and the two glass shapes blended mid-way, which
+                    // stuttered in that direction only.)
+                    .background(alignment: .topLeading) {
+                        if let frame = segments[model.switchSection] {
+                            Color.clear
+                                .glassEffect(.regular.tint(.earmarkSelectionBlue).interactive(), in: .capsule)
+                                .frame(width: frame.width, height: frame.height)
+                                .offset(x: frame.minX, y: frame.minY)
+                        }
+                    }
+                    .coordinateSpace(.named(Self.space))
                     .padding(3)
                     .glassEffect(.regular.interactive(), in: .capsule)
-                    .animation(.snappy(duration: 0.28), value: model.switchSection)
+                    .animation(.snappy(duration: Self.slide), value: model.switchSection)
                 }
             } else {
                 Picker("Section", selection: Binding(get: { model.switchSection }, set: { model.show($0) })) {
@@ -290,6 +306,8 @@ struct SectionSwitch: View {
         }
         .help("Switch between sound effects (⌘1) and music (⌘2)")
     }
+
+    private nonisolated static let space = "sectionSwitch"
 
     @available(macOS 26, *)
     private func segment(_ section: AppSection) -> some View {
@@ -303,13 +321,7 @@ struct SectionSwitch: View {
                 .foregroundStyle(chosen && activeState != .inactive ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
                 .padding(.horizontal, 16)
                 .frame(height: 28)
-                .background {
-                    if chosen {
-                        Color.clear
-                            .glassEffect(.regular.tint(.blue).interactive(), in: .capsule)
-                            .matchedGeometryEffect(id: "pill", in: pill)
-                    }
-                }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { segments[section] = $0 }
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -426,7 +438,7 @@ private struct WelcomePoint: View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: icon)
                 .font(.title2)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color.earmarkBlue)
                 .frame(width: 30)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.headline)

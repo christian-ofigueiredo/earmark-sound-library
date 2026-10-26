@@ -234,8 +234,8 @@ final class WaveformCanvas: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let r = bounds
-        // The app's blue (SwiftUI's .tint(.blue) doesn't reach AppKit drawing); grey when inactive.
-        let accent = active ? NSColor.systemBlue : NSColor.secondaryLabelColor
+        // The app's blue (SwiftUI's tint doesn't reach AppKit drawing); grey when inactive.
+        let accent = active ? NSColor.earmarkBlue : NSColor.secondaryLabelColor
         NSColor.labelColor.withAlphaComponent(0.05).setFill()
         NSBezierPath(roundedRect: r, xRadius: 8, yRadius: 8).fill()
         if let sel = selection {
@@ -243,7 +243,8 @@ final class WaveformCanvas: NSView {
             NSRect(x: sel.lowerBound * r.width, y: 0, width: max((sel.upperBound - sel.lowerBound) * r.width, 1), height: r.height).fill()
         }
         if let peaks, !peaks.isEmpty {
-            (active ? NSColor.systemBlue.withAlphaComponent(0.75) : NSColor.labelColor.withAlphaComponent(0.4)).setFill()
+            // Solid: see-through, the bars came out a duller blue than the rest of the app.
+            (active ? NSColor.earmarkBlue : NSColor.labelColor.withAlphaComponent(0.4)).setFill()
             let mid = r.height / 2, step = r.width / CGFloat(peaks.count)
             for (i, p) in peaks.enumerated() {
                 let h = max(0.5, CGFloat(min(p, 1)) * (mid - 2))

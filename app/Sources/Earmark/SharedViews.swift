@@ -2,6 +2,40 @@ import AppKit
 import EarmarkCore
 import SwiftUI
 
+// MARK: colour
+
+/// The app's blue, one hue throughout (owner, 2026-10-26: in dark mode the waveform, the
+/// selected row and the buttons were blues of different hues). It's the selected row's hue,
+/// which follows the system's accent.
+extension NSColor {
+    /// Behind white text or symbols: the list selection itself, the section pill, the play button.
+    static var earmarkSelectionBlue: NSColor { .selectedContentBackgroundColor }
+
+    /// Blue text, symbols, buttons and the waveform: the selection's colour in light mode; in
+    /// dark mode the same hue, lighter, as the deep selection blue was hard to read on dark grey.
+    static let earmarkBlue = NSColor(name: "earmarkBlue") { appearance in
+        var base = NSColor.systemBlue
+        appearance.performAsCurrentDrawingAppearance {
+            base = NSColor.selectedContentBackgroundColor.usingColorSpace(.sRGB) ?? .systemBlue
+        }
+        guard appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua else { return base }
+        let saturation = base.saturationComponent
+        // A grey accent (Graphite) stays grey, just lighter.
+        return NSColor(colorSpace: .sRGB, hue: base.hueComponent, saturation: min(saturation, 0.78),
+                       brightness: saturation < 0.2 ? max(base.brightnessComponent, 0.75) : 1, alpha: 1)
+    }
+}
+
+extension Color {
+    static let earmarkBlue = Color(nsColor: .earmarkBlue)
+    static let earmarkSelectionBlue = Color(nsColor: .earmarkSelectionBlue)
+}
+
+extension ShapeStyle where Self == Color {
+    static var earmarkBlue: Color { .earmarkBlue }
+    static var earmarkSelectionBlue: Color { .earmarkSelectionBlue }
+}
+
 /// Waveform, play button and range selection for one file.
 struct PlayerPanel: View {
     @Environment(AppModel.self) private var model
@@ -226,7 +260,7 @@ struct NowPlayingBar: View {
             .controlSize(.small)
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.1)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.earmarkBlue.opacity(0.1)))
         .padding([.horizontal, .top], 12)
     }
 }
@@ -442,13 +476,14 @@ extension View {
     }
 
     /// Player buttons: round Liquid Glass buttons on macOS 26 and later; `prominent` (play)
-    /// is tinted glass in the app's blue.
+    /// is tinted glass in the app's blue. Both carry a white symbol on blue while active, so
+    /// both take the selection's blue, as the section pill.
     @ViewBuilder func playerButtonStyle(prominent: Bool = false) -> some View {
         if #available(macOS 26, *) {
             if prominent {
-                buttonStyle(.glassProminent).buttonBorderShape(.circle).controlSize(.large)
+                buttonStyle(.glassProminent).buttonBorderShape(.circle).controlSize(.large).tint(.earmarkSelectionBlue)
             } else {
-                buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
+                buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large).tint(.earmarkSelectionBlue)
             }
         } else {
             self
