@@ -195,3 +195,62 @@ import Testing
         #expect(v.first?.vector == [1, 0])
     }
 }
+
+@Suite struct FolderRuleTests {
+    @Test func rulesFillOnlyUncategorisedSoundsFromTheNearestFolder() async throws {
+        let db = try LibraryDatabase(path: nil)
+        let root = TestFiles.tempDir()
+        TestFiles.write(TestFiles.wav(seconds: 1), to: root.appendingPathComponent("Pack/Footsteps/Concrete/a.wav"))
+        TestFiles.write(TestFiles.wav(seconds: 2), to: root.appendingPathComponent("Pack/Footsteps/b.wav"))
+        TestFiles.write(TestFiles.wav(seconds: 3), to: root.appendingPathComponent("Pack/Footsteps/WHSH_Vendor_X_Y.wav"))
+        TestFiles.write(TestFiles.wav(seconds: 4), to: root.appendingPathComponent("Other/c.wav"))
+        let lib = try db.addLibrary(kind: .sounds, path: root.path, bookmark: nil)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        try db.save([FolderRule(libraryId: lib.id!, folder: "Pack/Footsteps", catID: "FEETHmn")])
+        let sounds = FolderRules.apply(try db.folderRules(), to: try db.sounds())
+        func s(_ name: String) -> SoundRecord { sounds.first { $0.fileName == name }! }
+        #expect(s("a.wav").catID == "FEETHmn")                          // subfolder: nearest rule above
+        #expect(s("a.wav").categorySource == FolderRules.source)
+        #expect(s("b.wav").category == "FOOTSTEPS")
+        #expect(s("WHSH_Vendor_X_Y.wav").catID == "WHSH")              // the vendor's UCS wins
+        #expect(s("c.wav").catID == nil)
+        try db.removeFolderRule(libraryId: lib.id!, folder: "Pack/Footsteps")
+        #expect(try db.folderRules().isEmpty)
+    }
+
+    @Test func folderNamesPointToUCS() {
+        let catalog = UCSCatalog.shared
+        func best(_ folder: String) -> String? {
+            FolderSuggester.nameScores(folder: folder, catalog: catalog).max { $0.value.score < $1.value.score }
+                .flatMap { catalog.entry(catID: $0.key)?.category }
+        }
+        let feet = best("Sound Ideas - The SFX KIT Disk [Wav] MERRY XMAS 2022/TSK-03/Footsteps/Concrete")
+        #expect(feet == "FOOTSTEPS", "\(String(describing: feet)) \(FolderSuggester.folderWords("Sound Ideas - The SFX KIT Disk [Wav] MERRY XMAS 2022/TSK-03/Footsteps/Concrete"))")
+        let crowd = best("Sound Ideas - The SFX KIT Disk [Wav] MERRY XMAS 2022/TSK-06/Crowds")
+        #expect(crowd == "CROWDS", "\(String(describing: crowd))")
+        let words = FolderSuggester.folderWords("Pack/TSK-01/Automobiles").map(\.word)
+        #expect(words == ["automobile"], "\(words)")   // "pack" and "tsk" say nothing
+    }
+
+    @Test func parentFolderDecidesTheCategoryAndSynonymsTheSubcategory() {
+        func top(_ folder: String) -> String? {
+            FolderSuggester.suggest(folder: folder, soundIds: [], index: nil, labels: [:]).first?.entry.catID
+        }
+        #expect(top("Pack/TSK-03/Footsteps/Metal - Steel") == "FEETHmn")
+        #expect(top("Pack/TSK-03/Footsteps/Concrete") == "FEETHmn")
+        let auto = FolderSuggester.suggest(folder: "Pack/TSK-01/Automobiles", soundIds: [], index: nil, labels: [:])
+        // "Automobile" is a synonym of many VEHICLES subcategories: category only, so MISC.
+        #expect(auto.first?.entry.catID == "VEHMisc", "\(auto.map { "\($0.entry.catID) \($0.score) \($0.words)" })")
+        #expect(top("Pack/TSK-06/Crowds") == "CRWDMisc")
+    }
+
+    @Test func soundPicksTheSubcategoryWhenTheNameOnlyGivesTheCategory() {
+        // Folder "Footsteps" (category only); its sounds' neighbours are labelled FEETHmn.
+        func v(_ x: Float, _ y: Float) -> [Float] { let n = (x * x + y * y).squareRoot(); return [x / n, y / n] }
+        let index = SimilarityIndex(vectors: [(1, v(1, 0.1)), (2, v(1, 0.12)), (10, v(1, 0.11)), (11, v(1, 0.09)), (20, v(0, 1))])
+        let labels: [Int64: String] = [10: "FEETHmn", 11: "FEETHmn", 20: "WHSHSwsh"]
+        let options = FolderSuggester.suggest(folder: "Pack/Footsteps", soundIds: [1, 2], index: index, labels: labels)
+        #expect(options.first?.entry.catID == "FEETHmn")
+        #expect((options.first?.soundShare ?? 0) > 0.5)
+    }
+}

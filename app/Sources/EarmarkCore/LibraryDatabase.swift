@@ -241,6 +241,16 @@ public final class LibraryDatabase: Sendable {
                 t.primaryKey(["soundId", "model"])
             }
         }
+        // Categories the user chose for folders of sounds that have none (FolderRules).
+        m.registerMigration("v5-folder-rules") { db in
+            try db.create(table: "folderRule") { t in
+                t.column("libraryId", .integer).notNull()
+                t.column("folder", .text).notNull()
+                t.column("catID", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.primaryKey(["libraryId", "folder"])
+            }
+        }
         return m
     }
 

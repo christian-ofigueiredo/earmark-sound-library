@@ -26,6 +26,52 @@ extension PeavEmbedder: BatchEmbedder {
 }
 
 var args = CommandLine.arguments
+
+// Folder suggestions, checked on folders that already have UCS categories:
+//   earmark-parity folders <copy of library.sqlite>
+if args.count >= 3, args[1] == "folders" {
+    let db = try LibraryDatabase(path: args[2])
+    let sounds = try db.sounds()
+    let index = SimilarityIndex(vectors: try db.vectors(model: "clap-general"))
+    let labels = Dictionary(uniqueKeysWithValues: sounds.compactMap { s in s.catID.flatMap { c in s.id.map { ($0, c) } } })
+    let groups = Dictionary(grouping: sounds, by: { "\($0.libraryId)|\($0.folder)" })
+    let catalog = UCSCatalog.shared
+    var n = 0, nameTop1 = 0, soundTop1 = 0, top1 = 0, top3 = 0, category = 0
+    for (_, members) in groups where members.count >= 5 {
+        let cats = members.compactMap(\.catID)
+        guard cats.count == members.count,
+              let (truth, count) = Dictionary(grouping: cats, by: { $0 }).mapValues(\.count).max(by: { $0.value < $1.value }),
+              Double(count) / Double(members.count) >= 0.6 else { continue }
+        let ids = members.compactMap(\.id)
+        n += 1
+        let names = FolderSuggester.nameScores(folder: members[0].folder, catalog: catalog)
+        if names.max(by: { $0.value.score < $1.value.score })?.key == truth { nameTop1 += 1 }
+        let shares = FolderSuggester.soundShares(soundIds: ids, index: index, labels: labels)
+        if shares.max(by: { $0.value < $1.value })?.key == truth { soundTop1 += 1 }
+        let options = FolderSuggester.suggest(folder: members[0].folder, soundIds: ids, index: index, labels: labels)
+        if options.first?.entry.catID == truth { top1 += 1 }
+        if options.prefix(3).contains(where: { $0.entry.catID == truth }) { top3 += 1 }
+        if options.first?.entry.category == catalog.entry(catID: truth)?.category { category += 1 }
+        if options.first?.entry.catID != truth, args.contains("--misses") {
+            print("  miss: \(members[0].folder.split(separator: "/").suffix(2).joined(separator: "/")) — truth \(truth), got "
+                  + options.map { "\($0.entry.catID) \(String(format: "%.2f", $0.score)) [\($0.words.joined(separator: ","))\(String(format: " ♪%.0f%%", $0.soundShare * 100))]" }.joined(separator: " | "))
+        }
+    }
+    func pct(_ k: Int) -> String { String(format: "%.0f%%", 100 * Double(k) / Double(max(1, n))) }
+    print("\(n) labelled folders (≥ 5 sounds, ≥ 60% one subcategory):")
+    print("  name only \(pct(nameTop1)) · sound only \(pct(soundTop1)) · combined \(pct(top1)) (top 3 \(pct(top3)), category \(pct(category)))")
+    print("\nLargest uncategorised folders:")
+    let open = groups.values.filter { $0.allSatisfy { $0.catID == nil } }.sorted { $0.count > $1.count }.prefix(25)
+    for members in open {
+        let options = FolderSuggester.suggest(folder: members[0].folder, soundIds: members.compactMap(\.id), index: index, labels: labels)
+        let text = options.map { o in
+            "\(o.entry.label) [\(o.words.joined(separator: ","))\(o.soundShare > 0 ? String(format: " ♪%.0f%%", o.soundShare * 100) : "")]"
+        }.joined(separator: "  |  ")
+        print(String(format: "%4d  ", members.count) + members[0].folder.split(separator: "/").suffix(2).joined(separator: "/") + "  →  " + text)
+    }
+    exit(0)
+}
+
 guard args.count >= 4, ["clap", "peav"].contains(args[1]) else {
     print("usage: earmark-parity <clap|peav> <model> <reference.json> [files=300] [seed=1]")
     exit(2)
