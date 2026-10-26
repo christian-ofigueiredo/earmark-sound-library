@@ -20,14 +20,12 @@ struct ContentView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Section", selection: $model.section) {
-                    Text("Sound Effects").tag(AppSection.sounds)
-                    Text("Music").tag(AppSection.music)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .help("Switch between sound effects (⌘1) and music (⌘2)")
+            // The switch is its own Liquid Glass control, not on the toolbar's shared glass.
+            if #available(macOS 26, *) {
+                ToolbarItem(placement: .principal) { SectionSwitch() }
+                    .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .principal) { SectionSwitch() }
             }
         }
         .onChange(of: model.section) { _, section in
@@ -53,6 +51,60 @@ struct ContentView: View {
             get: { model.alert != nil },
             set: { if !$0, model.alert?.id == shownID { model.alert = nil } }
         )
+    }
+}
+
+/// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose blue glass pill
+/// slides to the chosen section; the section itself changes once the pill has arrived
+/// (`AppModel.show`), so the animation never waits for the section to be built.
+struct SectionSwitch: View {
+    @Environment(AppModel.self) private var model
+    @Namespace private var pill
+
+    var body: some View {
+        Group {
+            if #available(macOS 26, *) {
+                GlassEffectContainer {
+                    HStack(spacing: 0) {
+                        ForEach(AppSection.allCases, id: \.self) { section in segment(section) }
+                    }
+                    .padding(3)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                }
+            } else {
+                Picker("Section", selection: Binding(get: { model.chosenSection }, set: { model.show($0) })) {
+                    ForEach(AppSection.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+        }
+        .help("Switch between sound effects (⌘1) and music (⌘2)")
+    }
+
+    @available(macOS 26, *)
+    private func segment(_ section: AppSection) -> some View {
+        let chosen = section == model.chosenSection
+        return Button {
+            model.show(section)
+        } label: {
+            Text(section.title)
+                .font(.body.weight(chosen ? .semibold : .regular))
+                .foregroundStyle(chosen ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                .padding(.horizontal, 16)
+                .frame(height: 28)
+                .background {
+                    if chosen {
+                        Capsule()
+                            .fill(Color.blue.gradient)
+                            .glassEffect(.regular.tint(.blue).interactive(), in: .capsule)
+                            .matchedGeometryEffect(id: "pill", in: pill)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 }
 

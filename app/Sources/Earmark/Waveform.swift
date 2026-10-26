@@ -143,7 +143,8 @@ final class WaveformCanvas: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let r = bounds
-        let accent = active ? NSColor.controlAccentColor : NSColor.secondaryLabelColor
+        // The app's blue (SwiftUI's .tint(.blue) doesn't reach AppKit drawing); grey when inactive.
+        let accent = active ? NSColor.systemBlue : NSColor.secondaryLabelColor
         NSColor.labelColor.withAlphaComponent(0.05).setFill()
         NSBezierPath(roundedRect: r, xRadius: 8, yRadius: 8).fill()
         if let sel = selection {
@@ -151,7 +152,7 @@ final class WaveformCanvas: NSView {
             NSRect(x: sel.lowerBound * r.width, y: 0, width: max((sel.upperBound - sel.lowerBound) * r.width, 1), height: r.height).fill()
         }
         if let peaks, !peaks.isEmpty {
-            NSColor.labelColor.withAlphaComponent(active ? 0.6 : 0.4).setFill()
+            (active ? NSColor.systemBlue.withAlphaComponent(0.75) : NSColor.labelColor.withAlphaComponent(0.4)).setFill()
             let mid = r.height / 2, step = r.width / CGFloat(peaks.count)
             for (i, p) in peaks.enumerated() {
                 let h = max(0.5, CGFloat(min(p, 1)) * (mid - 2))
@@ -160,7 +161,8 @@ final class WaveformCanvas: NSView {
         }
         if let playhead, playhead.isFinite {
             let x = CGFloat(min(max(playhead, 0), 1)) * r.width
-            accent.setFill()
+            // The playhead in the text colour, to stand out on the blue waveform.
+            NSColor.labelColor.setFill()
             NSRect(x: x - 0.75, y: 0, width: 1.5, height: r.height).fill()
             // A small handle at the top shows the playhead can be dragged.
             let handle = NSBezierPath()

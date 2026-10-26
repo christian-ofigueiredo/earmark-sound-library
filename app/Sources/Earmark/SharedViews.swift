@@ -42,7 +42,7 @@ struct PlayerPanel: View {
                 } label: {
                     Image(systemName: player.plays(url) ? "pause.fill" : "play.fill").frame(width: 16)
                 }
-                .playerButtonStyle()
+                .playerButtonStyle(prominent: true)
                 .help(player.plays(url) ? "Pause (Space in the list)"
                       : selection == nil ? "Play (Space in the list)" : "Play the selection")
                 Button {
@@ -310,10 +310,15 @@ extension View {
         }
     }
 
-    /// Player buttons: round Liquid Glass buttons on macOS 26 and later.
-    @ViewBuilder func playerButtonStyle() -> some View {
+    /// Player buttons: round Liquid Glass buttons on macOS 26 and later; `prominent` (play)
+    /// is tinted glass in the app's blue.
+    @ViewBuilder func playerButtonStyle(prominent: Bool = false) -> some View {
         if #available(macOS 26, *) {
-            buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
+            if prominent {
+                buttonStyle(.glassProminent).buttonBorderShape(.circle).controlSize(.large)
+            } else {
+                buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
+            }
         } else {
             self
         }

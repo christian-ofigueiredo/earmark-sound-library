@@ -11,11 +11,13 @@ struct EarmarkApp: App {
         Window("Earmark", id: "main") {
             ContentView()
                 .environment(model)
+                .tint(.blue)
                 .frame(minWidth: 980, minHeight: 600)
         }
         Window("Folder Categories", id: FolderMapView.windowID) {
             FolderMapView()
                 .environment(model)
+                .tint(.blue)
                 .frame(minWidth: 900, minHeight: 480)
         }
         .defaultSize(width: 1100, height: 680)
@@ -34,9 +36,9 @@ struct EarmarkApp: App {
                 MapFoldersButton()
             }
             CommandGroup(before: .toolbar) {
-                Button("Sound Effects") { model.section = .sounds }
+                Button("Sound Effects") { model.show(.sounds) }
                     .keyboardShortcut("1")
-                Button("Music") { model.section = .music }
+                Button("Music") { model.show(.music) }
                     .keyboardShortcut("2")
                 Divider()
             }

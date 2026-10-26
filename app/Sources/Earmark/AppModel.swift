@@ -2,10 +2,18 @@ import AppKit
 import EarmarkCore
 import EarmarkML
 import Observation
+import SwiftUI
 import UniformTypeIdentifiers
 
 enum AppSection: String, CaseIterable {
     case sounds, music
+
+    var title: String {
+        switch self {
+        case .sounds: "Sound Effects"
+        case .music: "Music"
+        }
+    }
 }
 
 struct AppAlert: Identifiable {
@@ -53,7 +61,11 @@ final class AppModel {
     let folderGuesser = FolderGuesser()
     let analysis = AnalysisEngine()
 
-    var section: AppSection
+    /// The section on screen.
+    private(set) var section: AppSection
+    /// The section the switch shows as chosen. `section` follows once the switch's animation
+    /// has ended, so building the other section (~0.2 s) can't make the animation stutter.
+    private(set) var chosenSection: AppSection
     var showWelcome: Bool
     var alert: AppAlert?
 
@@ -79,7 +91,9 @@ final class AppModel {
 
     init() {
         let defaults = UserDefaults.standard
-        section = AppSection(rawValue: defaults.string(forKey: "section") ?? "") ?? .sounds
+        let saved = AppSection(rawValue: defaults.string(forKey: "section") ?? "") ?? .sounds
+        section = saved
+        chosenSection = saved
         showWelcome = !defaults.bool(forKey: "welcomeSeen")
         do {
             database = try LibraryDatabase(path: Self.supportFolder.appendingPathComponent("library.sqlite").path)
@@ -94,6 +108,20 @@ final class AppModel {
             // After the analysis has read which sounds it has done (the guesses note it).
             guessing = true
             folderGuesser.update(model: self)
+        }
+    }
+
+    // MARK: sections
+
+    /// The section switch, ⌘1/⌘2 and anything else that changes section: the switch animates
+    /// first, then the section changes.
+    func show(_ new: AppSection) {
+        guard new != chosenSection else { return }
+        withAnimation(.snappy(duration: 0.28)) {
+            chosenSection = new
+        } completion: { [weak self] in
+            guard let self, self.chosenSection == new else { return }   // chosen again meanwhile
+            self.section = new
         }
     }
 
@@ -306,7 +334,7 @@ final class AppModel {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let entries = try Phase0MusicImport.read(Data(contentsOf: url))
-            section = .music
+            show(.music)
             Task { await applyPhase0(entries, offerFolder: true) }
         } catch {
             show(error, title: "Couldn't import “\(url.lastPathComponent)”")

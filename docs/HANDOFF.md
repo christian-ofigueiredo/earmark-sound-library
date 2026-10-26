@@ -342,6 +342,19 @@ Settings → Repository name. Topics/description also have to be set there.
   round Liquid Glass (`.buttonStyle(.glass)`); the waveform turns grey in an inactive window
   (`controlActiveState`), as the system dims everything else; Folder Categories has its tabs
   in the toolbar. Menu icons: macOS 27 shows few by default, nothing to do.
+- **Section switch stuttered** (owner, 2026-10-26): building the other section (split view,
+  tables, constraints) takes ~0.2 s of main thread (measured with `sample`), and it ran during
+  the segmented control's animation. Now `AppModel.show(_:)` animates `chosenSection` first and
+  sets `section` in the animation's completion, so the animation never waits; ⌘1/⌘2 go the same
+  way. The switch is a custom Liquid Glass control (`SectionSwitch`: `GlassEffectContainer`,
+  a blue tinted glass pill moved with `matchedGeometryEffect`, the toolbar's shared glass
+  hidden with `sharedBackgroundVisibility(.hidden)`); before macOS 26, a segmented picker.
+  Blue details: `.tint(.blue)` on both windows, the play button `.glassProminent`, the
+  waveform in system blue (the playhead in the text colour). If the 0.2 s after the switch
+  bothers, keep both sections built instead of rebuilding them (their toolbars and search
+  fields would need merging first).
+- When measuring with `sample`, clicks made through the accessibility tools cost the app a
+  lot themselves (~0.7 s of AX queries over two clicks): count only the display-cycle branch.
 
 - See `CLAUDE.md` "Gotchas" for Phase 0 (S-KEY writes `prediction/` folders if called on a
   directory; PE-AV text embeds bug; CLAP 10 s windowing; Beat This! checkpoint fallback;
