@@ -192,6 +192,9 @@ struct SoundSidebar: View {
                     Label("Not Categorised Yet", systemImage: "questionmark.folder")
                         .badge(model.soundIndex.uncategorised)
                         .tag(SoundScope.uncategorised)
+                    MapFoldersButton()
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -286,7 +289,21 @@ struct SoundDetailPane: View {
 
 struct SoundDetail: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     let sound: SoundRecord
+
+    /// Opens Map Folders to Categories on this sound's folder (or the rule that categorised it).
+    private func mapFolder() {
+        var key = FolderMapper.Key(libraryId: sound.libraryId, folder: sound.folder)
+        if sound.categorySource == FolderRules.source {
+            var folder = sound.folder
+            while !model.folderRules.contains(where: { $0.libraryId == sound.libraryId && $0.folder == folder }),
+                  let slash = folder.lastIndex(of: "/") { folder = String(folder[..<slash]) }
+            key.folder = folder
+        }
+        model.folderMapper.focus(key)
+        openWindow(id: FolderMapView.windowID)
+    }
 
     /// Which embeddings this sound has ("CLAP, PE-AV"), or nil.
     private func embeddingText(for sound: SoundRecord) -> String? {
@@ -314,10 +331,18 @@ struct SoundDetail: View {
                             }
                         }
                         if let source = sound.categorySource {
-                            Text("Category from \(source)").font(.caption).foregroundStyle(.secondary)
+                            HStack(spacing: 6) {
+                                Text("Category from \(source)").font(.caption).foregroundStyle(.secondary)
+                                if source == FolderRules.source {
+                                    Button("Change…", action: mapFolder).buttonStyle(.link).font(.caption)
+                                }
+                            }
                         }
                     } else {
-                        Text("Not categorised yet").font(.callout).foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Text("Not categorised yet").font(.callout).foregroundStyle(.secondary)
+                            Button("Choose a Category for Its Folder…", action: mapFolder).buttonStyle(.link).font(.callout)
+                        }
                     }
                 }
                 if online {

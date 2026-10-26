@@ -104,8 +104,9 @@ Settings → Repository name. Topics/description also have to be set there.
      removed sounds are kept in `retiredSound` (schema v2) so re-adding a library restores them.
    - ~~MP3/AAC length and format~~ Done: the scanner takes an optional `TechnicalReader`; the app
      passes an AVAudioFile one (`SoundFiles.technical`), so the core still builds on Linux.
-   - Applying the owner-approved Sound Ideas folder → UCS mapping (from the C CSVs) as vendor
-     rules: **blocked** until the owner fills in the "Your decision" column.
+   - ~~Applying the owner-approved Sound Ideas folder → UCS mapping (from the C CSVs)~~
+     Superseded by **Map Folders to Categories** in the app (see Phase 3 below): the owner
+     picks a category per folder there, with suggestions, instead of filling the CSVs.
    - ~~Group MP3/WAV twins~~ Done (`FormatTwins`): same library, same name apart from the
      extension, folders equal once format words are blanked, lengths within 0.5 s. The list shows
      the best copy (WAV > AIFF > FLAC > AAC > MP3); the detail pane lists the others under
@@ -245,6 +246,27 @@ Settings → Repository name. Topics/description also have to be set there.
      Next if more speed is needed: several CPU model instances for the short windows (same
      part, so the mmapped weights may be shared; check memory), or measure why short windows
      are 3× slower beside the GPU.
+   - **Map Folders to Categories, 2026-10-25** (File menu, the sidebar under Not Categorised
+     Yet, or "Choose a Category for Its Folder…" on an uncategorised sound): lists the folders
+     whose sounds have no category, largest first (214 folders, 23,879 sounds on SoundFX).
+     Each row has a suggestion from `FolderSuggester` (folder name + what its sounds sound
+     like via CLAP neighbours with a category from their files; 79% top 1, 86% top 3, 91%
+     category on 43 labelled folders), the top 3 plus Other… (the whole UCS list, searchable
+     by name, CatID and synonyms), the reason ("name “footstep” · 62% of similar sounds",
+     orange "listen first" when neither name nor sound agree), and a play button (a different
+     sound each click; selecting a row plays one, so the arrow keys review folders).
+     Nothing is saved until a folder is ticked (Space ticks the selected rows) and Save
+     Categories is pressed. Rules live in `folderRule` (schema v5) and apply on load to sounds
+     with no category of their own, from the nearest folder with a rule
+     (`categorySource` = "your folder rule"); "Your Folder Categories" lists them with
+     Change… and Remove. Suggestions take ~0.3–0.7 s per folder, computed while the window
+     is open, folders on screen first. `earmark-parity folders <copy of library.sqlite>`
+     prints the accuracy and how many folders/sounds get a supported suggestion (210 of 214
+     folders, 22,715 sounds). Tested in the app (tick, pick, Other…, save, change, remove,
+     open from a sound); the test rules were removed, so the owner's database has none yet.
+     Weak spots seen: vendor names in parent folders count as words ("Lens Distortions"
+     suggests DESIGNED / DISTORTION as a 2nd option); "Street Basketball" suggests AMBIENCE
+     ("street") over SPORTS / COURT; "Pickups" (Foley) suggests METAL / HANDLE.
    - Disk: only ~13 GB free on 2026-10-23 evening. Converting PE-AV used ~12 GB in
      `models/build` (could be trimmed to the float32 parts) plus 4.5 GB of installed models;
      45 GB of coremltools temp compiles from crashed runs were deleted. The rest of the drop
@@ -267,3 +289,13 @@ Settings → Repository name. Topics/description also have to be set there.
 - The GRDB `sound.path` column is UNIQUE, so folders of the same kind can't overlap; the app
   refuses or offers to replace them.
 - Phase 0 music confidence flags are miscalibrated; don't present them as errors.
+- Views inside `Table` cells (and context menus) must not read `@Environment(AppModel.self)`:
+  after rows are removed, the table can update a removed row's cell outside the window and
+  SwiftUI traps ("no Observable object"). Pass the model in (`FolderMapView.swift`).
+- The status bar used to be a `safeAreaInset` over the split view; the sidebar list ignores
+  that inset (and `contentMargins`), so its last rows were hidden. It's now below the split
+  view in a `VStack`.
+- Testing SwiftUI menus: the computer-use background tools refuse menu buttons, and real
+  clicks failed on the 3-display setup on 2026-10-25 (they landed on the desktop). UI
+  scripting works: `osascript` → System Events → `click menu button …`, then
+  `click menu item "…" of menu 1 of it`; table rows via `set selected of row N to true`.

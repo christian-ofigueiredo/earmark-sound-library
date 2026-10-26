@@ -6,16 +6,22 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var model = model
-        Group {
-            if let error = model.startupError {
-                ContentUnavailableView("Earmark can't start", systemImage: "exclamationmark.triangle",
-                                       description: Text(error))
-            } else {
-                switch model.section {
-                case .sounds: SoundsView()
-                case .music: MusicView()
+        // The status bar sits below the split view rather than in a safe-area inset: the
+        // sidebar list ignores the inset, so its last rows ended up under the bar.
+        VStack(spacing: 0) {
+            Group {
+                if let error = model.startupError {
+                    ContentUnavailableView("Earmark can't start", systemImage: "exclamationmark.triangle",
+                                           description: Text(error))
+                } else {
+                    switch model.section {
+                    case .sounds: SoundsView()
+                    case .music: MusicView()
+                    }
                 }
             }
+            .frame(maxHeight: .infinity)
+            StatusBar()
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -28,7 +34,6 @@ struct ContentView: View {
                 .help("Switch between sound effects (⌘1) and music (⌘2)")
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar() }
         .onChange(of: model.section) { _, section in
             model.player.stop()
             UserDefaults.standard.set(section.rawValue, forKey: "section")

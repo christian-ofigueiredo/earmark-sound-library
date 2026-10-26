@@ -24,10 +24,13 @@ struct LibrarySnapshot: Sendable {
     var soundIndex: SoundIndex
     var songs: [SongRecord]
     var songIndex: SongIndex
+    var folderRules: [FolderRule]
 
     init(_ db: LibraryDatabase) throws {
         libraries = try db.libraries()
-        sounds = try db.sounds()
+        folderRules = try db.folderRules()
+        // Sounds with no category of their own take their folder's rule (Map Folders to Categories).
+        sounds = FolderRules.apply(folderRules, to: try db.sounds())
         soundIndex = SoundIndex(sounds)
         songs = try db.songs()
         songIndex = SongIndex(songs)
@@ -43,6 +46,7 @@ final class AppModel {
     let player = AudioPlayer()
     let soundBrowser = SoundBrowser()
     let musicBrowser = MusicBrowser()
+    let folderMapper = FolderMapper()
     let analysis = AnalysisEngine()
 
     var section: AppSection
@@ -55,6 +59,7 @@ final class AppModel {
     private(set) var soundIndex = SoundIndex([])
     private(set) var songs: [SongRecord] = []
     private(set) var songIndex = SongIndex([])
+    private(set) var folderRules: [FolderRule] = []
     /// Bumped on every reload so the browsers refresh their lists.
     private(set) var version = 0
     private(set) var scanning: Set<Int64> = []
@@ -93,6 +98,7 @@ final class AppModel {
             soundIndex = snap.soundIndex
             songs = snap.songs
             songIndex = snap.songIndex
+            folderRules = snap.folderRules
             version += 1
             analysis.libraryChanged()
         } catch {
@@ -349,6 +355,18 @@ final class AppModel {
     /// How many CLAP results existed when `similarity` was built (rebuilt when more arrive).
     private var similarityBuiltFor = -1
 
+    /// The CLAP index, built on first use and again when more sounds have been analysed.
+    func similarityIndex() async throws -> SimilarityIndex? {
+        guard let db = database else { return nil }
+        let analysed = analysis.clapStatus.count
+        if similarity == nil || similarityBuiltFor != analysed {
+            let vectors = try await Task.detached(priority: .userInitiated) { try db.vectors(model: ClapEmbedder.modelName) }.value
+            similarity = SimilarityIndex(vectors: vectors)
+            similarityBuiltFor = analysed
+        }
+        return similarity
+    }
+
     func canFindSimilar(_ sound: SoundRecord) -> Bool {
         SoundEmbedding.isCurrent(analysis.clapStatus[sound.id ?? -1], model: ClapEmbedder.modelName, for: sound)
     }
@@ -356,16 +374,10 @@ final class AppModel {
     /// Shows the 100 sounds closest to `sound` (CLAP, cosine), leaving out format twins
     /// already hidden from the list and byte-identical copies.
     func findSimilar(to sound: SoundRecord) {
-        guard let id = sound.id, let db = database else { return }
-        let analysed = analysis.clapStatus.count
+        guard let id = sound.id else { return }
         Task {
             do {
-                if similarity == nil || similarityBuiltFor != analysed {
-                    let vectors = try await Task.detached(priority: .userInitiated) { try db.vectors(model: ClapEmbedder.modelName) }.value
-                    similarity = SimilarityIndex(vectors: vectors)
-                    similarityBuiltFor = analysed
-                }
-                guard let index = similarity, index.contains(id) else { return }
+                guard let index = try await similarityIndex(), index.contains(id) else { return }
                 var excluded = soundIndex.twins.hidden
                 if let fp = sound.fingerprint {
                     for s in sounds where s.fingerprint == fp && s.id != id { if let other = s.id { excluded.insert(other) } }
@@ -377,6 +389,29 @@ final class AppModel {
             } catch {
                 show(error, title: "Couldn't find similar sounds")
             }
+        }
+    }
+
+    // MARK: folder rules
+
+    /// Saves the user's categories for folders (stored in Earmark's database only) and reloads.
+    func saveFolderRules(_ rules: [FolderRule]) {
+        guard let db = database, !rules.isEmpty else { return }
+        do {
+            try db.save(rules)
+            Task { await reload() }
+        } catch {
+            show(error, title: "Couldn't save the folder categories")
+        }
+    }
+
+    func removeFolderRule(_ rule: FolderRule) {
+        guard let db = database else { return }
+        do {
+            try db.removeFolderRule(libraryId: rule.libraryId, folder: rule.folder)
+            Task { await reload() }
+        } catch {
+            show(error, title: "Couldn't remove the folder category")
         }
     }
 

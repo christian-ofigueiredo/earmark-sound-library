@@ -60,6 +60,19 @@ if args.count >= 3, args[1] == "folders" {
     func pct(_ k: Int) -> String { String(format: "%.0f%%", 100 * Double(k) / Double(max(1, n))) }
     print("\(n) labelled folders (≥ 5 sounds, ≥ 60% one subcategory):")
     print("  name only \(pct(nameTop1)) · sound only \(pct(soundTop1)) · combined \(pct(top1)) (top 3 \(pct(top3)), category \(pct(category)))")
+    // What Map Folders to Categories would offer: folders with sounds that have no category.
+    let twins = FormatTwins.group(sounds).hidden
+    let unlabelled = Dictionary(grouping: sounds.filter { $0.catID == nil && !twins.contains($0.id ?? -1) },
+                                by: { "\($0.libraryId)|\($0.folder)" })
+    var strong = (folders: 0, sounds: 0), weak = (folders: 0, sounds: 0)
+    for (_, members) in unlabelled {
+        let options = FolderSuggester.suggest(folder: members[0].folder, soundIds: members.compactMap(\.id), index: index, labels: labels)
+        guard let top = options.first else { continue }
+        if top.words.isEmpty && top.soundShare < 0.3 { weak.folders += 1; weak.sounds += members.count }
+        else { strong.folders += 1; strong.sounds += members.count }
+    }
+    print("\n\(unlabelled.count) folders, \(unlabelled.values.map(\.count).reduce(0, +)) sounds without a category (format twins left out):")
+    print("  name or sound agree: \(strong.folders) folders, \(strong.sounds) sounds · weak (listen first): \(weak.folders) folders, \(weak.sounds) sounds")
     print("\nLargest uncategorised folders:")
     let open = groups.values.filter { $0.allSatisfy { $0.catID == nil } }.sorted { $0.count > $1.count }.prefix(25)
     for members in open {

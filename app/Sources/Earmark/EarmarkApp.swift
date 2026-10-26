@@ -13,6 +13,12 @@ struct EarmarkApp: App {
                 .environment(model)
                 .frame(minWidth: 980, minHeight: 600)
         }
+        Window("Map Folders to Categories", id: FolderMapView.windowID) {
+            FolderMapView()
+                .environment(model)
+                .frame(minWidth: 900, minHeight: 480)
+        }
+        .defaultSize(width: 1100, height: 680)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Add Sound Library…") { model.chooseLibrary(.sounds) }
@@ -24,6 +30,8 @@ struct EarmarkApp: App {
                 Divider()
                 Button("Rescan All Folders") { model.rescanAll() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
+                Divider()
+                MapFoldersButton()
             }
             CommandGroup(before: .toolbar) {
                 Button("Sound Effects") { model.section = .sounds }
