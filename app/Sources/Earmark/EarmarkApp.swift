@@ -12,7 +12,12 @@ struct EarmarkApp: App {
             ContentView()
                 .environment(model)
                 .tint(.blue)
-                .frame(minWidth: 980, minHeight: 600)
+                .fixedMinimumSize(CGSize(width: 980, height: 600))
+        }
+        Settings {
+            Preferences()
+                .environment(model)
+                .tint(.blue)
         }
         Window("Folder Categories", id: FolderMapView.windowID) {
             FolderMapView()
@@ -72,13 +77,42 @@ struct AnalysisMenu: View {
         Button("Resume Analysis") { analysis.mode = .automatic }
             .keyboardShortcut("r", modifiers: [.command, .option])
         Button("Run at Full Speed Now") { analysis.mode = .fullSpeed }
-        Divider()
-        Picker("While You Use the Mac", selection: Binding(
-            get: { analysis.mode == .idleOnly ? AnalysisGovernor.Mode.idleOnly : .automatic },
-            set: { analysis.mode = $0 }
-        )) {
-            Text("Keep Analysing Gently").tag(AnalysisGovernor.Mode.automatic)
-            Text("Wait Until the Mac Is Idle").tag(AnalysisGovernor.Mode.idleOnly)
-        }
+        // "While you use the Mac" is in Preferences: set once, not every time.
     }
+}
+
+extension View {
+    /// A fixed minimum size for a window's or a split view column's content. Otherwise SwiftUI
+    /// works the minimum out by measuring every view, again after any change: with the detail
+    /// pane's text (its grid) that was 10–20 ms, 40 times a second while something played
+    /// (the playhead moves), so the main thread was always busy and animations dropped frames.
+    /// This asks nothing of the content.
+    func fixedMinimumSize(_ minimum: CGSize) -> some View {
+        FixedMinimumLayout(minimum: minimum) { self }
+    }
+}
+
+private struct FixedMinimumLayout: Layout {
+    let minimum: CGSize
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        // Smallest: the minimum; largest (an infinite proposal): unlimited; else what's offered.
+        func length(_ proposed: CGFloat?, _ least: CGFloat) -> CGFloat {
+            guard let proposed else { return least }
+            return proposed.isInfinite ? proposed : max(proposed, least)
+        }
+        return CGSize(width: length(proposal.width, minimum.width), height: length(proposal.height, minimum.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews { subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size)) }
+    }
+
+    // No alignment guides of its own: by default a layout gets them by placing its content,
+    // which measures all of it again (a stack around a split view column asks).
+    func explicitAlignment(of guide: HorizontalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+                           subviews: Subviews, cache: inout ()) -> CGFloat? { nil }
+
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+                           subviews: Subviews, cache: inout ()) -> CGFloat? { nil }
 }

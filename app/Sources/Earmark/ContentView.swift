@@ -63,6 +63,8 @@ struct LibraryView: View {
     var body: some View {
         @Bindable var model = model
         let music = model.section == .music
+        // The shown section's parts, faded out during a switch (`AppModel.show`).
+        let soundsShown = !music && !model.sectionFaded, songsShown = music && !model.sectionFaded
         let sounds = model.soundBrowser, songs = model.musicBrowser
         // The detail pane is an inspector rather than a third split column: a three-column
         // NavigationSplitView ignores the content column's width and squeezes the table.
@@ -76,25 +78,29 @@ struct LibraryView: View {
         } detail: {
             ZStack {
                 SoundTable()
-                    .edgeBar(.bottom, shown: !music) { StatusBar() }
+                    .edgeBar(.bottom, shown: soundsShown) { StatusBar() }
                 SongTable()
-                    .edgeBar(.top, shown: music) { MusicFilterBar() }
-                    .edgeBar(.bottom, shown: music) { StatusBar() }
+                    .edgeBar(.top, shown: songsShown) { MusicFilterBar() }
+                    .edgeBar(.bottom, shown: songsShown) { StatusBar() }
             }
             // One stable binding: anything that changes here with the section reaches every
             // view below, and SwiftUI's own tables (Folder Categories) would pay for it per cell.
             .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
             .inspector(isPresented: .constant(true)) {
                 DetailColumn(music: music)
+                    .fixedMinimumSize(CGSize(width: 300, height: 300))
                     .inspectorColumnWidth(min: 300, ideal: 380, max: 600)
             }
         }
         .onChange(of: model.section) { _, section in
-            SectionViews.sync(showing: section)
+            SectionViews.sync(showing: section, faded: model.sectionFaded, animated: false)
+        }
+        .onChange(of: model.sectionFaded) { _, faded in
+            SectionViews.sync(showing: model.section, faded: faded, animated: true)
         }
         .onAppear {
             // As soon as the window has its lists (the next turn of the run loop).
-            DispatchQueue.main.async { SectionViews.sync(showing: model.section) }
+            DispatchQueue.main.async { SectionViews.sync(showing: model.section, faded: false, animated: false) }
         }
         .task(id: sounds.filterKey(version: model.version)) { await sounds.refresh(from: model) }
         .task(id: songs.filterKey(version: model.version)) { songs.refresh(from: model) }
@@ -133,8 +139,8 @@ struct DetailColumn: View {
             }
             ZStack {
                 // The hidden pane's own AppKit views (waveform, file drag) let clicks through.
-                SoundDetailPane().environment(\.sectionShown, !music).shown(!music)
-                SongDetailPane().environment(\.sectionShown, music).shown(music)
+                SoundDetailPane().environment(\.sectionShown, !music).shown(!music && !model.sectionFaded)
+                SongDetailPane().environment(\.sectionShown, music).shown(music && !model.sectionFaded)
             }
             .offset(y: slide)
         }
@@ -165,7 +171,8 @@ extension View {
 /// in AppKit. So the hidden section's sidebar and BPM fields are hidden in AppKit (a few rows
 /// to lay out again: cheap). The big lists hide themselves (`RecordTable`).
 @MainActor enum SectionViews {
-    static func sync(showing section: AppSection) {
+    /// `faded`: the shown sidebar is transparent too, during a switch; `animated` fades it.
+    static func sync(showing section: AppSection, faded: Bool, animated: Bool) {
         guard let window = NSApp.windows.first(where: { $0.title == "Earmark" && $0.contentView != nil }),
               let content = window.contentView else { return }
         var sidebars: [NSScrollView] = [], fields: [NSView] = []
@@ -189,7 +196,13 @@ extension View {
             hidden.append(sidebars[section == .sounds ? 1 : 0])
         }
         if section == .music { shown += fields } else { hidden += fields }
-        for view in shown { view.isHidden = false }
+        for view in shown where view.isHidden {
+            view.alphaValue = faded ? 0 : 1
+            view.isHidden = false
+        }
+        if sidebars.count == 2 {
+            fade(sidebars[section == .sounds ? 0 : 1], to: faded ? 0 : 1, animated: animated)
+        }
         // As `RecordTable` does: hidden after SwiftUI's update, without the keyboard (hiding
         // the view that has it makes AppKit ask SwiftUI for the next one, which can hang).
         DispatchQueue.main.async {
@@ -197,6 +210,17 @@ extension View {
                 window.makeFirstResponder(nil)
             }
             for view in hidden { view.isHidden = true }
+        }
+    }
+
+    /// Fades an AppKit view with Core Animation, which runs off the main thread.
+    static func fade(_ view: NSView, to alpha: CGFloat, animated: Bool) {
+        guard view.alphaValue != alpha || animated else { return }
+        guard animated else { view.alphaValue = alpha; return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = alpha > 0 ? 0.22 : 0.15
+            context.timingFunction = CAMediaTimingFunction(name: alpha > 0 ? .easeOut : .easeIn)
+            view.animator().alphaValue = alpha
         }
     }
 }
@@ -210,7 +234,7 @@ struct AutoPlayToggle: View {
     @AppStorage("autoplayMusic") private var autoplayMusic = false
 
     var body: some View {
-        let music = model.section == .music
+        let music = model.switchSection == .music
         let on = music ? autoplayMusic : autoplaySounds
         Button {
             if music { autoplayMusic.toggle() } else { autoplaySounds.toggle() }
@@ -254,10 +278,10 @@ struct SectionSwitch: View {
                     }
                     .padding(3)
                     .glassEffect(.regular.interactive(), in: .capsule)
-                    .animation(.snappy(duration: 0.28), value: model.section)
+                    .animation(.snappy(duration: 0.28), value: model.switchSection)
                 }
             } else {
-                Picker("Section", selection: Binding(get: { model.section }, set: { model.show($0) })) {
+                Picker("Section", selection: Binding(get: { model.switchSection }, set: { model.show($0) })) {
                     ForEach(AppSection.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -269,7 +293,7 @@ struct SectionSwitch: View {
 
     @available(macOS 26, *)
     private func segment(_ section: AppSection) -> some View {
-        let chosen = section == model.section
+        let chosen = section == model.switchSection
         return Button {
             model.show(section)
         } label: {

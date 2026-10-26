@@ -206,6 +206,7 @@ struct SoundTable: View {
     var body: some View {
         @Bindable var browser = model.soundBrowser
         let shown = model.section == .sounds
+        let faded = model.sectionFaded
         let playing = model.playingSound
         RecordTable(rows: browser.visible, rowsVersion: browser.generation, filter: browser.filterKey(version: 0),
                     columns: Self.columns(browser), hiddenColumns: browser.isShowingSimilar ? [] : ["match"],
@@ -213,7 +214,7 @@ struct SoundTable: View {
                     autosaveName: "Sounds", accessibilityLabel: "Sounds", url: \.url,
                     menu: { ids in menu(for: ids) },
                     primaryAction: { ids in if let s = model.sound(id: ids.first ?? nil) { model.player.toggle(s.url) } },
-                    playing: playing?.id, playingPaused: !model.player.isPlaying, revealRequest: browser.revealRequest)
+                    playing: playing?.id, playingPaused: !model.player.isPlaying, revealRequest: browser.revealRequest, faded: faded)
         .overlay {
             Group {
                 if model.soundLibraries.isEmpty {
@@ -230,7 +231,7 @@ struct SoundTable: View {
                     ContentUnavailableView("No Sounds Here", systemImage: "tray")
                 }
             }
-            .shown(shown)
+            .shown(shown && !faded)
         }
     }
 

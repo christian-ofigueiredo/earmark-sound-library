@@ -61,9 +61,14 @@ final class AppModel {
     let folderGuesser = FolderGuesser()
     let analysis = AnalysisEngine()
 
-    /// The section on screen. Both sections stay built (`LibraryView`), so changing it costs
-    /// about a frame and happens with the switch's animation.
+    /// The section on screen. Both sections stay built (`LibraryView`).
     private(set) var section: AppSection
+    /// The section the switch shows: it changes first, then `section` once the content has
+    /// faded out (`show`).
+    private(set) var switchSection: AppSection
+    /// The shown section's content is faded out, during a switch.
+    private(set) var sectionFaded = false
+    @ObservationIgnored private var switching: Task<Void, Never>?
     var showWelcome: Bool
     var alert: AppAlert?
 
@@ -89,7 +94,9 @@ final class AppModel {
 
     init() {
         let defaults = UserDefaults.standard
-        section = AppSection(rawValue: defaults.string(forKey: "section") ?? "") ?? .sounds
+        let savedSection = AppSection(rawValue: defaults.string(forKey: "section") ?? "") ?? .sounds
+        section = savedSection
+        switchSection = savedSection
         showWelcome = !defaults.bool(forKey: "welcomeSeen")
         do {
             database = try LibraryDatabase(path: Self.supportFolder.appendingPathComponent("library.sqlite").path)
@@ -98,6 +105,7 @@ final class AppModel {
             database = nil
             startupError = "Earmark couldn't open its database in \(Self.supportFolder.path): \(error.localizedDescription)"
         }
+        player.gain = { [weak self] url in self?.previewGain(for: url) ?? 0 }
         Task {
             await reload()
             analysis.start(model: self)
@@ -115,12 +123,29 @@ final class AppModel {
         set { if section == .music { musicBrowser.search = newValue } else { soundBrowser.search = newValue } }
     }
 
-    /// The section switch, ⌘1/⌘2 and anything else that changes section: the content changes at
-    /// once and the switch's pill slides (`SectionSwitch` animates it on its own).
+    /// The section switch, ⌘1/⌘2 and anything else that changes section. The switch's pill
+    /// slides while the content fades out; the section changes while nothing shows (its layout
+    /// is the one costly moment, ~0.1 s); then the new content fades in. Done at once, the
+    /// pill's slide and any fade stuttered over that moment.
     func show(_ new: AppSection) {
-        guard new != section else { return }
-        section = new
+        guard new != switchSection else { return }
+        switchSection = new
+        switching?.cancel()
+        switching = Task { [weak self] in
+            guard let self else { return }
+            withAnimation(Self.fadeOut) { sectionFaded = true }
+            try? await Task.sleep(for: .milliseconds(170))
+            guard !Task.isCancelled else { return }
+            section = switchSection
+            // The new section is laid out before it fades in, so the fade starts smoothly.
+            try? await Task.sleep(for: .milliseconds(30))
+            guard !Task.isCancelled else { return }
+            withAnimation(Self.fadeIn) { sectionFaded = false }
+        }
     }
+
+    static let fadeOut = Animation.easeIn(duration: 0.15)
+    static let fadeIn = Animation.easeOut(duration: 0.22)
 
     // MARK: reading
 
@@ -155,6 +180,21 @@ final class AppModel {
     }
 
     /// The sound the player has (playing or paused), if it's a sound.
+    /// Plays sound effects at the same loudness (Preferences): the gain, dB, that brings a sound
+    /// to the chosen loudness, keeping its peaks below −1 dBFS. Only playback in Earmark: the
+    /// file isn't changed. Songs, and sounds not measured yet, play as they are.
+    func previewGain(for url: URL) -> Double {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: Preferences.normalizeKey) as? Bool ?? true else { return 0 }
+        let target = defaults.object(forKey: Preferences.loudnessKey) as? Double ?? Preferences.defaultLoudness
+        let path = url.path
+        guard let sound = sounds.first(where: { $0.path == path }), let id = sound.id,
+              let facts = analysis.facts[id], facts.isCurrent(for: sound), let loudness = facts.loudness else { return 0 }
+        var gain = target - loudness
+        if let peak = facts.peak { gain = min(gain, -1 - peak) }
+        return max(-40, min(gain, 48))
+    }
+
     var playingSound: SoundRecord? {
         guard player.state != .stopped, let path = player.url?.path else { return nil }
         return sounds.first { $0.path == path }

@@ -346,10 +346,12 @@ Settings → Repository name. Topics/description also have to be set there.
 - **Section switch** (owner, 2026-10-26: stuttered, then "remove the short pause too"):
   rebuilding a section (split view, tables, layout) took ~0.2 s of main thread. Now both
   sections stay built in one split view (`LibraryView`: each column a ZStack of both), the
-  search field and auto-play button are shared and follow the section, and
-  `AppModel.show(_:)` changes section at once while `SectionSwitch` animates its pill on its
-  own. A switch costs ~80–100 ms of main thread, mostly SwiftUI working out the window's
-  minimum size (`NSHostingView.minSize`) and laying out after the state change.
+  search field and auto-play button are shared and follow the section. `AppModel.show(_:)`
+  (owner, 2026-10-26: "rough… make it fade, it can be a little slower"): the switch's pill
+  (`switchSection`) slides while the shown section fades out (`sectionFaded`), the section
+  changes while nothing shows (its layout, the one costly moment), then the new one fades in.
+  SwiftUI parts fade with SwiftUI opacity; the AppKit lists and sidebars with Core Animation
+  (`SectionViews.fade`), which runs off the main thread.
   Don't hide a section with `.disabled`, `.allowsHitTesting`, `.accessibilityHidden` or
   `.focused`, and don't give `.searchable` a binding or prompt that changes with the section:
   with SwiftUI tables, each changed the environment of every cell (each its own
@@ -393,6 +395,29 @@ Settings → Repository name. Topics/description also have to be set there.
   scrolling, sorting, search and clearing it, the row and header menus, Find Similar Sounds
   (Match column), the detail pane's play and waveform. The owner checked dragging rows into
   Resolve: works.
+- **Smoothness: the main thread was always busy while something played** (owner,
+  2026-10-26: animations "in a slow frame rate", "the program is lagging"). Three causes,
+  all measured with `sample`: (1) SwiftUI works out a window's (and each split view
+  column's) minimum size by measuring all of its content after any change, and the detail
+  pane's grid made that 10–20 ms, 40 times a second while the playhead moved: the window
+  content and the detail column now use `fixedMinimumSize`, a layout that reports a fixed
+  minimum without asking its content (it must also answer alignment queries itself, or a
+  parent stack makes it lay the content out anyway). (2) The waveform redrew all its bars
+  for each playhead move: the playhead is now its own layer. (3) Passing the playhead into
+  `WaveformView` as a value rebuilt and re-laid out the whole detail pane on each tick (a
+  representable's update is re-measured): the waveform now follows the player itself with a
+  display link while playing, and the time labels are their own views over a fixed-width
+  stand-in (`TickingText`). Playing went from ~100% to ~25% of the main thread.
+- **Preview loudness** (owner: some sounds at −44 LUFS were barely audible). Preferences
+  (⌘,, `Preferences.swift`): "Play sound effects at the same loudness", on by default, at
+  −14 LUFS (streaming), −16 or −23 (EBU R128). `AppModel.previewGain` brings a sound to that
+  level from its measured loudness (`SoundFacts`), keeping peaks below −1 dBFS; songs and
+  unmeasured sounds play as they are. Only playback: files aren't changed and Resolve gets
+  the original. `AudioPlayer` is now AVAudioEngine (player node → two EQ units as gain
+  stages, each −96…+24 dB): AVAudioPlayer can't play above a file's own level. Ranges and
+  seeks are scheduled segments; a segment's end, matched by `generation`, stops playback;
+  an output device change restarts the engine where it was. Preferences also has auto-play
+  and "While you use the Mac" (moved out of the Analysis menu).
 - **What's playing** (owner, 2026-10-26: after selecting another row, the playing one was
   lost; the owner chose the design). The playing row's name has a speaker before it, blue
   while playing, grey while paused, white on the selection (`RecordTable` `playing`,
@@ -402,7 +427,8 @@ Settings → Repository name. Topics/description also have to be set there.
   choice and music filters if they hide it. The playing item is found by its path
   (`AppModel.playingSound/playingSong`); the time is its own small view, as it changes 40
   times a second. Switching section still stops playback. The strip slides down from the
-  top and the details slide with it (`DetailColumn`, 0.3 s; owner asked). The details are
+  top and the details slide with it (`DetailColumn`, 0.3 s; owner asked; smooth once the
+  playback work above was gone). The details are
   usually new views (another row selected), so neither layout animation nor an insertion
   transition moves them (a `.transition` on the detail view didn't run at all): they're
   offset by the strip's height and animated back to 0 instead.
@@ -411,6 +437,11 @@ Settings → Repository name. Topics/description also have to be set there.
   (`ToolbarSpacer`, `.primaryAction` and moving it to the inspector's toolbar changed
   nothing). The owner chose to attach it to the switch: `AutoPlayToggle`, in the principal
   item with `SectionSwitch`, drawn like it (light glass, the blue pill while on).
+- **Open: "Application performed a reentrant operation in its NSTableView delegate"** is
+  logged once a few seconds after launch, while the library loads (since before
+  2026-10-26). Not from `RecordTable` (instrumented: none of its changes happen inside its
+  own callbacks), so most likely a SwiftUI sidebar list updating while it loads. AppKit says
+  it will become an assert in a future macOS: worth finding.
 - **Sidebar rows added or removed while selected** (owner, 2026-10-26: "Similar to…" text
   doubled, its ✕ needed two clicks). Adding the Similar row and selecting it in the same
   update left a copy of the row drawn over it: the text twice, in the selected (bold) and

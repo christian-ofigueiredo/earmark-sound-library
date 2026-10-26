@@ -24,7 +24,10 @@ struct PlayerPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             WaveformView(peaks: waveform?.peaks,
                          active: activeState != .inactive,
-                         playhead: isActive && length > 0 ? player.currentTime / length : nil,
+                         playhead: { [player, url, length] in
+                             player.isActive(url) && length > 0 ? player.liveTime / length : nil
+                         },
+                         playing: player.plays(url),
                          selection: $selection,
                          onClick: click,
                          onScrub: { fraction, _ in if isActive { player.seek(to: fraction * length) } })
@@ -53,7 +56,7 @@ struct PlayerPanel: View {
                 .playerButtonStyle()
                 .disabled(!isActive)
                 .help("Stop and go back to the start")
-                Text(timeLabel).monospacedDigit().foregroundStyle(.secondary)
+                PlayerTime(url: url, length: length, selection: selection, precise: precise)
                 Spacer()
                 if selection != nil {
                     Button("Clear Selection", action: clearSelection)
@@ -107,10 +110,24 @@ struct PlayerPanel: View {
         selection = nil
         if player.url == url { player.clearRange() }
     }
+}
 
-    /// The time while playing or paused; otherwise the selection, or the length.
-    private var timeLabel: String {
-        if isActive {
+/// The player's time while playing or paused; otherwise the selection, or the length. Its own
+/// view, so the time's 40 changes a second don't rebuild the player panel.
+private struct PlayerTime: View {
+    @Environment(AppModel.self) private var model
+    let url: URL
+    let length: Double
+    let selection: ClosedRange<Double>?
+    let precise: Bool
+
+    var body: some View {
+        TickingText(label).foregroundStyle(.secondary)
+    }
+
+    private var label: String {
+        let player = model.player
+        if player.isActive(url) {
             return "\(formatLength(player.currentTime, precise: precise)) / \(formatLength(length, precise: precise))"
         }
         if let sel = selection, length > 0 {
@@ -122,7 +139,26 @@ struct PlayerPanel: View {
     }
 }
 
-/// The original file, ready to drag into Resolve or Finder.
+
+/// Text that changes many times a second (the playing time), laid out by a stand-in with its
+/// digits zeroed: the stand-in only changes when the number of digits does, so the views
+/// around it aren't laid out again on every tick (the detail pane's scroll-if-needed measured
+/// all of its content each time).
+struct TickingText: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(String(text.map { $0.isNumber ? "0" : $0 }))
+            .monospacedDigit()
+            .hidden()
+            .overlay(alignment: .leading) { Text(text).monospacedDigit().fixedSize() }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(text)
+    }
+}
+
 /// The sound or song the player has, for `NowPlayingBar`.
 struct NowPlaying: Equatable {
     var url: URL
@@ -202,13 +238,13 @@ private struct NowPlayingTime: View {
     let precise: Bool
 
     var body: some View {
-        Text("\(formatLength(model.player.currentTime, precise: precise)) / \(formatLength(duration, precise: precise))")
+        TickingText("\(formatLength(model.player.currentTime, precise: precise)) / \(formatLength(duration, precise: precise))")
             .font(.caption)
-            .monospacedDigit()
             .foregroundStyle(.secondary)
     }
 }
 
+/// The original file, ready to drag into Resolve or Finder.
 struct FileChip: View {
     let url: URL
 

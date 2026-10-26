@@ -191,13 +191,14 @@ struct SongTable: View {
     var body: some View {
         @Bindable var browser = model.musicBrowser
         let shown = model.section == .music
+        let faded = model.sectionFaded
         let playing = model.playingSong
         RecordTable(rows: browser.visible, rowsVersion: browser.generation, filter: browser.filterKey(version: 0),
                     columns: Self.columns, selection: $browser.selection, sortOrder: $browser.sortOrder,
                     shown: shown, autosaveName: "Songs", accessibilityLabel: "Songs", url: \.url,
                     menu: { ids in menu(for: ids) },
                     primaryAction: { ids in if let s = model.song(id: ids.first ?? nil) { model.player.toggle(s.url) } },
-                    playing: playing?.id, playingPaused: !model.player.isPlaying, revealRequest: browser.revealRequest)
+                    playing: playing?.id, playingPaused: !model.player.isPlaying, revealRequest: browser.revealRequest, faded: faded)
         .overlay {
             Group {
                 if model.musicLibraries.isEmpty {
@@ -219,7 +220,7 @@ struct SongTable: View {
                     }
                 }
             }
-            .shown(shown)
+            .shown(shown && !faded)
         }
     }
 

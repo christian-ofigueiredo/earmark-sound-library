@@ -63,8 +63,11 @@ struct WaveformView: NSViewRepresentable {
     let peaks: [Float]?
     /// The window is active: in an inactive one the accent colours turn grey, as the system's do.
     var active = true
-    /// 0…1, or nil when this file isn't loaded in the player.
-    let playhead: Double?
+    /// The playhead, 0…1, or nil when this file isn't loaded in the player. Read by the view
+    /// itself at the display's rate while `playing`: passing the position in, as a value,
+    /// rebuilt and laid out the whole detail pane 40 times a second.
+    let playhead: () -> Double?
+    let playing: Bool
     @Binding var selection: ClosedRange<Double>?
     /// Click at a point (0…1).
     let onClick: (Double) -> Void
@@ -77,7 +80,9 @@ struct WaveformView: NSViewRepresentable {
         view.passesClicks = !context.environment.sectionShown
         view.peaks = peaks
         view.active = active
-        view.playhead = playhead
+        view.playheadSource = playhead
+        view.running = playing
+        view.refreshPlayhead()
         view.selection = selection
         view.onClick = onClick
         view.onScrub = onScrub
@@ -92,7 +97,35 @@ final class WaveformCanvas: NSView {
     var passesClicks = false
 
     override func hitTest(_ point: NSPoint) -> NSView? { passesClicks ? nil : super.hitTest(point) }
-    var playhead: Double? { didSet { if oldValue != playhead { needsDisplay = true } } }
+    /// Drawn on its own layer, moved as it plays: redrawing the waveform for it, 40 times a
+    /// second, kept the main thread busy.
+    private var playhead: Double? { didSet { if oldValue != playhead { placePlayhead() } } }
+    private let playheadLayer = CAShapeLayer()
+    var playheadSource: () -> Double? = { nil }
+    /// Follows the playhead at the display's rate while playing.
+    var running = false { didSet { if oldValue != running { updateDisplayLink() } } }
+    private var displayLink: CADisplayLink?
+
+    func refreshPlayhead() { playhead = playheadSource() }
+
+    private func updateDisplayLink() {
+        if running, window != nil {
+            guard displayLink == nil else { return }
+            let link = displayLink(target: self, selector: #selector(step))
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        } else {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+    }
+
+    @objc private func step(_ link: CADisplayLink) { refreshPlayhead() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateDisplayLink()
+    }
     var selection: ClosedRange<Double>? { didSet { if oldValue != selection { needsDisplay = true } } }
     var onClick: (Double) -> Void = { _ in }
     var onScrub: (Double, Bool) -> Void = { _, _ in }
@@ -106,6 +139,53 @@ final class WaveformCanvas: NSView {
     private let grab: CGFloat = 6
 
     override var isFlipped: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        playheadLayer.isHidden = true
+        layer?.addSublayer(playheadLayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func layout() {
+        super.layout()
+        placePlayhead()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        placePlayhead()
+    }
+
+    /// The playhead in the text colour, to stand out on the blue waveform, with a small handle
+    /// at the top that shows it can be dragged.
+    private func placePlayhead() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        guard let playhead, playhead.isFinite, bounds.width > 0 else {
+            playheadLayer.isHidden = true
+            return
+        }
+        let height = bounds.height
+        let x = CGFloat(min(max(playhead, 0), 1)) * bounds.width
+        if playheadLayer.bounds.height != height {
+            let path = CGMutablePath()
+            path.addRect(CGRect(x: 4.25, y: 0, width: 1.5, height: height))
+            path.addLines(between: [CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 0), CGPoint(x: 5, y: 6)])
+            path.closeSubpath()
+            playheadLayer.path = path
+            playheadLayer.bounds = CGRect(x: 0, y: 0, width: 10, height: height)
+            playheadLayer.anchorPoint = CGPoint(x: 0.5, y: 0)
+        }
+        var color = NSColor.labelColor.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance { color = NSColor.labelColor.cgColor }
+        playheadLayer.fillColor = color
+        playheadLayer.position = CGPoint(x: x, y: 0)
+        playheadLayer.isHidden = false
+    }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     private func fraction(_ x: CGFloat) -> Double { min(max(Double(x / max(bounds.width, 1)), 0), 1) }
@@ -114,6 +194,8 @@ final class WaveformCanvas: NSView {
     override func mouseDown(with event: NSEvent) {
         let x = location(event)
         lastX = x
+        // Only this window's clicks (a late event from elsewhere landed here as a click at 0).
+        guard event.window === window else { drag = nil; return }
         if let playhead, abs(CGFloat(playhead) * bounds.width - x) <= grab {
             drag = .scrubbing
         } else {
@@ -127,6 +209,7 @@ final class WaveformCanvas: NSView {
         switch drag {
         case .scrubbing:
             onScrub(fraction(x), false)
+            refreshPlayhead()
         case .pending(let start) where abs(x - start) > 3, .selecting(let start):
             drag = .selecting(from: start)
             let a = fraction(start), b = fraction(x)
@@ -140,10 +223,13 @@ final class WaveformCanvas: NSView {
         let x = location(event)
         switch drag {
         case .scrubbing: onScrub(fraction(lastX), true)
-        case .pending: onClick(fraction(x))
+        // A click counts where it's released over the waveform; elsewhere it's cancelled.
+        case .pending where event.window === window && bounds.contains(convert(event.locationInWindow, from: nil)):
+            onClick(fraction(x))
         default: break
         }
         drag = nil
+        refreshPlayhead()   // a jump while paused
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -163,19 +249,6 @@ final class WaveformCanvas: NSView {
                 let h = max(0.5, CGFloat(min(p, 1)) * (mid - 2))
                 NSRect(x: CGFloat(i) * step, y: mid - h, width: max(step, 0.75), height: h * 2).fill()
             }
-        }
-        if let playhead, playhead.isFinite {
-            let x = CGFloat(min(max(playhead, 0), 1)) * r.width
-            // The playhead in the text colour, to stand out on the blue waveform.
-            NSColor.labelColor.setFill()
-            NSRect(x: x - 0.75, y: 0, width: 1.5, height: r.height).fill()
-            // A small handle at the top shows the playhead can be dragged.
-            let handle = NSBezierPath()
-            handle.move(to: NSPoint(x: x - 5, y: 0))
-            handle.line(to: NSPoint(x: x + 5, y: 0))
-            handle.line(to: NSPoint(x: x, y: 6))
-            handle.close()
-            handle.fill()
         }
     }
 

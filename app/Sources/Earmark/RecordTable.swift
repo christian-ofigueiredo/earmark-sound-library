@@ -58,6 +58,8 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
     var playingPaused = false
     /// Bumped to scroll the list to the selection (Show, in the detail pane's Now Playing).
     var revealRequest = 0
+    /// Faded out during a section switch (Core Animation, so it stays smooth while the app works).
+    var faded = false
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -138,7 +140,14 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
         }
         table.isShownSection = shown
         if shown {
-            if scroll.isHidden { scroll.isHidden = false }
+            if scroll.isHidden {
+                scroll.alphaValue = faded ? 0 : 1
+                scroll.isHidden = false
+            }
+            if coordinator.faded != faded {
+                coordinator.faded = faded
+                SectionViews.fade(scroll, to: faded ? 0 : 1, animated: true)
+            }
             // Once both sections have updated.
             if !coordinator.wasShown { DispatchQueue.main.async { table.takeKeyboardIfFree() } }
         } else if !scroll.isHidden {
@@ -160,6 +169,7 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
         weak var table: NSTableView?
         weak var headerMenu: NSMenu?
         var wasShown = false
+        var faded = false
         var revealed = 0
         private(set) var version = Int.min
         private var rows: [Record] = []
