@@ -26,6 +26,10 @@ struct EarmarkApp: App {
                 .frame(minWidth: 900, minHeight: 480)
         }
         .defaultSize(width: 1100, height: 680)
+        Window("Keyboard Shortcuts", id: KeyboardShortcutsView.windowID) {
+            KeyboardShortcutsView()
+        }
+        .windowResizability(.contentSize)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Add Sound Library…") { model.chooseLibrary(.sounds) }
@@ -40,6 +44,15 @@ struct EarmarkApp: App {
                 Divider()
                 MapFoldersButton()
             }
+            CommandGroup(after: .newItem) {
+                Divider()
+                SelectionCommands(model: model, part: .file)
+            }
+            CommandGroup(after: .pasteboard) { SelectionCommands(model: model, part: .pasteboard) }
+            CommandGroup(after: .textEditing) {
+                Divider()
+                SelectionCommands(model: model, part: .find)
+            }
             CommandGroup(before: .toolbar) {
                 Button("Sound Effects") { model.show(.sounds) }
                     .keyboardShortcut("1")
@@ -47,10 +60,10 @@ struct EarmarkApp: App {
                     .keyboardShortcut("2")
                 Divider()
             }
+            CommandMenu("Playback") { PlaybackMenu(model: model) }
+            CommandMenu("Song") { SongMenu(model: model) }
             CommandMenu("Analysis") { AnalysisMenu(analysis: model.analysis) }
-            CommandGroup(replacing: .help) {
-                Button("Welcome to Earmark") { model.showWelcome = true }
-            }
+            CommandGroup(replacing: .help) { HelpMenu(model: model) }
         }
     }
 }

@@ -211,6 +211,7 @@ struct SongTable: View {
                     shown: shown, autosaveName: "Songs", accessibilityLabel: "Songs", url: \.url,
                     menu: { ids in menu(for: ids) },
                     primaryAction: { ids in if let s = model.song(id: ids.first ?? nil) { model.player.toggle(s.url) } },
+                    arrowKeys: { model.skip(forward: $0, more: $1) },
                     playing: playing?.id, playingPaused: !model.player.isPlaying, revealRequest: browser.revealRequest, faded: faded)
         .overlay {
             Group {

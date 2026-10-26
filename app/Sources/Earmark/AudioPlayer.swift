@@ -122,6 +122,15 @@ final class AudioPlayer {
         if state == .playing { node.play() }
     }
 
+    /// Moves the playhead by `delta` seconds (the arrow keys), playing or paused as it was;
+    /// past the end it stops, as at the end of the file.
+    func skip(by delta: TimeInterval) {
+        guard file != nil, state != .stopped else { return }
+        let t = liveTime + delta
+        guard t < duration else { return stop() }
+        seek(to: max(0, t))
+    }
+
     /// Play to the end of the file instead of stopping at the end of the selected range.
     func clearRange() {
         guard rangeEnd != nil else { return }

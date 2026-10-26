@@ -54,6 +54,8 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
     var menu: (Set<Record.ID>) -> [RecordMenuItem]
     /// Double-click, Return and Space.
     var primaryAction: (Set<Record.ID>) -> Void
+    /// ← and → (forward), with Shift for more: true when handled.
+    var arrowKeys: (_ forward: Bool, _ more: Bool) -> Bool = { _, _ in false }
     /// The row playing or paused, marked with a speaker (blue playing, grey paused).
     var playing: Record.ID?
     var playingPaused = false
@@ -96,6 +98,7 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
         table.target = coordinator
         table.doubleAction = #selector(Coordinator.doubleClicked)
         table.onPrimaryKey = { [weak coordinator] in coordinator?.primary() }
+        table.onArrowKey = { [weak coordinator] forward, more in coordinator?.parent.arrowKeys(forward, more) ?? false }
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
         let rowMenu = NSMenu()
         rowMenu.autoenablesItems = false
@@ -360,6 +363,8 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
 /// shown and nothing else in the window has it.
 final class KeyTableView: NSTableView {
     var onPrimaryKey: () -> Void = {}
+    /// ← / → (forward), with Shift for more; false lets the table have the key.
+    var onArrowKey: (_ forward: Bool, _ more: Bool) -> Bool = { _, _ in false }
     /// False once the other section is shown (the list is hidden a moment later).
     var isShownSection = true
     private var wantsKeyboard = false
@@ -383,6 +388,10 @@ final class KeyTableView: NSTableView {
             return
         }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function])
+        if let key = event.specialKey, key == .leftArrow || key == .rightArrow, modifiers.isEmpty || modifiers == .shift,
+           onArrowKey(key == .rightArrow, modifiers == .shift) {
+            return
+        }
         if modifiers.isEmpty, ["\r", "\u{3}", " "].contains(event.charactersIgnoringModifiers ?? "") {
             onPrimaryKey()
         } else {

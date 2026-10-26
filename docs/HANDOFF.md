@@ -490,6 +490,21 @@ Settings → Repository name. Topics/description also have to be set there.
   usually new views (another row selected), so neither layout animation nor an insertion
   transition moves them (a `.transition` on the detail view didn't run at all): they're
   offset by the strip's height and animated back to 0 instead.
+- **Keyboard shortcuts** (owner, 2026-10-26; `Shortcuts.swift`, each defined once and used by
+  both the menus and Help ▸ Keyboard Shortcuts). In the list (bare keys, like Space, handled by
+  `KeyTableView` so typing in the search field is untouched): ← / → move what's playing or paused
+  5 s in a song, 1 s in a sound effect; ⇧← / ⇧→ 15 s / 5 s (`AudioPlayer.skip(by:)` stops past
+  the end); with nothing playing the key goes to the table. Menus: Playback (Stop ⌘., Show Now
+  Playing ⌘L, Auto-play On or Off ⇧⌘A for the section on screen), Song (Double/Halve Tempo
+  ⌥⌘↑/⌥⌘↓, Use Relative Key ⌥⌘K, Revert; through the main window's undo manager, so Edit ▸ Undo
+  takes them back), File ▸ Show in Finder ⌘R (⇧⌘R is Rescan All Folders), Edit ▸ Copy Path ⌥⌘C,
+  Search ⌘F (`NSSearchToolbarItem.beginSearchInteraction`), Find Similar Sounds / Find Songs That
+  Mix With This ⇧⌘F (the title follows the section). Help ▸ Keyboard Shortcuts is a window sized
+  to its content (system font: monospaced drew ⌥⇧⌘ badly). Checked in the app: the arrow keys
+  (0:00.1 → 0:06.1 on a sound, paused), Show Now Playing, Auto-play (restored), Search focus,
+  Find Similar, Double Tempo then Undo (database checked), the help window. Not run: Copy Path
+  (the test tool refuses clipboard menu items) and Show in Finder (would bring Finder forward);
+  both reuse the row menu's code.
 - **Auto-play button**: in the toolbar it sat halfway between the section switch and the
   search field, as SwiftUI puts flexible spaces on both sides of a toolbar item there
   (`ToolbarSpacer`, `.primaryAction` and moving it to the inspector's toolbar changed
