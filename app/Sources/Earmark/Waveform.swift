@@ -61,6 +61,8 @@ enum Waveform {
 ///   click: move the playhead there · drag the playhead: scrub · drag elsewhere: select a range
 struct WaveformView: NSViewRepresentable {
     let peaks: [Float]?
+    /// The window is active: in an inactive one the accent colours turn grey, as the system's do.
+    var active = true
     /// 0…1, or nil when this file isn't loaded in the player.
     let playhead: Double?
     @Binding var selection: ClosedRange<Double>?
@@ -73,6 +75,7 @@ struct WaveformView: NSViewRepresentable {
 
     func updateNSView(_ view: WaveformCanvas, context: Context) {
         view.peaks = peaks
+        view.active = active
         view.playhead = playhead
         view.selection = selection
         view.onClick = onClick
@@ -83,6 +86,7 @@ struct WaveformView: NSViewRepresentable {
 
 final class WaveformCanvas: NSView {
     var peaks: [Float]? { didSet { if oldValue != peaks { needsDisplay = true } } }
+    var active = true { didSet { if oldValue != active { needsDisplay = true } } }
     var playhead: Double? { didSet { if oldValue != playhead { needsDisplay = true } } }
     var selection: ClosedRange<Double>? { didSet { if oldValue != selection { needsDisplay = true } } }
     var onClick: (Double) -> Void = { _ in }
@@ -139,14 +143,15 @@ final class WaveformCanvas: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let r = bounds
+        let accent = active ? NSColor.controlAccentColor : NSColor.secondaryLabelColor
         NSColor.labelColor.withAlphaComponent(0.05).setFill()
-        NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
+        NSBezierPath(roundedRect: r, xRadius: 8, yRadius: 8).fill()
         if let sel = selection {
-            NSColor.controlAccentColor.withAlphaComponent(0.22).setFill()
+            accent.withAlphaComponent(0.22).setFill()
             NSRect(x: sel.lowerBound * r.width, y: 0, width: max((sel.upperBound - sel.lowerBound) * r.width, 1), height: r.height).fill()
         }
         if let peaks, !peaks.isEmpty {
-            NSColor.labelColor.withAlphaComponent(0.6).setFill()
+            NSColor.labelColor.withAlphaComponent(active ? 0.6 : 0.4).setFill()
             let mid = r.height / 2, step = r.width / CGFloat(peaks.count)
             for (i, p) in peaks.enumerated() {
                 let h = max(0.5, CGFloat(min(p, 1)) * (mid - 2))
@@ -155,7 +160,7 @@ final class WaveformCanvas: NSView {
         }
         if let playhead, playhead.isFinite {
             let x = CGFloat(min(max(playhead, 0), 1)) * r.width
-            NSColor.controlAccentColor.setFill()
+            accent.setFill()
             NSRect(x: x - 0.75, y: 0, width: 1.5, height: r.height).fill()
             // A small handle at the top shows the playhead can be dragged.
             let handle = NSBezierPath()

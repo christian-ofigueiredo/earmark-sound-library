@@ -6,22 +6,18 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var model = model
-        // The status bar sits below the split view rather than in a safe-area inset: the
-        // sidebar list ignores the inset, so its last rows ended up under the bar.
-        VStack(spacing: 0) {
-            Group {
-                if let error = model.startupError {
-                    ContentUnavailableView("Earmark can't start", systemImage: "exclamationmark.triangle",
-                                           description: Text(error))
-                } else {
-                    switch model.section {
-                    case .sounds: SoundsView()
-                    case .music: MusicView()
-                    }
+        // Each section puts the status bar under its list (`edgeBar`), so the sidebar runs
+        // the window's full height, as macOS 27 sidebars do.
+        Group {
+            if let error = model.startupError {
+                ContentUnavailableView("Earmark can't start", systemImage: "exclamationmark.triangle",
+                                       description: Text(error))
+            } else {
+                switch model.section {
+                case .sounds: SoundsView()
+                case .music: MusicView()
                 }
             }
-            .frame(maxHeight: .infinity)
-            StatusBar()
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -92,17 +88,21 @@ struct StatusBar: View {
                     .layoutPriority(1)
                 Divider().frame(height: 12)
             }
-            Label("Analysis is much faster when you're not using the Mac. Leave Earmark open overnight.",
-                  systemImage: "moon.zzz")
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .help("Earmark analyses sounds in the background and slows down while you work.")
+            // The reminder the owner asked for, shortened when the list is narrow.
+            ViewThatFits(in: .horizontal) {
+                Label("Analysis is much faster when you're not using the Mac. Leave Earmark open overnight.",
+                      systemImage: "moon.zzz")
+                Label("Faster while the Mac is idle", systemImage: "moon.zzz")
+                Image(systemName: "moon.zzz")
+            }
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .help("Analysis is much faster when you're not using the Mac. Leave Earmark open overnight: "
+                + "it analyses sounds in the background and slows down while you work.")
         }
         .font(.callout)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
     }
 
     /// Totals for both sections; the current one says "N of M" while a filter or search hides some.

@@ -5,6 +5,7 @@ import SwiftUI
 /// Waveform, play button and range selection for one file.
 struct PlayerPanel: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.controlActiveState) private var activeState
     let url: URL
     let knownDuration: Double?
     /// Sound effects show tenths of a second; songs don't need them.
@@ -22,6 +23,7 @@ struct PlayerPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             WaveformView(peaks: waveform?.peaks,
+                         active: activeState != .inactive,
                          playhead: isActive && length > 0 ? player.currentTime / length : nil,
                          selection: $selection,
                          onClick: click,
@@ -40,6 +42,7 @@ struct PlayerPanel: View {
                 } label: {
                     Image(systemName: player.plays(url) ? "pause.fill" : "play.fill").frame(width: 16)
                 }
+                .playerButtonStyle()
                 .help(player.plays(url) ? "Pause (Space in the list)"
                       : selection == nil ? "Play (Space in the list)" : "Play the selection")
                 Button {
@@ -47,6 +50,7 @@ struct PlayerPanel: View {
                 } label: {
                     Image(systemName: "stop.fill").frame(width: 16)
                 }
+                .playerButtonStyle()
                 .disabled(!isActive)
                 .help("Stop and go back to the start")
                 Text(timeLabel).monospacedDigit().foregroundStyle(.secondary)
@@ -286,6 +290,32 @@ struct DetailScroll<Content: View>: View {
         ViewThatFits(in: .vertical) {
             content.frame(maxHeight: .infinity, alignment: .top)
             ScrollView { content }
+        }
+    }
+}
+
+extension View {
+    /// A bar along the top or bottom of a list. On macOS 26 and later it's the system's kind
+    /// (no divider; the list's rows end above it) on the bar material, since tables don't
+    /// draw the scroll edge effect under it. Earlier, an inset with a bar background and a divider.
+    @ViewBuilder func edgeBar<Bar: View>(_ edge: VerticalEdge, @ViewBuilder _ bar: () -> Bar) -> some View {
+        if #available(macOS 26, *) {
+            safeAreaBar(edge: edge, spacing: 0) { bar().background(.bar) }
+        } else {
+            safeAreaInset(edge: edge, spacing: 0) {
+                bar()
+                    .background(.bar)
+                    .overlay(alignment: edge == .top ? .bottom : .top) { Divider() }
+            }
+        }
+    }
+
+    /// Player buttons: round Liquid Glass buttons on macOS 26 and later.
+    @ViewBuilder func playerButtonStyle() -> some View {
+        if #available(macOS 26, *) {
+            buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
+        } else {
+            self
         }
     }
 }

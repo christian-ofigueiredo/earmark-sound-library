@@ -121,6 +121,7 @@ struct SoundsView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 380)
         } detail: {
             SoundTable()
+                .edgeBar(.bottom) { StatusBar() }
                 .searchable(text: $browser.search, placement: .toolbar, prompt: "Name, description, keywords")
                 .inspector(isPresented: .constant(true)) {
                     SoundDetailPane()

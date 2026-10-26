@@ -16,6 +16,7 @@ APP="$OUT/Earmark.app"
 BUNDLE_ID="io.github.christian-ofigueiredo.Earmark"
 VERSION="$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo 0)"
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
+MIN_MACOS="14.0"   # as in app/Package.swift
 
 cd "$PKG"
 swift build -c release --product Earmark
@@ -24,6 +25,14 @@ BIN="$(swift build -c release --show-bin-path)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/Earmark" "$APP/Contents/MacOS/Earmark"
+# SwiftPM records the deployment target as the SDK the binary was built with
+# (LC_BUILD_VERSION "sdk 14.0"), and macOS draws apps built for an old SDK in the
+# old design: old window buttons and controls, no Liquid Glass. Record the SDK
+# actually used, keeping the minimum system version.
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+vtool -set-build-version macos "$MIN_MACOS" "$SDK_VERSION" -replace \
+    -output "$APP/Contents/MacOS/Earmark.sdk" "$APP/Contents/MacOS/Earmark" 2>/dev/null
+mv "$APP/Contents/MacOS/Earmark.sdk" "$APP/Contents/MacOS/Earmark"
 for b in "$BIN"/*.bundle; do
     cp -R "$b" "$APP/Contents/Resources/"
 done
@@ -42,7 +51,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>

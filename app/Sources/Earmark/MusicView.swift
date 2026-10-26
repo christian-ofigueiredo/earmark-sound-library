@@ -105,7 +105,8 @@ struct MusicView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
         } detail: {
             SongTable()
-                .safeAreaInset(edge: .top, spacing: 0) { MusicFilterBar() }
+                .edgeBar(.top) { MusicFilterBar() }
+                .edgeBar(.bottom) { StatusBar() }
                 .searchable(text: $browser.search, placement: .toolbar, prompt: "Title, artist, file")
                 .inspector(isPresented: .constant(true)) {
                     SongDetailPane()
@@ -203,8 +204,6 @@ struct MusicFilterBar: View {
         .controlSize(.small)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(.bar)
-        .overlay(alignment: .bottom) { Divider() }
     }
 }
 

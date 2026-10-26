@@ -330,6 +330,19 @@ Settings → Repository name. Topics/description also have to be set there.
 
 ## Gotchas learned
 
+- **The app looked pre-macOS 27 (old window buttons and controls, no Liquid Glass)** because
+  SwiftPM wrote the deployment target as the SDK in the binary (`otool -l … LC_BUILD_VERSION`
+  said "sdk 14.0"), and macOS draws apps built for an old SDK in the old design. Apple: apps
+  built with the 2027 SDK get the macOS 27 look automatically. `scripts/build-app.sh` now
+  records the SDK actually used with `vtool -set-build-version macos 14.0 <xcrun sdk version>`
+  (minimum stays 14.0). Check with `otool -l app/build/Earmark.app/Contents/MacOS/Earmark |
+  grep -A4 LC_BUILD_VERSION`. On top of that (2026-10-26): the status bar sits under each
+  list (`edgeBar`, `safeAreaBar` on macOS 26+) so the sidebar runs the window's height;
+  tables don't draw the scroll edge effect, so bars keep the bar material; player buttons are
+  round Liquid Glass (`.buttonStyle(.glass)`); the waveform turns grey in an inactive window
+  (`controlActiveState`), as the system dims everything else; Folder Categories has its tabs
+  in the toolbar. Menu icons: macOS 27 shows few by default, nothing to do.
+
 - See `CLAUDE.md` "Gotchas" for Phase 0 (S-KEY writes `prediction/` folders if called on a
   directory; PE-AV text embeds bug; CLAP 10 s windowing; Beat This! checkpoint fallback;
   GitHub macOS runners fail any MPS allocation).

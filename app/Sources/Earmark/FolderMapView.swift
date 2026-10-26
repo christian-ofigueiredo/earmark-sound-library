@@ -250,39 +250,27 @@ struct FolderMapView: View {
 
     var body: some View {
         @Bindable var mapper = model.folderMapper
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Picker("Show", selection: $mapper.tab) {
-                    Text("Guessed by Earmark (\(mapper.guessed.count))").tag(FolderMapper.Tab.guessed)
-                    Text("Your Choices (\(mapper.mapped.count))").tag(FolderMapper.Tab.mapped)
-                    Text("Not Categorised (\(mapper.rows.count))").tag(FolderMapper.Tab.toMap)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                Spacer()
-                if let guess = model.guessProgress {
-                    ProgressView().controlSize(.small)
-                    Text("Guessing: \(guess.done) of \(guess.total) folders").foregroundStyle(.secondary)
-                } else if mapper.tab == .toMap, mapper.pending > 0 {
-                    ProgressView().controlSize(.small)
-                    Text("Suggesting categories: \(mapper.pending) folders to go")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+        Group {
             switch mapper.tab {
             case .guessed: GuessedFoldersTable()
             case .mapped: MappedFoldersTable()
             case .toMap: FoldersToMapTable()
             }
-            Divider()
+        }
+        .edgeBar(.bottom) {
             HStack(spacing: 12) {
-                Text("Sounds without a category take their folder's: yours, or else Earmark's guess. A category from the file itself always wins. Earmark keeps this in its own database; your files aren't changed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let guess = model.guessProgress {
+                    ProgressView().controlSize(.small)
+                    Text("Guessing: \(guess.done) of \(guess.total) folders").foregroundStyle(.secondary)
+                } else if mapper.tab == .toMap, mapper.pending > 0 {
+                    ProgressView().controlSize(.small)
+                    Text("Suggesting categories: \(mapper.pending) folders to go").foregroundStyle(.secondary)
+                } else {
+                    Text("Sounds without a category take their folder's: yours, or else Earmark's guess. A category from the file itself always wins. Earmark keeps this in its own database; your files aren't changed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer()
                 if mapper.tab == .toMap {
                     if !mapper.ticked.isEmpty {
@@ -296,7 +284,18 @@ struct FolderMapView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 10)
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Show", selection: $mapper.tab) {
+                    Text("Guessed by Earmark (\(mapper.guessed.count))").tag(FolderMapper.Tab.guessed)
+                    Text("Your Choices (\(mapper.mapped.count))").tag(FolderMapper.Tab.mapped)
+                    Text("Not Categorised (\(mapper.rows.count))").tag(FolderMapper.Tab.toMap)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
         }
         .searchable(text: $mapper.search, placement: .toolbar, prompt: "Folder")
         .task(id: model.version) { mapper.refresh(from: model) }
