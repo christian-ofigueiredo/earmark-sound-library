@@ -344,24 +344,51 @@ Settings → Repository name. Topics/description also have to be set there.
   in the toolbar. Menu icons: macOS 27 shows few by default, nothing to do.
 - **Section switch** (owner, 2026-10-26: stuttered, then "remove the short pause too"):
   rebuilding a section (split view, tables, layout) took ~0.2 s of main thread. Now both
-  sections stay built in one split view (`LibraryView`: each column a ZStack of both, the
-  hidden one at opacity 0 and below the other for clicks), the search field and auto-play
-  button are shared and follow the section, and `AppModel.show(_:)` changes section inside the
-  switch's animation, cross-fading. Measured with an automatic switch (no accessibility
-  clicks): ~20 ms per switch, ~40 ms spread over the animation's frames with the cross-fade.
+  sections stay built in one split view (`LibraryView`: each column a ZStack of both), the
+  search field and auto-play button are shared and follow the section, and
+  `AppModel.show(_:)` changes section at once while `SectionSwitch` animates its pill on its
+  own. A switch costs ~80 ms of main thread, nearly all SwiftUI working out the window's
+  minimum size (`NSHostingView.minSize`) after the state change; the section's own work
+  (`SectionViews.sync`) is 1–4 ms.
   Don't hide a section with `.disabled`, `.allowsHitTesting`, `.accessibilityHidden` or
   `.focused`, and don't give `.searchable` a binding or prompt that changes with the section:
   each changes the environment of every table cell (each its own `NSHostingView`) and the
   switch went back to ~0.5 s. The search binding is `AppModel.search` (stable), the prompt
-  "Search"; on a switch the keyboard is released (`makeFirstResponder(nil)`) and Space only
-  acts in the section shown. The switch is a custom Liquid Glass control (`SectionSwitch`:
+  "Search". The switch is a custom Liquid Glass control (`SectionSwitch`:
   `GlassEffectContainer`, a blue tinted glass pill moved with `matchedGeometryEffect`, the
   toolbar's shared glass hidden with `sharedBackgroundVisibility(.hidden)`); before macOS 26,
   a segmented picker. Blue details: `.tint(.blue)` on both windows, the play button
   `.glassProminent`, the waveform in system blue (the playhead in the text colour).
+- **Clicks and keys with both sections built** (owner, 2026-10-26: "↑↓ and Space don't
+  work"). SwiftUI's opacity doesn't stop AppKit sending the hidden section's views clicks,
+  scrolling and keys, and SwiftUI hit-tests its views in the order they were made (the music
+  ones last, so on top), whatever their order in AppKit or `zIndex`; reordering `subviews`
+  doesn't help. What works (`SectionViews` and `SectionEventRouter` in `ContentView.swift`):
+  the hidden sidebar and the music BPM fields get `isHidden` in AppKit (few rows to lay out
+  again: cheap). The big lists can't (hiding or moving one re-tiles its rows, ~0.1–0.3 s a
+  switch), so the hidden one gets `alphaValue = 0` (SwiftUI opacity on a table updates every
+  row, ~75 ms) and a local event monitor passes the clicks, drags and scrolling that land on
+  it to the shown list; a click redirected to a sidebar row did nothing, hence `isHidden`
+  there. The shown list gets the keyboard at launch and 0.35 s after a switch (after the
+  animation: `makeFirstResponder` makes SwiftUI walk the cells), and at once if a key comes
+  first. The detail panes' own AppKit views (waveform, file drag) let clicks through while
+  their section is hidden (`sectionShown`); SwiftUI controls at opacity 0 don't take clicks.
+  Each section's bars fade whole, bar material included (`edgeBar(_:shown:)`): the hidden
+  music filter bar's material hid the sound list's column headers and status bar. Space only
+  acts in the section shown. Checked with real clicks and keys in both sections: rows, ↑↓,
+  Space, ⌘1/⌘2 then keys at once, sidebar rows, BPM fields, scrolling, right-click menu,
+  detail pane play and waveform. Not checked: double-click on a row (the test tool's
+  double-click didn't play in either section, redirected or not; Return, the same action,
+  works).
+- **Sorting** was ~3.4 s on the main thread for 28k sounds (`displayName` built a URL per
+  comparison; localized compare). `FastSort` (`Display.swift`) builds the sort keys once,
+  and `SoundBrowser.refresh` filters and sorts off the main thread. Still slow: a big change
+  of `visible` makes SwiftUI's `Table` diff its rows (~1–2 s for 28k, e.g. clearing a search).
 - When measuring with `sample`, clicks made through the accessibility tools cost the app a
   lot themselves (AX queries, and layout they trigger): measure with the app acting on its own
-  (a temporary launch argument that switches sections on a timer worked well).
+  (a temporary launch argument that switches sections on a timer worked well). On the second
+  monitor ("LU28R55 (1)") the computer-use tool's clicks landed ~180 px (screenshot pixels)
+  above where it aimed; run Earmark's binary directly to read `NSLog` output.
 
 - See `CLAUDE.md` "Gotchas" for Phase 0 (S-KEY writes `prediction/` folders if called on a
   directory; PE-AV text embeds bug; CLAP 10 s windowing; Beat This! checkpoint fallback;
@@ -375,8 +402,8 @@ Settings → Repository name. Topics/description also have to be set there.
   after rows are removed, the table can update a removed row's cell outside the window and
   SwiftUI traps ("no Observable object"). Pass the model in (`FolderMapView.swift`).
 - The status bar used to be a `safeAreaInset` over the split view; the sidebar list ignores
-  that inset (and `contentMargins`), so its last rows were hidden. It's now below the split
-  view in a `VStack`.
+  that inset (and `contentMargins`), so its last rows were hidden. Each list now has its own
+  bar (`edgeBar`), so the sidebar runs the window's height.
 - Testing SwiftUI menus: the computer-use background tools refuse menu buttons, and real
   clicks failed on the 3-display setup on 2026-10-25 (they landed on the desktop). UI
   scripting works: `osascript` → System Events → `click menu button …`, then

@@ -71,11 +71,27 @@ final class SoundBrowser {
         FilterKey(scope: scope, search: search, sortOrder: sortOrder, version: version)
     }
 
-    func refresh(from model: AppModel) {
-        let terms = search.lowercased().split(whereSeparator: \.isWhitespace)
-        let scope = self.scope ?? .all
+    /// Filters and sorts off the main thread (tens of milliseconds for the whole library).
+    func refresh(from model: AppModel) async {
+        let terms = search.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        let scope = self.scope ?? .all, order = sortOrder, scores = similar?.scores
         let sounds = model.sounds, haystacks = model.soundIndex.haystacks, hidden = model.soundIndex.twins.hidden
-        visible = sounds.indices.filter { i in
+        let result = await Task.detached(priority: .userInitiated) {
+            Self.filtered(sounds, haystacks: haystacks, hidden: hidden, scope: scope, terms: terms, scores: scores, order: order)
+        }.value
+        guard !Task.isCancelled else { return }
+        visible = result
+        let matchVisibility: Visibility = isShowingSimilar ? .visible : .hidden
+        if columns[visibility: "match"] != matchVisibility { columns[visibility: "match"] = matchVisibility }
+        // Drop selected sounds the new filter hides, so the detail pane doesn't show them.
+        let kept = selection.intersection(visible.map(\.id))
+        if kept != selection { selection = kept }
+    }
+
+    nonisolated private static func filtered(_ sounds: [SoundRecord], haystacks: [String], hidden: Set<Int64>,
+                                             scope: SoundScope, terms: [String], scores: [Int64: Float]?,
+                                             order: [KeyPathComparator<SoundRecord>]) -> [SoundRecord] {
+        let found = sounds.indices.filter { i in
             let s = sounds[i]
             if let id = s.id, hidden.contains(id) { return false }
             switch scope {
@@ -86,25 +102,20 @@ final class SoundBrowser {
             case .uncategorised: if s.catID != nil { return false }
             case .guessed: if s.categorySource != FolderRules.guessSource { return false }
             case .similar(let source):
-                guard let id = s.id, id == source || similar?.scores[id] != nil else { return false }
+                guard let id = s.id, id == source || scores?[id] != nil else { return false }
             }
             return terms.allSatisfy { haystacks[i].contains($0) }
         }
-        .map { sounds[$0] }
-        .sorted(using: sortOrder)
-        let matchVisibility: Visibility = isShowingSimilar ? .visible : .hidden
-        if columns[visibility: "match"] != matchVisibility { columns[visibility: "match"] = matchVisibility }
-        if case .similar(let source) = scope, let scores = similar?.scores {
+        var result = FastSort.sorted(found.map { sounds[$0] }, by: order)
+        if case .similar(let source) = scope, let scores {
             // Best match first, the sound it started from at the top.
-            visible.sort { a, b in
+            result.sort { a, b in
                 let sa = a.id == source ? 2 : scores[a.id ?? -1] ?? -2
                 let sb = b.id == source ? 2 : scores[b.id ?? -1] ?? -2
                 return sa > sb
             }
         }
-        // Drop selected sounds the new filter hides, so the detail pane doesn't show them.
-        let kept = selection.intersection(visible.map(\.id))
-        if kept != selection { selection = kept }
+        return result
     }
 }
 

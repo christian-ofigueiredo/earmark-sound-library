@@ -74,6 +74,7 @@ struct WaveformView: NSViewRepresentable {
     func makeNSView(context: Context) -> WaveformCanvas { WaveformCanvas() }
 
     func updateNSView(_ view: WaveformCanvas, context: Context) {
+        view.passesClicks = !context.environment.sectionShown
         view.peaks = peaks
         view.active = active
         view.playhead = playhead
@@ -87,6 +88,10 @@ struct WaveformView: NSViewRepresentable {
 final class WaveformCanvas: NSView {
     var peaks: [Float]? { didSet { if oldValue != peaks { needsDisplay = true } } }
     var active = true { didSet { if oldValue != active { needsDisplay = true } } }
+    /// In the hidden section's detail pane (kept built under the shown one): clicks go through.
+    var passesClicks = false
+
+    override func hitTest(_ point: NSPoint) -> NSView? { passesClicks ? nil : super.hitTest(point) }
     var playhead: Double? { didSet { if oldValue != playhead { needsDisplay = true } } }
     var selection: ClosedRange<Double>? { didSet { if oldValue != selection { needsDisplay = true } } }
     var onClick: (Double) -> Void = { _ in }

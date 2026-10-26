@@ -142,3 +142,55 @@ struct SongIndex: Sendable {
         }
     }
 }
+
+// MARK: sorting
+
+/// Sorts records by a table's sort order with each record's keys worked out once. Sorting the
+/// 28,827 sounds with the key paths directly took ~3.4 s on the main thread: Finder-style
+/// string comparison is slow and `displayName` builds a URL on every call.
+enum FastSort {
+    /// One sort column: text keys (`textKey`) or numbers, and its direction.
+    private struct Column {
+        var texts: [String]?
+        var numbers: [Double]?
+        var reverse: Bool
+    }
+
+    static func sorted<R>(_ items: [R], by order: [KeyPathComparator<R>]) -> [R] {
+        guard !order.isEmpty, items.count > 1 else { return items }
+        var columns: [Column] = []
+        for comparator in order {
+            let reverse = comparator.order == .reverse
+            switch comparator.keyPath {
+            case let path as KeyPath<R, String>: columns.append(Column(texts: items.map { textKey($0[keyPath: path]) }, reverse: reverse))
+            case let path as KeyPath<R, Double>: columns.append(Column(numbers: items.map { $0[keyPath: path] }, reverse: reverse))
+            case let path as KeyPath<R, Int>: columns.append(Column(numbers: items.map { Double($0[keyPath: path]) }, reverse: reverse))
+            default: return items.sorted(using: order)   // a column type this doesn't know
+            }
+        }
+        let indices = items.indices.sorted { a, b in
+            for c in columns {
+                if let t = c.texts, t[a] != t[b] { return (t[a] < t[b]) != c.reverse }
+                if let n = c.numbers, n[a] != n[b] { return (n[a] < n[b]) != c.reverse }
+            }
+            return a < b   // stable
+        }
+        return indices.map { items[$0] }
+    }
+
+    /// A key whose plain order is Finder's: case and accents ignored, numbers by value
+    /// ("Hit 2" before "Hit 10").
+    static func textKey(_ s: String) -> String {
+        var out = "", digits = ""
+        func flush() {
+            guard !digits.isEmpty else { return }
+            out += String(repeating: "0", count: max(0, 12 - digits.count)) + digits
+            digits = ""
+        }
+        for c in s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) {
+            if c.isASCII, c.isNumber { digits.append(c) } else { flush(); out.append(c) }
+        }
+        flush()
+        return out
+    }
+}

@@ -80,13 +80,12 @@ final class MusicBrowser {
         let terms = search.lowercased().split(whereSeparator: \.isWhitespace)
         let scope = self.scope ?? .all
         let songs = model.songs, haystacks = model.songIndex.haystacks
-        visible = songs.indices.filter { i in
+        let found = songs.indices.filter { i in
             let s = songs[i]
             if case .library(let id) = scope, s.libraryId != id { return false }
             return matchesTempo(s.bpm) && matchesKey(s.key) && terms.allSatisfy { haystacks[i].contains($0) }
         }
-        .map { songs[$0] }
-        .sorted(using: sortOrder)
+        visible = FastSort.sorted(found.map { songs[$0] }, by: sortOrder)
         // Drop selected songs the new filter hides, so the detail pane doesn't show them.
         let kept = selection.intersection(visible.map(\.id))
         if kept != selection { selection = kept }

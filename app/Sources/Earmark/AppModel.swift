@@ -115,11 +115,11 @@ final class AppModel {
         set { if section == .music { musicBrowser.search = newValue } else { soundBrowser.search = newValue } }
     }
 
-    /// The section switch, ⌘1/⌘2 and anything else that changes section: the switch's pill
-    /// slides while the sections cross-fade.
+    /// The section switch, ⌘1/⌘2 and anything else that changes section: the content changes at
+    /// once and the switch's pill slides (`SectionSwitch` animates it on its own).
     func show(_ new: AppSection) {
         guard new != section else { return }
-        withAnimation(.snappy(duration: 0.28)) { section = new }
+        section = new
     }
 
     // MARK: reading

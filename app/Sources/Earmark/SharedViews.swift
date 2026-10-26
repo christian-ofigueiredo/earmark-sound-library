@@ -146,6 +146,7 @@ struct FileChip: View {
 
 /// A transparent view that drags a file (the original, by reference) and shows a tooltip.
 struct FileDragArea: NSViewRepresentable {
+    @Environment(\.sectionShown) private var sectionShown
     let url: URL
     let tooltip: String
 
@@ -153,13 +154,18 @@ struct FileDragArea: NSViewRepresentable {
 
     func updateNSView(_ view: FileDragView, context: Context) {
         view.url = url
-        view.toolTip = tooltip
+        view.toolTip = sectionShown ? tooltip : nil
+        view.passesClicks = !sectionShown
     }
 }
 
 final class FileDragView: NSView, NSDraggingSource {
     var url: URL?
+    /// In the hidden section's detail pane (kept built under the shown one): clicks go through.
+    var passesClicks = false
     private var mouseDownEvent: NSEvent?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { passesClicks ? nil : super.hitTest(point) }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -298,14 +304,17 @@ extension View {
     /// A bar along the top or bottom of a list. On macOS 26 and later it's the system's kind
     /// (no divider; the list's rows end above it) on the bar material, since tables don't
     /// draw the scroll edge effect under it. Earlier, an inset with a bar background and a divider.
-    @ViewBuilder func edgeBar<Bar: View>(_ edge: VerticalEdge, @ViewBuilder _ bar: () -> Bar) -> some View {
+    /// `shown: false` makes the whole bar, background too, transparent (`shown(_:)`).
+    @ViewBuilder func edgeBar<Bar: View>(_ edge: VerticalEdge, shown visible: Bool = true,
+                                         @ViewBuilder _ bar: () -> Bar) -> some View {
         if #available(macOS 26, *) {
-            safeAreaBar(edge: edge, spacing: 0) { bar().background(.bar) }
+            safeAreaBar(edge: edge, spacing: 0) { bar().background(.bar).shown(visible) }
         } else {
             safeAreaInset(edge: edge, spacing: 0) {
                 bar()
                     .background(.bar)
                     .overlay(alignment: edge == .top ? .bottom : .top) { Divider() }
+                    .shown(visible)
             }
         }
     }
@@ -323,4 +332,10 @@ extension View {
             self
         }
     }
+}
+
+extension EnvironmentValues {
+    /// False in the section kept built under the one shown (`LibraryView`): its own AppKit
+    /// views let clicks through. Set only on the detail panes, never above a list.
+    @Entry var sectionShown = true
 }
