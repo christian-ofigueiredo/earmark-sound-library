@@ -31,26 +31,29 @@ final class SoundBrowser {
         var scores: [Int64: Float]
     }
     private(set) var similar: Similar?
-    /// Bumped when a similar search is cleared, so the sidebar list is rebuilt rather than
-    /// animating the row away (that left a stale, highlighted row drawn in the sidebar).
-    private(set) var sidebarGeneration = 0
 
     var isShowingSimilar: Bool { if case .similar = scope { true } else { false } }
 
     /// Counts the refreshes of `visible`, so the list knows when to reload.
     private(set) var generation = 0
 
+    // The sidebar's Similar row is never added or removed while it's selected: done in one
+    // update, the sidebar left a copy of the row drawn over it (its text doubled, in the
+    // selected and plain styles), which also took the first click on its ✕.
+
     func showSimilar(_ result: Similar) {
         similar = result
         search = ""
-        scope = .similar(result.source)
         selection = [result.source]
+        // Selected once the row is in the sidebar.
+        DispatchQueue.main.async { if self.similar == result { self.scope = .similar(result.source) } }
     }
 
     func clearSimilar() {
         if isShowingSimilar { scope = .all }
-        similar = nil
-        sidebarGeneration += 1
+        // Removed once it's no longer selected.
+        let cleared = similar
+        DispatchQueue.main.async { if self.similar == cleared { self.similar = nil } }
     }
 
     /// "87%" for a match, "Source" for the sound the search started from, "" otherwise.
@@ -182,7 +185,6 @@ struct SoundSidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .id(browser.sidebarGeneration)
     }
 }
 

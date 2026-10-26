@@ -390,6 +390,14 @@ Settings → Repository name. Topics/description also have to be set there.
   scrolling, sorting, search and clearing it, the row and header menus, Find Similar Sounds
   (Match column), the detail pane's play and waveform. Not checked: dragging a row into
   Resolve.
+- **Sidebar rows added or removed while selected** (owner, 2026-10-26: "Similar to…" text
+  doubled, its ✕ needed two clicks). Adding the Similar row and selecting it in the same
+  update left a copy of the row drawn over it: the text twice, in the selected (bold) and
+  plain styles, and the copy took the first click. Removing it while selected did the same
+  (a stale highlighted row). So `SoundBrowser.showSimilar` selects the row on the next turn
+  of the run loop, and `clearSimilar` deselects first and removes it on the next turn. This
+  replaces rebuilding the whole sidebar with `.id` on clear, which also collapsed the
+  categories you had opened.
 - **Sorting** was ~3.4 s on the main thread for 28k sounds (`displayName` built a URL per
   comparison; localized compare). `FastSort` (`Display.swift`) builds the sort keys once,
   and `SoundBrowser.refresh` filters and sorts off the main thread.

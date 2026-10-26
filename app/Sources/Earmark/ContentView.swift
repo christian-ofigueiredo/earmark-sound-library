@@ -104,10 +104,6 @@ struct LibraryView: View {
         .onChange(of: model.section) { _, section in
             SectionViews.sync(showing: section)
         }
-        .onChange(of: model.soundBrowser.sidebarGeneration) {
-            // The sounds sidebar was rebuilt (a new AppKit list).
-            SectionViews.sync(showing: model.section)
-        }
         .onAppear {
             // As soon as the window has its lists (the next turn of the run loop).
             DispatchQueue.main.async { SectionViews.sync(showing: model.section) }
