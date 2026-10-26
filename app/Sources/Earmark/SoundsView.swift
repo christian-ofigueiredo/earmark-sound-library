@@ -108,43 +108,6 @@ final class SoundBrowser {
     }
 }
 
-struct SoundsView: View {
-    @Environment(AppModel.self) private var model
-    @AppStorage("autoplaySounds") private var autoplay = false
-
-    var body: some View {
-        @Bindable var browser = model.soundBrowser
-        // The detail pane is an inspector rather than a third split column: a three-column
-        // NavigationSplitView ignores the content column's width and squeezes the table.
-        NavigationSplitView {
-            SoundSidebar()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 380)
-        } detail: {
-            SoundTable()
-                .edgeBar(.bottom) { StatusBar() }
-                .searchable(text: $browser.search, placement: .toolbar, prompt: "Name, description, keywords")
-                .inspector(isPresented: .constant(true)) {
-                    SoundDetailPane()
-                        .inspectorColumnWidth(min: 300, ideal: 380, max: 600)
-                }
-        }
-        .toolbar {
-            ToolbarItem {
-                Toggle(isOn: $autoplay) {
-                    Label("Auto-play", systemImage: autoplay ? "play.circle.fill" : "play.circle")
-                }
-                .help("Play sounds as you select them")
-            }
-        }
-        .task(id: browser.filterKey(version: model.version)) { model.soundBrowser.refresh(from: model) }
-        .onChange(of: browser.selection) { _, ids in
-            guard autoplay, ids.count == 1, let s = model.sound(id: ids.first ?? nil),
-                  model.isOnline(libraryId: s.libraryId) else { return }
-            model.player.play(s.url)
-        }
-    }
-}
-
 struct SoundSidebar: View {
     @Environment(AppModel.self) private var model
 
@@ -259,7 +222,8 @@ struct SoundTable: View {
             if let s = model.sound(id: ids.first ?? nil) { model.player.toggle(s.url) }
         }
         .onKeyPress(.space) {
-            guard let s = model.sound(id: browser.selection.first ?? nil) else { return .ignored }
+            // Both sections stay built; only the one shown takes Space.
+            guard model.section == .sounds, let s = model.sound(id: browser.selection.first ?? nil) else { return .ignored }
             model.player.toggle(s.url)
             return .handled
         }

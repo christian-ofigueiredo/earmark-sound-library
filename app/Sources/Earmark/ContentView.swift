@@ -13,10 +13,7 @@ struct ContentView: View {
                 ContentUnavailableView("Earmark can't start", systemImage: "exclamationmark.triangle",
                                        description: Text(error))
             } else {
-                switch model.section {
-                case .sounds: SoundsView()
-                case .music: MusicView()
-                }
+                LibraryView()
             }
         }
         .toolbar {
@@ -54,9 +51,86 @@ struct ContentView: View {
     }
 }
 
+/// Both sections in one split view, both kept built: changing section only shows one and
+/// hides the other, where rebuilding a section (split view, tables, layout) took ~0.2 s.
+/// The search field and the auto-play button are shared and follow the section shown.
+struct LibraryView: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage("autoplaySounds") private var autoplaySounds = false
+    @AppStorage("autoplayMusic") private var autoplayMusic = false
+
+    var body: some View {
+        @Bindable var model = model
+        let music = model.section == .music
+        let sounds = model.soundBrowser, songs = model.musicBrowser
+        // The detail pane is an inspector rather than a third split column: a three-column
+        // NavigationSplitView ignores the content column's width and squeezes the table.
+        NavigationSplitView {
+            ZStack {
+                SoundSidebar().shown(!music)
+                MusicSidebar().shown(music)
+            }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 380)
+        } detail: {
+            ZStack {
+                SoundTable()
+                    .edgeBar(.bottom) { StatusBar() }
+                    .shown(!music)
+                SongTable()
+                    .edgeBar(.top) { MusicFilterBar() }
+                    .edgeBar(.bottom) { StatusBar() }
+                    .shown(music)
+            }
+            // One stable binding: anything that changes here with the section reaches every
+            // table cell (each its own hosting view) and makes the switch slow.
+            .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
+            .inspector(isPresented: .constant(true)) {
+                ZStack {
+                    SoundDetailPane().shown(!music)
+                    SongDetailPane().shown(music)
+                }
+                .inspectorColumnWidth(min: 300, ideal: 380, max: 600)
+            }
+        }
+        .toolbar {
+            ToolbarItem {
+                let on = music ? autoplayMusic : autoplaySounds
+                Toggle(isOn: Binding(get: { on }, set: { if music { autoplayMusic = $0 } else { autoplaySounds = $0 } })) {
+                    Label("Auto-play", systemImage: on ? "play.circle.fill" : "play.circle")
+                }
+                .help(music ? "Play songs as you select them" : "Play sounds as you select them")
+            }
+        }
+        .onChange(of: model.section) {
+            // Keys mustn't go to the hidden list; the user clicks into the one shown.
+            NSApp.keyWindow?.makeFirstResponder(nil)
+        }
+        .task(id: sounds.filterKey(version: model.version)) { sounds.refresh(from: model) }
+        .task(id: songs.filterKey(version: model.version)) { songs.refresh(from: model) }
+        .onChange(of: sounds.selection) { _, ids in
+            guard autoplaySounds, !music, ids.count == 1, let s = model.sound(id: ids.first ?? nil),
+                  model.isOnline(libraryId: s.libraryId) else { return }
+            model.player.play(s.url)
+        }
+        .onChange(of: songs.selection) { _, ids in
+            guard autoplayMusic, music, ids.count == 1, let s = model.song(id: ids.first ?? nil),
+                  model.isOnline(libraryId: s.libraryId) else { return }
+            model.player.play(s.url)
+        }
+    }
+}
+
+extension View {
+    /// Keeps a section built but out of sight while the other is shown, which stays on top
+    /// for clicks. Only opacity and order: `.disabled`, `.allowsHitTesting` and the like change
+    /// the environment of every table cell (each its own hosting view) and cost ~0.5 s.
+    func shown(_ visible: Bool) -> some View {
+        opacity(visible ? 1 : 0).zIndex(visible ? 1 : 0)
+    }
+}
+
 /// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose blue glass pill
-/// slides to the chosen section; the section itself changes once the pill has arrived
-/// (`AppModel.show`), so the animation never waits for the section to be built.
+/// slides to the chosen section (`AppModel.show`).
 struct SectionSwitch: View {
     @Environment(AppModel.self) private var model
     @Namespace private var pill
@@ -72,7 +146,7 @@ struct SectionSwitch: View {
                     .glassEffect(.regular.interactive(), in: .capsule)
                 }
             } else {
-                Picker("Section", selection: Binding(get: { model.chosenSection }, set: { model.show($0) })) {
+                Picker("Section", selection: Binding(get: { model.section }, set: { model.show($0) })) {
                     ForEach(AppSection.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -84,7 +158,7 @@ struct SectionSwitch: View {
 
     @available(macOS 26, *)
     private func segment(_ section: AppSection) -> some View {
-        let chosen = section == model.chosenSection
+        let chosen = section == model.section
         return Button {
             model.show(section)
         } label: {

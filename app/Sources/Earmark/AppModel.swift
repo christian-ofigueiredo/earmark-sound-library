@@ -61,11 +61,9 @@ final class AppModel {
     let folderGuesser = FolderGuesser()
     let analysis = AnalysisEngine()
 
-    /// The section on screen.
+    /// The section on screen. Both sections stay built (`LibraryView`), so changing it costs
+    /// about a frame and happens with the switch's animation.
     private(set) var section: AppSection
-    /// The section the switch shows as chosen. `section` follows once the switch's animation
-    /// has ended, so building the other section (~0.2 s) can't make the animation stutter.
-    private(set) var chosenSection: AppSection
     var showWelcome: Bool
     var alert: AppAlert?
 
@@ -91,9 +89,7 @@ final class AppModel {
 
     init() {
         let defaults = UserDefaults.standard
-        let saved = AppSection(rawValue: defaults.string(forKey: "section") ?? "") ?? .sounds
-        section = saved
-        chosenSection = saved
+        section = AppSection(rawValue: defaults.string(forKey: "section") ?? "") ?? .sounds
         showWelcome = !defaults.bool(forKey: "welcomeSeen")
         do {
             database = try LibraryDatabase(path: Self.supportFolder.appendingPathComponent("library.sqlite").path)
@@ -113,16 +109,17 @@ final class AppModel {
 
     // MARK: sections
 
-    /// The section switch, ⌘1/⌘2 and anything else that changes section: the switch animates
-    /// first, then the section changes.
+    /// The search field, shared by both sections: the shown one's search.
+    var search: String {
+        get { section == .music ? musicBrowser.search : soundBrowser.search }
+        set { if section == .music { musicBrowser.search = newValue } else { soundBrowser.search = newValue } }
+    }
+
+    /// The section switch, ⌘1/⌘2 and anything else that changes section: the switch's pill
+    /// slides while the sections cross-fade.
     func show(_ new: AppSection) {
-        guard new != chosenSection else { return }
-        withAnimation(.snappy(duration: 0.28)) {
-            chosenSection = new
-        } completion: { [weak self] in
-            guard let self, self.chosenSection == new else { return }   // chosen again meanwhile
-            self.section = new
-        }
+        guard new != section else { return }
+        withAnimation(.snappy(duration: 0.28)) { section = new }
     }
 
     // MARK: reading

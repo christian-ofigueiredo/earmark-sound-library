@@ -93,43 +93,6 @@ final class MusicBrowser {
     }
 }
 
-struct MusicView: View {
-    @Environment(AppModel.self) private var model
-    @AppStorage("autoplayMusic") private var autoplay = false
-
-    var body: some View {
-        @Bindable var browser = model.musicBrowser
-        // Detail as an inspector, as in SoundsView, so the table gets the window's width.
-        NavigationSplitView {
-            MusicSidebar()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
-        } detail: {
-            SongTable()
-                .edgeBar(.top) { MusicFilterBar() }
-                .edgeBar(.bottom) { StatusBar() }
-                .searchable(text: $browser.search, placement: .toolbar, prompt: "Title, artist, file")
-                .inspector(isPresented: .constant(true)) {
-                    SongDetailPane()
-                        .inspectorColumnWidth(min: 300, ideal: 360, max: 600)
-                }
-        }
-        .toolbar {
-            ToolbarItem {
-                Toggle(isOn: $autoplay) {
-                    Label("Auto-play", systemImage: autoplay ? "play.circle.fill" : "play.circle")
-                }
-                .help("Play songs as you select them")
-            }
-        }
-        .task(id: browser.filterKey(version: model.version)) { model.musicBrowser.refresh(from: model) }
-        .onChange(of: browser.selection) { _, ids in
-            guard autoplay, ids.count == 1, let s = model.song(id: ids.first ?? nil),
-                  model.isOnline(libraryId: s.libraryId) else { return }
-            model.player.play(s.url)
-        }
-    }
-}
-
 struct MusicSidebar: View {
     @Environment(AppModel.self) private var model
 
@@ -259,7 +222,8 @@ struct SongTable: View {
             if let s = model.song(id: ids.first ?? nil) { model.player.toggle(s.url) }
         }
         .onKeyPress(.space) {
-            guard let s = model.song(id: browser.selection.first ?? nil) else { return .ignored }
+            // Both sections stay built; only the one shown takes Space.
+            guard model.section == .music, let s = model.song(id: browser.selection.first ?? nil) else { return .ignored }
             model.player.toggle(s.url)
             return .handled
         }
