@@ -77,6 +77,10 @@ struct EarmarkApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        Appearance.saved.apply()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when Earmark runs as a plain executable (Xcode or `swift run`).
         NSApp.setActivationPolicy(.regular)

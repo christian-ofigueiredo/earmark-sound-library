@@ -1,3 +1,4 @@
+import AppKit
 import EarmarkCore
 import SwiftUI
 
@@ -9,6 +10,7 @@ struct Preferences: View {
     static let defaultLoudness = -14.0
 
     @Environment(AppModel.self) private var model
+    @AppStorage(Appearance.key) private var appearance = Appearance.system
     @AppStorage(Preferences.normalizeKey) private var normalize = true
     @AppStorage(Preferences.loudnessKey) private var loudness = Preferences.defaultLoudness
     @AppStorage("autoplaySounds") private var autoplaySounds = false
@@ -16,6 +18,12 @@ struct Preferences: View {
 
     var body: some View {
         Form {
+            Section {
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(Appearance.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+            }
             Section {
                 Toggle("Play sound effects at the same loudness", isOn: $normalize)
                 Picker("Loudness", selection: $loudness) {
@@ -53,7 +61,37 @@ struct Preferences: View {
         .formStyle(.grouped)
         .frame(width: 500)
         .fixedSize(horizontal: false, vertical: true)
+        .onChange(of: appearance) { appearance.apply() }
         .onChange(of: normalize) { model.player.refreshGain() }
         .onChange(of: loudness) { model.player.refreshGain() }
+    }
+}
+
+/// Earmark's own light or dark, or the Mac's (owner, 2026-10-27). For the whole app: every
+/// window, the sound map too, follows `NSApp.appearance`.
+enum Appearance: String, CaseIterable {
+    case system, light, dark
+
+    static let key = "appearance"
+
+    var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    /// The saved choice, at launch (before any window shows, so none flashes the other way).
+    static var saved: Appearance {
+        UserDefaults.standard.string(forKey: key).flatMap(Appearance.init(rawValue:)) ?? .system
+    }
+
+    @MainActor func apply() {
+        switch self {
+        case .system: NSApp.appearance = nil
+        case .light: NSApp.appearance = NSAppearance(named: .aqua)
+        case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
     }
 }

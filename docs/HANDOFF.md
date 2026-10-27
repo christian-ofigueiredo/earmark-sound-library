@@ -573,6 +573,11 @@ Settings → Repository name. Topics/description also have to be set there.
   seeks are scheduled segments; a segment's end, matched by `generation`, stops playback;
   an output device change restarts the engine where it was. Preferences also has auto-play
   and "While you use the Mac" (moved out of the Analysis menu).
+- **Appearance** (owner, 2026-10-27). Preferences' first row: System, Light or Dark
+  (`Appearance` in `Preferences.swift`, saved as `appearance`). It sets `NSApp.appearance`
+  (nil for System), so every window and the sound map's AppKit canvas follow; the saved
+  choice is applied in `applicationWillFinishLaunching`, before any window shows. Handy for
+  testing too: no need to change the Mac's own setting to see the other look.
 - **What's playing** (owner, 2026-10-26: after selecting another row, the playing one was
   lost; the owner chose the design). The playing row's name has a speaker before it, blue
   while playing, grey while paused, white on the selection (`RecordTable` `playing`,
