@@ -175,6 +175,56 @@ if args.count >= 3, args[1] == "folders" {
 
 // Tempo and key, checked against the values Phase 0 stored for the same songs:
 //   earmark-parity music <folder with BeatThis/SKey.mlpackage> <copy of library.sqlite> [songs=300] [seed=1] [cpu|gpu|all]
+// Analysis files at full size, on copies (never the app's own database):
+//   earmark-parity analysis-files <copy of library.sqlite> <out folder>
+// Exports every library, clears the analysis in a second copy, imports into it, compares the two.
+if args.count >= 4, args[1] == "analysis-files" {
+    func peakMB() -> Double { var u = rusage(); getrusage(RUSAGE_SELF, &u); return Double(u.ru_maxrss) / 1_048_576 }
+    let source = try LibraryDatabase(path: args[2])
+    let out = URL(fileURLWithPath: args[3], isDirectory: true)
+    try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+    var files: [URL] = []
+    // ONLY_IMPORT=1: use the files already in <out folder> (to measure the import alone).
+    if ProcessInfo.processInfo.environment["ONLY_IMPORT"] != nil {
+        files = try source.libraries().map { out.appendingPathComponent(AnalysisFile.fileName(for: $0)) }
+    } else { for lib in try source.libraries() {
+        let t = Date()
+        let url = out.appendingPathComponent(AnalysisFile.fileName(for: lib))
+        let bytes = try source.writeAnalysisFile(for: lib, includeEmbeddings: true, to: url)
+        files.append(url)
+        print(String(format: "export %@: %.1f MB in %.1f s (peak memory so far %.0f MB)",
+                     lib.name, Double(bytes) / 1_048_576, Date().timeIntervalSince(t), peakMB()))
+    } }
+    // The second copy: the same libraries and files, with no analysis at all.
+    let cleared = out.appendingPathComponent("cleared.sqlite")
+    try? FileManager.default.removeItem(at: cleared)
+    try FileManager.default.copyItem(at: URL(fileURLWithPath: args[2]), to: cleared)
+    let target = try LibraryDatabase(path: cleared.path)
+    try target.clearAnalysisForTesting()
+    for pass in 1 ... 2 {
+        var report = AnalysisImportReport()
+        let t = Date()
+        for url in files { report = report + (try target.importAnalysis(try AnalysisFile.read(try Data(contentsOf: url)))) }
+        print(String(format: "import pass %d in %.1f s (peak memory %.0f MB): ", pass, Date().timeIntervalSince(t), peakMB()) + "\(report)")
+    }
+    // Item by item: the copy now has what the source has.
+    let (a, b) = (try source.soundFacts(), try target.soundFacts())
+    let factsSame = a.filter { $0.value.error == nil }.allSatisfy { id, f in b[id].map { $0.loudness == f.loudness && $0.peak == f.peak && $0.fingerprint == f.fingerprint } ?? false }
+    print("facts: source \(a.count) (\(a.values.filter { $0.error != nil }.count) unreadable, not exported), copy \(b.count), all the same: \(factsSame)")
+    for model in SoundEmbedding.versions.keys.sorted() {
+        let (va, vb) = (try source.vectors(model: model), try target.vectors(model: model))
+        let byId = Dictionary(uniqueKeysWithValues: vb.map { ($0.id, $0.vector) })
+        print("\(model): source \(va.count) vectors, copy \(vb.count), bit-exact: \(va.allSatisfy { byId[$0.id] == $0.vector })")
+    }
+    let (sa, sb) = (try source.songs(), try target.songs())
+    let songsById = Dictionary(uniqueKeysWithValues: sb.map { ($0.id!, $0) })
+    let songsSame = sa.allSatisfy { s in songsById[s.id!].map { $0.bpm == s.bpm && $0.key == s.key && $0.beatsPerBar == s.beatsPerBar
+        && $0.tempoStability == s.tempoStability && $0.keyConfidence == s.keyConfidence && $0.analysisSource == s.analysisSource } ?? false }
+    print("songs: \(sa.filter(\.isAnalysed).count) analysed in the source, \(sb.filter(\.isAnalysed).count) in the copy, all the same: \(songsSame)")
+    print("folder categories: \(try source.folderRules().count) / \(try target.folderRules().count); corrections: \(try source.songCorrections().count) / \(try target.songCorrections().count)")
+    exit(0)
+}
+
 // The app's decode of one song, as raw float32 (mono 22.05 kHz): earmark-parity decode <file> <out.f32>
 if args.count >= 4, args[1] == "decode" {
     let audio = try MusicAnalyzer.decode(url: URL(fileURLWithPath: args[2]))

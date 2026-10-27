@@ -31,6 +31,7 @@ struct ContentView: View {
             UserDefaults.standard.set(section.rawValue, forKey: "section")
         }
         .sheet(isPresented: $model.showWelcome) { WelcomeView().environment(model) }
+        .sheet(item: $model.exportRequest) { ExportAnalysisSheet(request: $0).environment(model) }
         .alert(model.alert?.title ?? "", isPresented: alertShown, presenting: model.alert) { alert in
             if let actionTitle = alert.actionTitle {
                 Button(actionTitle, role: alert.isDestructive ? ButtonRole.destructive : nil) { alert.action?() }

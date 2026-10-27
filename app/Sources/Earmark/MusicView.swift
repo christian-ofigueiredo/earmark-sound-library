@@ -149,9 +149,9 @@ struct MusicSidebar: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Button {
-                    model.choosePhase0Import()
+                    model.chooseImport()
                 } label: {
-                    Label("Import Phase 0 Results…", systemImage: "square.and.arrow.down")
+                    Label("Import Analysis…", systemImage: "square.and.arrow.down")
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
@@ -219,8 +219,8 @@ struct SongTable: View {
                     ContentUnavailableView {
                         Label("No Music Folders Yet", systemImage: "music.note")
                     } description: {
-                        Text("Add a music folder, then import the tempo and key results from Phase 0. "
-                            + "Earmark only reads the files.")
+                        Text("Add a music folder: Earmark works out each song's tempo and key in the background "
+                            + "(or import results with File ▸ Import Analysis…). Earmark only reads the files.")
                     } actions: {
                         Button("Add Music Folder…") { model.chooseLibrary(.music) }
                     }
@@ -341,7 +341,7 @@ struct SongDetail: View {
                 } else if !song.isAnalysed && song.correction == nil {
                     Text(model.analysis.musicUnavailable == "model not installed"
                          ? "Not analysed yet. Earmark's tempo and key models aren't installed; you can import "
-                           + "Phase 0's results instead (File ▸ Import Phase 0 Music Analysis…)."
+                           + "Phase 0's results instead (File ▸ Import Analysis…)."
                          : "Not analysed yet. Earmark works out its tempo and key in the background.")
                         .font(.callout)
                         .foregroundStyle(.secondary)

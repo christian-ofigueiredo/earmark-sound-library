@@ -367,6 +367,24 @@ Settings → Repository name. Topics/description also have to be set there.
      the current tempo. The row menu now also opens without a click (VoiceOver), on the
      selection. Checked in the app on one of the owner's songs (every menu, undo/redo, the
      sidebar list, a relaunch), then reverted; the database matched its backup.
+   - ~~Export and import of analysis files~~ Done, 2026-10-26 (owner approved the plan;
+     format in `docs/analysis-file-format.md`). File ▸ Export Analysis… (a sheet: which
+     libraries, "Include sound embeddings"; a folder picker that refuses folders inside any
+     library; one `<name>.earmark-analysis.json` per library; also in each library's menu) and
+     File ▸ Import Analysis… (Earmark files and Phase 0's music_analysis.json, which replaces
+     the old Phase 0 item; the sidebar's button too). Core: `AnalysisFiles.swift`, 7 tests
+     (another "Mac" with files moved, renamed and changed). Sounds match by fingerprint; songs
+     by a fingerprint read at export (128 KB each) among local songs of the same size, else
+     path and size. Imports only fill gaps; local results, folder categories and corrections
+     win; stale versions and changed files are skipped. After an import the engine re-reads
+     what's done (`AnalysisEngine.reloadStatus`) so nothing is analysed twice. Full size on
+     copies of the owner's database (`earmark-parity analysis-files <copy> <out>`): SoundFX
+     237 MB in 2.7 s (written a batch of 2,000 sounds at a time; built whole in memory it
+     peaked at 1.2 GB, now 300 MB), import 5.9 s (~800 MB peak, the file is read whole);
+     every value equal, all 57,654 vectors bit-exact; a second import adds nothing. Not
+     driven by me: the folder and file pickers (out of process), so the owner should try one
+     export and import. Folder categories and corrections were only tested in unit tests
+     (the owner has none yet).
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
      only 13–16%).
 5. Phase 4: Resolve Studio bridge for sending only a selected range. Use the scripting

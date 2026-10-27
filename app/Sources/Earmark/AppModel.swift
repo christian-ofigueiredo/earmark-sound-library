@@ -76,6 +76,8 @@ final class AppModel {
     @ObservationIgnored private var switching: Task<Void, Never>?
     var showWelcome: Bool
     var alert: AppAlert?
+    /// File ▸ Export Analysis…'s sheet, while it's open.
+    var exportRequest: ExportRequest?
 
     private(set) var soundLibraries: [Library] = []
     private(set) var musicLibraries: [Library] = []
@@ -97,7 +99,8 @@ final class AppModel {
     /// Bumped whenever the songs change (a reload, or Earmark's own tempo and key coming in).
     private(set) var songsVersion = 0
     private(set) var scanning: Set<Int64> = []
-    private(set) var activity: String?
+    /// The status bar's line about what Earmark is doing (scans, exports and imports of analysis).
+    var activity: String?
     private(set) var progress: Double?
 
     static let supportFolder: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -432,24 +435,9 @@ final class AppModel {
         progress = total > 0 ? Double(done) / Double(total) : nil
     }
 
-    // MARK: Phase 0 music analysis
+    // MARK: Phase 0 music analysis (read by File ▸ Import Analysis…, `chooseImport`)
 
-    func choosePhase0Import() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.prompt = "Import"
-        panel.message = "Choose music_analysis.json from a Phase 0 music report folder."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let entries = try Phase0MusicImport.read(Data(contentsOf: url))
-            show(.music)
-            Task { await applyPhase0(entries, offerFolder: true) }
-        } catch {
-            show(error, title: "Couldn't import “\(url.lastPathComponent)”")
-        }
-    }
-
-    private func applyPhase0(_ entries: [Phase0MusicImport.Entry], offerFolder: Bool) async {
+    func applyPhase0(_ entries: [Phase0MusicImport.Entry], offerFolder: Bool) async {
         guard let db = database else { return }
         do {
             let matched = try await Task.detached { try db.applySongAnalysis(entries) }.value

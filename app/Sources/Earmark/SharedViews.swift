@@ -437,6 +437,7 @@ struct LibraryMenu: View {
             .disabled(!library.isOnline || model.isScanning(library))
         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([library.url]) }
             .disabled(!library.isOnline)
+        Button("Export Analysis…") { model.chooseExport([library]) }
         Divider()
         Button("Remove from Earmark…", role: .destructive) { model.confirmRemove(library) }
     }

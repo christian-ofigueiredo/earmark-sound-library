@@ -37,7 +37,8 @@ struct EarmarkApp: App {
                 Button("Add Music Folder…") { model.chooseLibrary(.music) }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                 Divider()
-                Button("Import Phase 0 Music Analysis…") { model.choosePhase0Import() }
+                Button("Import Analysis…") { model.chooseImport() }
+                Button("Export Analysis…") { model.chooseExport() }
                 Divider()
                 Button("Rescan All Folders") { model.rescanAll() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])

@@ -119,6 +119,15 @@ final class AnalysisEngine {
         }
     }
 
+    /// After an import: what's done is read again from the database, so it isn't analysed again.
+    func reloadStatus() {
+        guard let db = model?.database else { return }
+        facts = (try? db.soundFacts()) ?? facts
+        clapStatus = (try? db.embeddingStatus(model: ClapEmbedder.modelName)) ?? clapStatus
+        peavStatus = (try? db.embeddingStatus(model: PeavEmbedder.modelName)) ?? peavStatus
+        rebuildQueue()
+    }
+
     /// Call after the library changes (scan, library added or removed).
     func libraryChanged() {
         rebuildQueue()
