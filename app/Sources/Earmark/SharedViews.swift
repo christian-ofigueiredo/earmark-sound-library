@@ -96,11 +96,21 @@ struct PlayerPanel: View {
                     Button("Clear Selection", action: clearSelection)
                         .buttonStyle(.link)
                 }
+                Button {
+                    model.addToResolve(url, range: secondsSelected)
+                } label: {
+                    Image(systemName: "plus.rectangle.on.rectangle").frame(width: 16)
+                }
+                .playerButtonStyle()
+                .disabled(!FileManager.default.fileExists(atPath: url.path))
+                .help(selection == nil ? "Add to the DaVinci Resolve timeline at its playhead (⌘T)"
+                      : "Add the selection to the DaVinci Resolve timeline at its playhead, cut from the original file (⌘T)")
             }
             if player.url == url, let error = player.error {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
         }
+        .onChange(of: selection) { model.playerSelection = secondsSelected.map { (url, $0) } }
         .task(id: url) {
             loading = true
             selection = nil
@@ -138,6 +148,12 @@ struct PlayerPanel: View {
         } else {
             player.play(url)
         }
+    }
+
+    /// The selection in seconds.
+    private var secondsSelected: ClosedRange<Double>? {
+        guard let sel = selection, length > 0 else { return nil }
+        return sel.lowerBound * length ... sel.upperBound * length
     }
 
     private func clearSelection() {

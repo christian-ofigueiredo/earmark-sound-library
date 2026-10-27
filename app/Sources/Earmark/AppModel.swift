@@ -87,6 +87,8 @@ final class AppModel {
     let soundMap = SoundMapState()
     /// File ▸ Export Analysis…'s sheet, while it's open.
     var exportRequest: ExportRequest?
+    /// The waveform's selection in the detail pane, in seconds (for File ▸ Add to DaVinci Resolve Timeline).
+    @ObservationIgnored var playerSelection: (url: URL, range: ClosedRange<Double>)?
 
     private(set) var soundLibraries: [Library] = []
     private(set) var musicLibraries: [Library] = []
@@ -675,6 +677,32 @@ final class AppModel {
                 try? await Task.detached(priority: .userInitiated) { try db.regroup(catID: catID) }.value
                 await self.reloadGroups()
                 self.groupBuilder.update(model: self)
+            }
+        }
+    }
+
+    // MARK: DaVinci Resolve
+
+    /// Puts the file, or `range` of it (seconds), on Resolve's timeline at its playhead
+    /// (`ResolveBridge`), and says where in the status bar.
+    func addToResolve(_ url: URL, range: ClosedRange<Double>?) {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            alert = AppAlert(title: "The file isn't there", message: "Connect its drive, then try again.")
+            return
+        }
+        let name = url.lastPathComponent
+        activity = "Adding “\(name)” to DaVinci Resolve…"
+        progress = nil
+        Task {
+            do {
+                let placed = try await ResolveBridge.add(.init(path: url.path, start: range?.lowerBound, end: range?.upperBound))
+                let done = "Added \(range == nil ? "“\(name)”" : "the selection") to “\(placed.timeline)” in DaVinci Resolve, track A\(placed.track)"
+                activity = done
+                try? await Task.sleep(for: .seconds(4))
+                if activity == done { activity = nil }
+            } catch {
+                activity = nil
+                show(error, title: "Couldn't add the sound to DaVinci Resolve")
             }
         }
     }

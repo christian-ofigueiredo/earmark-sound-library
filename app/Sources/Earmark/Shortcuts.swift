@@ -13,6 +13,7 @@ enum Shortcuts {
     static let search = KeyboardShortcut("f")
     static let findMatches = KeyboardShortcut("f", modifiers: [.command, .shift])
     static let showInFinder = KeyboardShortcut("r")
+    static let addToResolve = KeyboardShortcut("t")
     static let copyPath = KeyboardShortcut("c", modifiers: [.command, .option])
     static let doubleTempo = KeyboardShortcut(.upArrow, modifiers: [.command, .option])
     static let halveTempo = KeyboardShortcut(.downArrow, modifiers: [.command, .option])
@@ -76,6 +77,14 @@ extension AppModel {
         case .sounds: soundBrowser.selection.compactMap { sound(id: $0)?.url }
         case .music: musicBrowser.selection.compactMap { song(id: $0)?.url }
         }
+    }
+
+    /// The one selected sound or song, or its waveform selection, onto Resolve's timeline.
+    func addSelectionToResolve() {
+        let urls = selectedURLs
+        guard urls.count == 1, let url = urls.first else { return }
+        let range = playerSelection.flatMap { $0.url == url ? $0.range : nil }
+        addToResolve(url, range: range)
     }
 
     func showSelectionInFinder() {
@@ -168,6 +177,8 @@ struct SelectionCommands: View {
         case .file:
             Button("Show in Finder") { model.showSelectionInFinder() }
                 .keyboardShortcut(Shortcuts.showInFinder)
+            Button("Add to DaVinci Resolve Timeline") { model.addSelectionToResolve() }
+                .keyboardShortcut(Shortcuts.addToResolve)
         case .pasteboard:
             Button("Copy Path") { model.copySelectionPaths() }
                 .keyboardShortcut(Shortcuts.copyPath)
@@ -235,6 +246,7 @@ struct KeyboardShortcutsView: View {
             (s(Shortcuts.search), "Search"),
             (s(Shortcuts.findMatches), "Find similar sounds, or songs that mix with the selected song"),
             (s(Shortcuts.showInFinder), "Show in Finder"),
+            (s(Shortcuts.addToResolve), "Add to the DaVinci Resolve timeline at its playhead (the waveform's selection, or all)"),
             (s(Shortcuts.copyPath), "Copy path"),
         ]),
         Group(title: "Songs", rows: [

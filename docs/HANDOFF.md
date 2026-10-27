@@ -11,7 +11,7 @@ Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped
   Build each to the end, then tell the owner; if a real problem comes up, describe it and
   let the owner decide. Merging to `main` still needs approval. The five: similarity
   groups (done), refreshing the sound map for new sounds (done), suggested categories for single sounds
-  (with a review list; done), sending a selected range to Resolve, and finding duplicates.
+  (with a review list; done), sending a selected range to Resolve (done), and finding duplicates.
 - Never write to, rename or move original sound/music files. Earmark only reads them;
   state lives in its own database (`~/Library/Application Support/Earmark/library.sqlite`).
 - Quality over speed; best models available.
@@ -532,10 +532,29 @@ Settings → Repository name. Topics/description also have to be set there.
      (accessibility): the sidebar rows, a re-guessed sound's pane and menu, For This Sound… with
      the chooser, Chosen by You, Remove Your Category (Earmark's guess came back on its own);
      the test choice was removed. Not checked in the app: the list's row menu (right-click).
-5. Phase 4: Resolve Studio bridge for sending only a selected range. Use the scripting
-   API: import the original into the media pool, then `MediaPool.AppendToTimeline` with
-   `startFrame`/`endFrame`. External scripting must be set to Local in Resolve
-   preferences.
+5. Phase 4:
+   - ~~Resolve Studio bridge for a selected range~~ Done, 2026-10-27 (fourth of the five).
+     The player's new button (detail pane, sounds and songs) and File ▸ Add to DaVinci Resolve
+     Timeline (⌘T) put the file, or the waveform's selection, on the timeline open in Resolve:
+     the original imported once into an "Earmark" bin and appended as a cut of it (in/out,
+     no new file), audio only, at the playhead, on the first audio track free there for its
+     length (stereo files on stereo tracks, mono on mono or stereo; locked tracks skipped; a
+     new track of the file's kind if none), then the playhead moves to the cut's end so the
+     next one follows. The status bar says where ("… track A2"); failures explain (Resolve
+     closed or scripting off: Preferences ▸ System ▸ General ▸ External scripting using:
+     Local; no project; no timeline; the free Resolve has no scripting). `ResolveBridge.swift`
+     runs a small Python script with Resolve's own interpreter
+     (`…/DaVinci Resolve.app/Contents/Applications/ResolvePython`, Resolve 21.1+; the request
+     as JSON on stdin, one JSON line back). Checked against Resolve Studio 21.1.2 in a
+     temporary project (made, used and deleted by script; Resolve quit afterwards, as it was
+     before): imported audio takes the project's frame rate; `endFrame` is exclusive;
+     fractional frames are rounded, so cuts are frame-accurate (the selection is rounded
+     outwards); `recordFrame` counts from 00:00:00:00 (01:00:00:00 at 30 fps = 108000);
+     `trackIndex` is 1-based; `mediaType` 2 = audio only; the "Earmark" bin is reused; drop-frame
+     timecode is converted both ways (not tried in Resolve). From Earmark: a 36 s sound
+     through the File menu (placed on A2 because A1 was busy at the playhead), and the no
+     timeline and Resolve-closed messages. Not done: the free Resolve's fallback (an FCPXML
+     with the cut) from the plan; the owner has Studio.
 
 ## Gotchas learned
 
