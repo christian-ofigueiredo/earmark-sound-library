@@ -30,7 +30,9 @@ final class FolderGuesser {
     private func plan(_ model: AppModel) -> Work {
         let hidden = model.soundIndex.twins.hidden
         var open: [FolderMapper.Key: [SoundRecord]] = [:]
-        for s in model.sounds where s.catID == nil || s.categorySource == FolderRules.source || s.categorySource == FolderRules.guessSource {
+        // Sounds Earmark re-guessed from how they sound still belong to their folder's guess.
+        for s in model.sounds where s.catID == nil || s.categorySource == FolderRules.source || s.categorySource == FolderRules.guessSource
+            || s.categorySource == SoundCategories.soundGuessSource {
             guard let id = s.id, !hidden.contains(id) else { continue }
             open[FolderMapper.Key(libraryId: s.libraryId, folder: s.folder), default: []].append(s)
         }

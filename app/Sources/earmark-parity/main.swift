@@ -238,6 +238,107 @@ if args.count >= 4, args[1] == "groups" {
     exit(0)
 }
 
+// A second opinion per sound (CategoryVotes), checked two ways:
+//   earmark-parity votes <copy of library.sqlite> [--truth <tsv>] [--strong 0.6] [--weak 0.1] [--show 20]
+// 1. sounds with a category of their own (UCS in the file): does the vote of their nearest in
+//    other folders name it? 2. sounds in folders checked by hand (--truth, as for `folders`): when
+//    the vote disagrees with Earmark's guess, how often is the vote right, the guess wrong?
+if args.count >= 3, args[1] == "votes" {
+    let db = try LibraryDatabase(path: args[2])
+    func option(_ name: String) -> String? { args.firstIndex(of: name).flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } }
+    let strong = option("--strong").flatMap(Double.init) ?? 0.6, weak = option("--weak").flatMap(Double.init) ?? 0.1
+    let all = FolderRules.apply(try db.folderRules(), guesses: try db.folderGuesses(), to: try db.sounds())
+    let hidden = FormatTwins.group(all).hidden
+    let byId = Dictionary(uniqueKeysWithValues: all.compactMap { s in s.id.map { ($0, s) } })
+    var ids: [Int64] = [], capacity = 0
+    var buffer = PageBuffer(count: 0)
+    try db.forEachVectors(models: ["pe-av-large", "clap-general"], count: { capacity = $0; buffer = PageBuffer(count: $0 * 1536) }) { id, blocks in
+        guard let s = byId[id], !hidden.contains(id), ids.count < capacity else { return }
+        let r = ids.count
+        buffer.withFloats { x in for (c, v) in SoundMap.combine(blocks).enumerated() { x[r * 1536 + c] = v } }
+        ids.append(id)
+        _ = s
+    }
+    let sounds = ids.map { byId[$0]! }
+    let t = Date()
+    // --own: only sounds whose files carry a category vote (not Earmark's guesses).
+    let ownOnly = args.contains("--own")
+    let labels = sounds.map { s in
+        ownOnly && (s.categorySource == FolderRules.guessSource || s.categorySource == nil) ? nil : s.catID
+    }
+    let votes = buffer.withFloats { x in
+        CategoryVotes.votes(UnsafeBufferPointer(rebasing: x[0 ..< ids.count * 1536]), count: ids.count, dimensions: 1536,
+                            labels: labels, folders: sounds.map { "\($0.libraryId)/\($0.folder)" })!
+    }
+    // --alternatives: a flag only names one of the folder guess's runners-up.
+    let guesses = try db.folderGuesses()
+    let guessFolders = Dictionary(grouping: guesses, by: \.libraryId).mapValues { Set($0.map(\.folder)) }
+    let guessByKey = Dictionary(guesses.map { ("\($0.libraryId)/\($0.folder)", $0) }, uniquingKeysWith: { a, _ in a })
+    func alternatives(_ s: SoundRecord) -> Set<String> {
+        guard let f = FolderRules.ruleFolder(for: s.folder, in: guessFolders[s.libraryId] ?? []),
+              let g = guessByKey["\(s.libraryId)/\(f)"] else { return [] }
+        return Set(g.alternativeIDs)
+    }
+    let onlyAlternatives = args.contains("--alternatives")
+    func flagged(_ i: Int) -> Bool {
+        guard CategoryVotes.disagrees(votes[i], with: sounds[i].catID, strong: strong, weak: weak) else { return false }
+        return !onlyAlternatives || alternatives(sounds[i]).contains(votes[i][0].catID)
+    }
+    print(String(format: "%d sounds voted in %.1f s", ids.count, Date().timeIntervalSince(t)))
+    let catalog = UCSCatalog.shared
+    var own = 0, top1 = 0, top3 = 0, cat = 0
+    for (i, s) in sounds.enumerated() where s.categorySource != nil && s.categorySource != FolderRules.guessSource
+        && s.categorySource != FolderRules.source {
+        own += 1
+        if votes[i].first?.catID == s.catID { top1 += 1 }
+        if votes[i].contains(where: { $0.catID == s.catID }) { top3 += 1 }
+        if catalog.entry(catID: votes[i].first?.catID)?.category == s.category { cat += 1 }
+    }
+    print(String(format: "Own categories (%d sounds): vote top 1 %.0f%%, top 3 %.0f%%, category %.0f%%", own,
+                 100 * Double(top1) / Double(max(1, own)), 100 * Double(top3) / Double(max(1, own)), 100 * Double(cat) / Double(max(1, own))))
+    if let path = option("--truth") {
+        var truth: [String: Set<String>] = [:]
+        for line in try String(contentsOfFile: path, encoding: .utf8).split(separator: "\n") {
+            let parts = line.split(separator: "\t")
+            if parts.count >= 2 { truth[String(parts[0])] = Set(parts[1].split(separator: ",").map(String.init)) }
+        }
+        func truthFor(_ s: SoundRecord) -> Set<String>? {
+            var folder = s.folder
+            while true {
+                if let t = truth[folder] { return t }
+                guard let slash = folder.lastIndex(of: "/") else { return nil }
+                folder = String(folder[..<slash])
+            }
+        }
+        var checked = 0, guessRight = 0, flaggedCount = 0, voteRight = 0, guessWrongToo = 0, harmful = 0
+        var shown = 0, show = option("--show").flatMap(Int.init) ?? 0
+        for (i, s) in sounds.enumerated() {
+            guard let t = truthFor(s), s.categorySource == FolderRules.guessSource else { continue }
+            checked += 1
+            let right = t.contains(s.catID ?? "")
+            if right { guessRight += 1 }
+            guard flagged(i) else { continue }
+            flaggedCount += 1
+            let v = votes[i][0].catID
+            if t.contains(v) { voteRight += 1 }
+            if !right { guessWrongToo += 1 }
+            if right && !t.contains(v) { harmful += 1 }
+            if shown < show {
+                shown += 1
+                print("  \(s.fileName.prefix(60)) — guess \(s.catID ?? "-") \(right ? "✓" : "✗"), vote \(v) \(Int(votes[i][0].share * 100))% \(t.contains(v) ? "✓" : "✗")")
+            }
+        }
+        print(String(format: "Hand-checked folders: %d guessed sounds, guess right %.0f%%", checked, 100 * Double(guessRight) / Double(max(1, checked))))
+        print(String(format: "Flagged (vote ≥ %.0f%% for another, own < %.0f%%): %d; vote right %d, guess wrong %d, guess right but vote wrong %d",
+                     strong * 100, weak * 100, flaggedCount, voteRight, guessWrongToo, harmful))
+    }
+    // Over the whole library: how many sounds would be flagged.
+    let library = sounds.indices.filter(flagged)
+    let bySource = Dictionary(grouping: library) { sounds[$0].categorySource ?? "none" }.mapValues(\.count)
+    print("Flagged in the library: \(library.count) (\(bySource.map { "\($0.key): \($0.value)" }.sorted().joined(separator: ", ")))")
+    exit(0)
+}
+
 // Analysis files at full size, on copies (never the app's own database):
 //   earmark-parity analysis-files <copy of library.sqlite> <out folder>
 // Exports every library, clears the analysis in a second copy, imports into it, compares the two.

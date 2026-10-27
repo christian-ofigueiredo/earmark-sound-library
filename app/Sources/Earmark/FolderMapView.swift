@@ -304,7 +304,8 @@ struct FolderMapView: View {
             if mapper.playing != nil { model.player.stop() }
         }
         .sheet(item: $mapper.choosing) { key in
-            UCSChooser(folder: key.folder, current: mapper.currentCatID(key)) { catID in
+            UCSChooser(title: "Category for “\(key.folder.split(separator: "/").last.map(String.init) ?? key.folder)”",
+                       current: mapper.currentCatID(key)) { catID in
                 if mapper.isMapped(key) || mapper.isGuessed(key) {
                     model.saveFolderRules([FolderRule(libraryId: key.libraryId, folder: key.folder, catID: catID)])
                 } else {
@@ -604,7 +605,7 @@ struct FolderFinderButton: View {
 
 /// The whole UCS list, searchable by name, CatID and synonyms.
 struct UCSChooser: View {
-    let folder: String
+    let title: String
     let current: String?
     let onChoose: (String) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -623,7 +624,7 @@ struct UCSChooser: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Category for “\(folder.split(separator: "/").last.map(String.init) ?? folder)”")
+            Text(title)
                 .font(.headline)
             TextField("Search, e.g. door, rain, whoosh", text: $search)
                 .textFieldStyle(.roundedBorder)
@@ -662,6 +663,8 @@ struct UCSChooser: View {
         .padding(20)
         .frame(width: 540, height: 560)
         .onAppear { searchFocused = true }
+        // One left: selected, so Return chooses it.
+        .onChange(of: search) { if entries.count == 1 { selection = entries[0].catID } }
     }
 
     /// The selected category, if the search still shows it.

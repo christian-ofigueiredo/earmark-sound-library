@@ -28,6 +28,8 @@ import Testing
                            SoundEmbedding(soundId: s.id!, model: "pe-av-large", fingerprint: s.fingerprint, vector: Self.peav)])
         }
         try here.save([FolderRule(libraryId: lib.id!, folder: "Pack", catID: "AMBForst")])
+        let one = try #require(try here.sounds().first { $0.fileName == "one.wav" })
+        try here.setSoundCategory([(one.id!, one.fingerprint)], catID: "DOORWood")
         // The other Mac: one.wav moved and renamed, two.wav changed (other content).
         let theirs = try await Self.soundLibrary(there, at: TestFiles.tempDir(), ["Moved/uno.wav": 1, "Pack/two.wav": 3])
 
@@ -35,8 +37,10 @@ import Testing
         #expect(file.sounds?.count == 2 && file.folderCategories == [.init(folder: "Pack", catID: "AMBForst")])
         let report = try there.importAnalysis(file)
         #expect(report.sounds == 2 && report.soundsMatched == 1 && report.facts == 1 && report.embeddings == 2)
-        #expect(report.folderCategories == 1)
+        #expect(report.folderCategories == 1 && report.soundCategories == 1)
         let uno = try #require(try there.sounds().first { $0.fileName == "uno.wav" })
+        #expect(try there.soundCategoryChoices()[uno.id!]?.catID == "DOORWood")
+        #expect(try there.soundCategoryChoices()[uno.id!]?.byOwner == true)
         let two = try #require(try there.sounds().first { $0.fileName == "two.wav" })
         #expect(try there.soundFacts()[uno.id!]?.loudness == -20)
         #expect(try there.soundFacts()[uno.id!]?.isCurrent(for: uno) == true)
@@ -47,6 +51,7 @@ import Testing
         #expect(try there.folderRules() == [FolderRule(libraryId: theirs.id!, folder: "Pack", catID: "AMBForst",
                                                         createdAt: try there.folderRules()[0].createdAt)])
         // A second import adds nothing.
+        #expect(try there.importAnalysis(file).soundCategories == 0)
         #expect(try there.importAnalysis(file).facts == 0)
         #expect(try there.importAnalysis(file).embeddings == 0)
     }

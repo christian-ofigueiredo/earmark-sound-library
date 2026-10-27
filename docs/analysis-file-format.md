@@ -30,7 +30,8 @@ JSON, UTF-8. Dates are ISO 8601. Optional fields may be missing or `null`.
       "embeddings": {
         "clap-general": { "version": 1, "vector": "<base64>" },
         "pe-av-large":  { "version": 1, "vector": "<base64>" }
-      }
+      },
+      "category": "DOORWood"
     }
   ]
 }
@@ -61,6 +62,7 @@ A music folder has `"kind": "music"` and `songs` instead of `sounds`:
 | `embeddings` | Per model, float32 little-endian, base64. `vector: null` means silent (no embedding to make). CLAP: 512 values. PE-AV large: 1024. Both L2-normalised. |
 | `version` | The analysis pipeline's version. An import skips anything older than the importing Earmark's. |
 | `folderCategories` | The user's UCS categories for folders of sounds without one of their own. Earmark's guesses aren't exported; it makes them again. |
+| `category` | The user's UCS category for this one sound (added 2026-10-27; older Earmarks ignore it). Earmark's guesses from how a sound sounds aren't exported. |
 | `analysis` | Tempo and key as analysed. `source` is `Phase 0` or `Earmark`. `keyPitchClass`: C = 0 … B = 11. |
 | `correction` | Tempo, key or beats per bar the user set by hand. Only the parts they changed are present. |
 
@@ -73,6 +75,7 @@ Results for files that couldn't be read are not exported: the other Mac may be a
   analysed again as usual.
 - **Folder categories** go to the library where most of the file's sounds were found, for
   folders it has and the user hasn't given a category.
+- **A sound's category** goes to the matching sounds the user hasn't given one here.
 - **Songs** match by fingerprint, among local songs of the same size, preferring the same path.
   If the file has no fingerprint, they match by path and size. Tempo and key are added only to
   songs with none (analysed by nobody yet), keeping `source`. Corrections are added only where

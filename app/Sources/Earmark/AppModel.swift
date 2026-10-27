@@ -35,6 +35,7 @@ struct LibrarySnapshot: Sendable {
     var songCorrections: [String: SongCorrection]
     var folderRules: [FolderRule]
     var folderGuesses: [FolderGuess]
+    var soundChoices: [Int64: SoundCategoryChoice]
     var groups: SoundGroupSnapshot
 
     init(_ db: LibraryDatabase) throws {
@@ -42,8 +43,10 @@ struct LibrarySnapshot: Sendable {
         folderRules = try db.folderRules()
         folderGuesses = try db.folderGuesses()
         // Sounds with no category of their own take their folder's: the user's choice, or
-        // else Earmark's guess (Folder Categories).
-        sounds = FolderRules.apply(folderRules, guesses: folderGuesses, to: try db.sounds())
+        // else Earmark's guess (Folder Categories). Then single sounds' categories: the owner's
+        // over anything, Earmark's from how a sound sounds over its folder's guess.
+        soundChoices = try db.soundCategoryChoices()
+        sounds = SoundCategories.apply(soundChoices, to: FolderRules.apply(folderRules, guesses: folderGuesses, to: try db.sounds()))
         soundIndex = SoundIndex(sounds)
         // Songs show the tempo, key and beats per bar the user set by hand over what was analysed.
         songCorrections = Dictionary(try db.songCorrections().map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
@@ -65,6 +68,7 @@ final class AppModel {
     let folderMapper = FolderMapper()
     let folderGuesser = FolderGuesser()
     let groupBuilder = GroupBuilder()
+    let soundGuesser = SoundGuesser()
     let analysis = AnalysisEngine()
 
     /// The library has been read once since launch (the sidebars are built then).
@@ -96,6 +100,10 @@ final class AppModel {
     @ObservationIgnored private var correctionWrites: Task<Void, Never>?
     private(set) var folderRules: [FolderRule] = []
     private(set) var folderGuesses: [FolderGuess] = []
+    /// Categories for single sounds, the owner's and Earmark's (already applied to `sounds`).
+    private(set) var soundChoices: [Int64: SoundCategoryChoice] = [:]
+    /// The category chooser for selected sounds, while it's open.
+    var categoryChoosing: CategoryChoosing?
     /// Earmark guessing categories for folders (status bar).
     var guessProgress: (done: Int, total: Int)?
     @ObservationIgnored private var guessing = false
@@ -142,6 +150,7 @@ final class AppModel {
             // After the analysis has read which sounds it has done (the guesses note it).
             guessing = true
             folderGuesser.update(model: self)
+            soundGuesser.update(model: self)
             groupBuilder.update(model: self)
         }
     }
@@ -193,6 +202,7 @@ final class AppModel {
             songCorrections = snap.songCorrections
             folderRules = snap.folderRules
             folderGuesses = snap.folderGuesses
+            soundChoices = snap.soundChoices
             groups = snap.groups
             rebuildCategoryTree()
             version += 1
@@ -201,6 +211,7 @@ final class AppModel {
             analysis.libraryChanged()
             if guessing {
                 folderGuesser.update(model: self)
+                soundGuesser.update(model: self)
                 groupBuilder.update(model: self)
             }
         } catch {
@@ -664,6 +675,24 @@ final class AppModel {
                 try? await Task.detached(priority: .userInitiated) { try db.regroup(catID: catID) }.value
                 await self.reloadGroups()
                 self.groupBuilder.update(model: self)
+            }
+        }
+    }
+
+    // MARK: categories for single sounds
+
+    /// The owner's category for these sounds (nil takes it away: the folder's, or the file's own,
+    /// again). Earmark's database only.
+    func setCategory(_ ids: [Int64], to catID: String?) {
+        guard let db = database else { return }
+        let picked = ids.compactMap { sound(id: $0) }.map { (id: $0.id!, fingerprint: $0.fingerprint) }
+        guard !picked.isEmpty else { return }
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) { try db.setSoundCategory(picked, catID: catID) }.value
+                await reload()
+            } catch {
+                show(error, title: "Couldn't save the category")
             }
         }
     }

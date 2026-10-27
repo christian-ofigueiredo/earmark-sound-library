@@ -34,6 +34,8 @@ public struct AnalysisFile: Codable, Sendable {
         public var facts: Facts?
         /// By model ("clap-general", "pe-av-large").
         public var embeddings: [String: Embedding]?
+        /// The user's category for this sound (a UCS CatID), chosen one by one.
+        public var category: String?
     }
 
     public struct Facts: Codable, Sendable, Equatable {
@@ -128,7 +130,7 @@ public struct AnalysisFile: Codable, Sendable {
 
 /// What an import found and added.
 public struct AnalysisImportReport: Sendable, Equatable {
-    public var sounds = 0, soundsMatched = 0, facts = 0, embeddings = 0, folderCategories = 0
+    public var sounds = 0, soundsMatched = 0, facts = 0, embeddings = 0, folderCategories = 0, soundCategories = 0
     public var songs = 0, songsMatched = 0, songAnalyses = 0, corrections = 0
 
     public init() {}
@@ -136,7 +138,8 @@ public struct AnalysisImportReport: Sendable, Equatable {
     public static func + (a: Self, b: Self) -> Self {
         var r = a
         r.sounds += b.sounds; r.soundsMatched += b.soundsMatched; r.facts += b.facts; r.embeddings += b.embeddings
-        r.folderCategories += b.folderCategories; r.songs += b.songs; r.songsMatched += b.songsMatched
+        r.folderCategories += b.folderCategories; r.soundCategories += b.soundCategories
+        r.songs += b.songs; r.songsMatched += b.songsMatched
         r.songAnalyses += b.songAnalyses; r.corrections += b.corrections
         return r
     }
@@ -240,10 +243,12 @@ extension LibraryDatabase {
     /// couldn't be read here may be read on the other Mac).
     private func soundEntries(_ sounds: [SoundRecord], includeEmbeddings: Bool) throws -> [AnalysisFile.Sound] {
         let ids = sounds.compactMap(\.id)
-        let (facts, embeddings) = try dbQueue.read { db in
+        let (facts, embeddings, choices) = try dbQueue.read { db in
             (try SoundFacts.filter(ids.contains(Column("soundId"))).fetchAll(db),
-             includeEmbeddings ? try SoundEmbedding.filter(ids.contains(Column("soundId"))).fetchAll(db) : [])
+             includeEmbeddings ? try SoundEmbedding.filter(ids.contains(Column("soundId"))).fetchAll(db) : [],
+             try SoundCategoryChoice.filter(ids.contains(Column("soundId")) && Column("byOwner") == true).fetchAll(db))
         }
+        let chosen = Dictionary(choices.map { ($0.soundId, $0) }, uniquingKeysWith: { a, _ in a })
         let factsById = Dictionary(facts.map { ($0.soundId, $0) }, uniquingKeysWith: { a, _ in a })
         let embeddingsById = Dictionary(grouping: embeddings, by: \.soundId)
         return sounds.compactMap { s in
@@ -253,10 +258,11 @@ extension LibraryDatabase {
             for e in embeddingsById[id] ?? [] where e.fingerprint == fp && e.error == nil {
                 vectors[e.model] = .init(version: e.version, vector: e.vector)
             }
-            guard f != nil || !vectors.isEmpty else { return nil }
+            let category = chosen[id].flatMap { $0.fingerprint == fp ? $0.catID : nil }
+            guard f != nil || !vectors.isEmpty || category != nil else { return nil }
             return .init(path: s.pathInLibrary, fingerprint: fp,
                          facts: f.map { .init(version: $0.version, loudness: $0.loudness, peak: $0.peak) },
-                         embeddings: vectors.isEmpty ? nil : vectors)
+                         embeddings: vectors.isEmpty ? nil : vectors, category: category)
         }
     }
 
@@ -280,6 +286,8 @@ extension LibraryDatabase {
         var status: [String: [Int64: SoundEmbedding.Status]] = [:]
         for model in SoundEmbedding.versions.keys { status[model] = try embeddingStatus(model: model) }
         var newFacts: [Int64: SoundFacts] = [:], newEmbeddings: [String: SoundEmbedding] = [:]
+        let owners = Set(try soundCategoryChoices().filter { $0.value.byOwner }.keys)
+        var newCategories: [Int64: SoundCategoryChoice] = [:]
         var matchedLibraries: [Int64: Int] = [:]
         report.sounds = entries.count
         for entry in entries {
@@ -293,6 +301,10 @@ extension LibraryDatabase {
                     new.loudness = f.loudness
                     new.peak = f.peak
                     newFacts[id] = new
+                }
+                // The user's category for the sound, unless they chose one here.
+                if let c = entry.category, !owners.contains(id), UCSCatalog.shared.entry(catID: c) != nil {
+                    newCategories[id] = SoundCategoryChoice(soundId: id, fingerprint: s.fingerprint, catID: c, byOwner: true)
                 }
                 for (model, e) in entry.embeddings ?? [:] {
                     guard let current = SoundEmbedding.versions[model], e.version >= current,
@@ -318,10 +330,12 @@ extension LibraryDatabase {
             }
         }
         report.folderCategories = newRules.count
+        report.soundCategories = newCategories.count
         try dbQueue.write { db in
             for f in newFacts.values { try f.save(db) }
             for e in newEmbeddings.values { try e.save(db) }
             for r in newRules { try r.save(db) }
+            for c in newCategories.values { try c.save(db) }
         }
     }
 
@@ -368,7 +382,9 @@ extension LibraryDatabase {
     /// testing an import at full size on a copy (`earmark-parity analysis-files`). Never the app's database.
     public func clearAnalysisForTesting() throws {
         try dbQueue.write { db in
-            for table in ["soundFacts", "soundEmbedding", "folderRule", "songCorrection"] { try db.execute(sql: "DELETE FROM \(table)") }
+            for table in ["soundFacts", "soundEmbedding", "folderRule", "songCorrection", "soundCategory"] {
+                try db.execute(sql: "DELETE FROM \(table)")
+            }
             try db.execute(sql: """
                 UPDATE song SET bpm = NULL, bpmLow = NULL, bpmHigh = NULL, tempoStability = NULL, beatsPerBar = NULL,
                 keyPitchClass = NULL, keyMinor = NULL, keyConfidence = NULL, analysisSource = NULL

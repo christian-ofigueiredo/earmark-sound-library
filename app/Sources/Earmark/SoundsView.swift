@@ -15,6 +15,8 @@ enum SoundScope: Hashable, Sendable {
     case similar(Int64)
     /// A similarity group inside a subcategory.
     case group(Int64)
+    /// Sounds whose category is Earmark's guess from how they sound, and the owner's for one sound.
+    case guessedFromSound, chosenByYou
 }
 
 /// What the sound list shows: scope, search, sort and selection.
@@ -130,6 +132,8 @@ final class SoundBrowser {
             case .catID(let c): if s.catID != c { return false }
             case .uncategorised: if s.catID != nil { return false }
             case .guessed: if s.categorySource != FolderRules.guessSource { return false }
+            case .guessedFromSound: if s.categorySource != SoundCategories.soundGuessSource { return false }
+            case .chosenByYou: if s.categorySource != SoundCategories.ownerSource { return false }
             case .similar(let source):
                 guard let id = s.id, id == source || scores?[id] != nil else { return false }
             case .group(let g):
@@ -219,6 +223,18 @@ struct SoundSidebar: View {
                             .tag(SoundScope.guessed)
                             .help("Sounds whose category Earmark guessed from their folder: change any in Folder Categories")
                     }
+                    if model.soundIndex.guessedFromSound > 0 {
+                        Label("Guessed from the Sound", systemImage: "waveform.badge.magnifyingglass")
+                            .badge(model.soundIndex.guessedFromSound)
+                            .tag(SoundScope.guessedFromSound)
+                            .help("Sounds that don't sound like their folder's category: Earmark gave them the one the most similar sounds have. Worth a listen.")
+                    }
+                    if model.soundIndex.chosenByYou > 0 {
+                        Label("Chosen by You", systemImage: "person.crop.circle.badge.checkmark")
+                            .badge(model.soundIndex.chosenByYou)
+                            .tag(SoundScope.chosenByYou)
+                            .help("Sounds you gave a category one by one")
+                    }
                     Label("Not Categorised Yet", systemImage: "questionmark.folder")
                         .badge(model.soundIndex.uncategorised)
                         .tag(SoundScope.uncategorised)
@@ -300,6 +316,17 @@ struct SoundTable: View {
                 copyToPasteboard(picked.map(\.path).joined(separator: "\n"))
             })
         }
+        if !picked.isEmpty {
+            let ids = picked.compactMap(\.id)
+            items.append(.divider)
+            items.append(.action(picked.count == 1 ? "Set Category…" : "Set Category for \(picked.count) Sounds…") {
+                model.categoryChoosing = CategoryChoosing(sounds: ids)
+            })
+            let mine = picked.filter { $0.categorySource == SoundCategories.ownerSource }.compactMap(\.id)
+            if !mine.isEmpty {
+                items.append(.action("Remove Your Category") { model.setCategory(mine, to: nil) })
+            }
+        }
         items += groupMenuItems(for: picked, model: model)
         return items
     }
@@ -351,6 +378,15 @@ struct SoundDetail: View {
         return model.folderGuesses.first { $0.libraryId == key.libraryId && $0.folder == key.folder }
     }
 
+    /// Why Earmark gave this sound its category from how it sounds.
+    private var soundGuessReason: String {
+        guard let choice = model.soundChoices[sound.id ?? -1] else { return "" }
+        let label = { (catID: String?) in UCSCatalog.shared.entry(catID: catID)?.label.capitalized ?? catID ?? "" }
+        let share = Int(((choice.share ?? 0) * 100).rounded())
+        return "It doesn't sound like its folder's category (\(label(choice.replaced))): \(share)% of the most similar sounds "
+            + "in other folders are \(label(choice.catID))."
+    }
+
     /// Which embeddings this sound has ("CLAP, PE-AV"), or nil.
     private func embeddingText(for sound: SoundRecord) -> String? {
         let id = sound.id ?? -1
@@ -377,27 +413,28 @@ struct SoundDetail: View {
                             }
                         }
                         GroupLine(sound: sound)
-                        if let guess {
-                            HStack(spacing: 6) {
+                        HStack(spacing: 6) {
+                            if let guess {
                                 Text("Guessed by Earmark")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                                     .help("From its folder: \(guess.reason)")
-                                Button("Change…", action: mapFolder).buttonStyle(.link).font(.caption)
+                            } else if sound.categorySource == SoundCategories.soundGuessSource {
+                                Text("Guessed by Earmark from how it sounds")
+                                    .help(soundGuessReason)
+                            } else if sound.categorySource == SoundCategories.ownerSource {
+                                Text("Chosen by you")
+                            } else if let source = sound.categorySource {
+                                Text("Category from \(source)")
                             }
-                        } else if let source = sound.categorySource {
-                            HStack(spacing: 6) {
-                                Text("Category from \(source)").font(.caption).foregroundStyle(.secondary)
-                                if source == FolderRules.source {
-                                    Button("Change…", action: mapFolder).buttonStyle(.link).font(.caption)
-                                }
-                            }
+                            CategoryChangeMenu(sound: sound, title: "Change", mapFolder: mapFolder)
                         }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     } else {
                         HStack(spacing: 6) {
-                            Text("Not categorised yet").font(.callout).foregroundStyle(.secondary)
-                            Button("Choose a Category for Its Folder…", action: mapFolder).buttonStyle(.link).font(.callout)
+                            Text("Not categorised yet").foregroundStyle(.secondary)
+                            CategoryChangeMenu(sound: sound, title: "Choose a Category", mapFolder: mapFolder)
                         }
+                        .font(.callout)
                     }
                 }
                 if online {

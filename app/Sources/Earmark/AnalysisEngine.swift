@@ -326,6 +326,7 @@ final class AnalysisEngine {
         if embeddedSinceGrouping > 0, Date().timeIntervalSince(groupedAt) > 180, let model {
             embeddedSinceGrouping = 0
             groupedAt = Date()
+            model.soundGuesser.update(model: model)
             model.groupBuilder.update(model: model)
         }
         // A PE-AV batch running since the last tick means Earmark itself used the GPU.

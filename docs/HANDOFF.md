@@ -11,7 +11,7 @@ Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped
   Build each to the end, then tell the owner; if a real problem comes up, describe it and
   let the owner decide. Merging to `main` still needs approval. The five: similarity
   groups (done), refreshing the sound map for new sounds (done), suggested categories for single sounds
-  (with a review list), sending a selected range to Resolve, and finding duplicates.
+  (with a review list; done), sending a selected range to Resolve, and finding duplicates.
 - Never write to, rename or move original sound/music files. Earmark only reads them;
   state lives in its own database (`~/Library/Application Support/Earmark/library.sqlite`).
 - Quality over speed; best models available.
@@ -501,8 +501,37 @@ Settings → Repository name. Topics/description also have to be set there.
      app: the sidebar's and list's right-click menus (accessibility can't open them; same
      calls as the detail pane's, which are tested). Groups aren't in analysis files yet (made
      again on the other Mac; the owner's changes don't travel).
-   - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
-     only 13–16%).
+   - ~~Suggested categories for single sounds~~ Done, 2026-10-27 (third of the five).
+     **Measured first** (`earmark-parity votes <copy> --truth local/folder_truth.tsv`): a
+     sound's 15 nearest sounds in other folders (PE-AV + CLAP; its own folder doesn't vote,
+     since one folder guess gave them all their category) voting for their categories name a
+     file's own UCS category only 22% of the time (top 3 31%), and where that vote disagrees
+     with Earmark's folder guess on the hand-checked folders (14,500 guessed sounds, guesses
+     67% right) it is right only 20%, and 53% of those flags hit a correct guess: as Phase 0
+     found across packs (7–9%), not usable alone. Voting only with files' own categories was
+     worse. **What works:** let the vote choose only among the folder guess's runners-up
+     (`FolderGuess.alternatives`) when it's clear (≥ 60% for one, < 10% for the current): 578
+     hand-checked sounds flagged, the folder guess wrong for 71% of them, the vote right for 62%
+     (the guess for 29%); 755 sounds in the library. Thresholds 0.5/0.7 give 913/610 sounds
+     at 56%/69%. Since the owner wants categories automatic and corrected later, **Earmark
+     applies these** (`SoundCategories.guesses`, `SoundGuesser` in the background: ~5 s, after
+     the folder guesses and with new analysis; only when its inputs changed). Biggest moves
+     on the library: Human Misc → Voices Male (327, the hand-checked folder says male voices),
+     Footsteps Misc → Footsteps Human (119), Sports Equipment → Sports Ambience (47).
+     **Storage** `soundCategory` (schema v9): sound id + fingerprint, CatID, `byOwner`, the
+     vote's share and the folder guess it replaced. **Precedence** (`SoundCategories.apply`
+     after `FolderRules.apply`): the owner's choice for a sound > the file's own > the owner's
+     folder rule > Earmark's guess from the sound > Earmark's folder guess. **App:** sidebar
+     "Guessed from the Sound" (worth a listen) and "Chosen by You"; detail pane "Guessed by
+     Earmark from how it sounds" (help: the folder's guess and the vote) with a Change menu
+     (For This Sound…, For Its Folder… where a folder's category can reach it, Use Its
+     Folder's: …, Remove Your Category); list row menu Set Category… (several sounds at once)
+     and Remove Your Category; the UCS chooser (Folder Categories' Other…) selects the only
+     match left by a search, so Return chooses it. The owner's per-sound categories travel in
+     analysis files (`category` on a sound; docs/analysis-file-format.md). Checked in the app
+     (accessibility): the sidebar rows, a re-guessed sound's pane and menu, For This Sound… with
+     the chooser, Chosen by You, Remove Your Category (Earmark's guess came back on its own);
+     the test choice was removed. Not checked in the app: the list's row menu (right-click).
 5. Phase 4: Resolve Studio bridge for sending only a selected range. Use the scripting
    API: import the original into the media pool, then `MediaPool.AppendToTimeline` with
    `startFrame`/`endFrame`. External scripting must be set to Local in Resolve

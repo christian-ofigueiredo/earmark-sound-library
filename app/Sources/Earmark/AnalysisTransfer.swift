@@ -102,7 +102,7 @@ extension AppModel {
     }
 
     static func importTitle(_ r: AnalysisImportReport, files: Int) -> String {
-        let added = r.facts + r.embeddings + r.folderCategories + r.songAnalyses + r.corrections
+        let added = r.facts + r.embeddings + r.folderCategories + r.soundCategories + r.songAnalyses + r.corrections
         return added == 0 ? "Nothing new to import" : "Imported the analysis from \(files == 1 ? "1 file" : "\(files) files")"
     }
 
@@ -112,7 +112,8 @@ extension AppModel {
         if r.sounds > 0 {
             var added = [r.facts > 0 ? "loudness for \(n(r.facts))" : nil,
                          r.embeddings > 0 ? "\(n(r.embeddings)) embeddings" : nil,
-                         r.folderCategories > 0 ? "\(n(r.folderCategories)) folder categories" : nil].compactMap { $0 }
+                         r.folderCategories > 0 ? "\(n(r.folderCategories)) folder categories" : nil,
+                         r.soundCategories > 0 ? "your categories for \(n(r.soundCategories)) sounds" : nil].compactMap { $0 }
             if added.isEmpty { added = ["nothing new"] }
             lines.append("Sounds: \(n(r.soundsMatched)) of \(n(r.sounds)) found here; added \(added.joined(separator: ", ")).")
         }

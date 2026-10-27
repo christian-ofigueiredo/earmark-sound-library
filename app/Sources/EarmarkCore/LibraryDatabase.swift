@@ -321,6 +321,20 @@ public final class LibraryDatabase: Sendable {
                 t.belongsTo("soundGroup", onDelete: .cascade).notNull()
             }
         }
+        // A category for one sound: the owner's, or Earmark's guess from how it sounds
+        // (SoundCategories). Keyed by sound id, no foreign key, like the analysis tables.
+        m.registerMigration("v9-sound-categories") { db in
+            try db.create(table: "soundCategory") { t in
+                t.primaryKey("soundId", .integer)
+                t.column("fingerprint", .text)
+                t.column("catID", .text).notNull()
+                t.column("byOwner", .boolean).notNull()
+                t.column("share", .double)
+                t.column("replaced", .text)
+                t.column("version", .integer).notNull()
+                t.column("createdAt", .datetime).notNull()
+            }
+        }
         return m
     }
 

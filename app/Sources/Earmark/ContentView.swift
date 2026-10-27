@@ -33,6 +33,14 @@ struct ContentView: View {
         .sheet(isPresented: $model.showWelcome) { WelcomeView().environment(model) }
         .sheet(item: $model.exportRequest) { ExportAnalysisSheet(request: $0).environment(model) }
         .sheet(item: $model.groupNaming) { GroupNameSheet(naming: $0).environment(model) }
+        .sheet(item: $model.categoryChoosing) { choosing in
+            let first = model.sound(id: choosing.sounds.first)
+            UCSChooser(title: choosing.sounds.count == 1 ? "Category for “\(first?.displayName ?? "")”"
+                                                          : "Category for \(choosing.sounds.count) sounds",
+                       current: choosing.sounds.count == 1 ? first?.catID : nil) { catID in
+                model.setCategory(choosing.sounds, to: catID)
+            }
+        }
         .alert(model.alert?.title ?? "", isPresented: alertShown, presenting: model.alert) { alert in
             if let actionTitle = alert.actionTitle {
                 Button(actionTitle, role: alert.isDestructive ? ButtonRole.destructive : nil) { alert.action?() }

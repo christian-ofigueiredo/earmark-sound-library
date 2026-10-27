@@ -124,13 +124,16 @@ struct GroupLine: View {
                 Button(group.title) { model.soundBrowser.scope = .group(group.id!) }
                     .buttonStyle(.link)
                     .font(.caption)
+                    .lineLimit(1)
+                    .layoutPriority(1)
                     .help("Show this group: sounds in “\(sound.subcategory?.capitalized ?? "")” that sound alike")
                 if !group.keywordList.isEmpty {
                     Text(group.keywordList.map { "#\($0)" }.joined(separator: " "))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
-                        .help("Words most of the group's files share")
+                        .truncationMode(.tail)
+                        .help("Words most of the group's files share: " + group.keywordList.joined(separator: ", "))
                 }
                 Menu {
                     ForEach(model.groups(catID: sound.catID)) { g in
@@ -149,5 +152,51 @@ struct GroupLine: View {
                 .font(.caption)
             }
         }
+    }
+}
+
+/// Sounds whose category the owner is choosing (the chooser sheet).
+struct CategoryChoosing: Identifiable {
+    var sounds: [Int64]
+    var id: [Int64] { sounds }
+}
+
+/// Change ▸ For This Sound… / For Its Folder… / back to its folder's: in the detail pane.
+struct CategoryChangeMenu: View {
+    @Environment(AppModel.self) private var model
+    let sound: SoundRecord
+    let title: String
+    let mapFolder: () -> Void
+
+    var body: some View {
+        Menu {
+            Button("For This Sound…") { model.categoryChoosing = CategoryChoosing(sounds: [sound.id!]) }
+            // A folder's category only reaches sounds without one in their files.
+            if !hasOwnCategory {
+                Button("For Its Folder…", action: mapFolder)
+            }
+            switch sound.categorySource {
+            case SoundCategories.ownerSource:
+                Divider()
+                Button("Remove Your Category") { model.setCategory([sound.id!], to: nil) }
+            case SoundCategories.soundGuessSource:
+                if let folders = model.soundChoices[sound.id ?? -1]?.replaced, let e = UCSCatalog.shared.entry(catID: folders) {
+                    Divider()
+                    Button("Use Its Folder's: \(e.label.capitalized)") { model.setCategory([sound.id!], to: e.catID) }
+                }
+            default:
+                EmptyView()
+            }
+        } label: {
+            Text(title)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    /// The file says its category itself (UCS file name, iXML).
+    private var hasOwnCategory: Bool {
+        guard let source = sound.categorySource else { return false }
+        return ![FolderRules.source, FolderRules.guessSource, SoundCategories.soundGuessSource, SoundCategories.ownerSource].contains(source)
     }
 }
