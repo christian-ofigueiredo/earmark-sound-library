@@ -36,6 +36,11 @@ mv "$APP/Contents/MacOS/Earmark.sdk" "$APP/Contents/MacOS/Earmark"
 for b in "$BIN"/*.bundle; do
     cp -R "$b" "$APP/Contents/Resources/"
 done
+# The icon: an Icon Composer file (app/Icon/AppIcon.icon, Liquid Glass layers), compiled into
+# Assets.car with an AppIcon.icns for older systems.
+xcrun actool "$PKG/Icon/AppIcon.icon" --compile "$APP/Contents/Resources" --platform macosx \
+    --minimum-deployment-target "$MIN_MACOS" --app-icon AppIcon \
+    --output-partial-info-plist "$(mktemp -t earmark-icon)" > /dev/null
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -44,6 +49,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleExecutable</key><string>Earmark</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleIconName</key><string>AppIcon</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Earmark</string>

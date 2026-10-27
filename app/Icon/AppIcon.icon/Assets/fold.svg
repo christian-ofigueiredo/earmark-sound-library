@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="g" x1="600" y1="192" x2="740" y2="340" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7A66F0"/>
+      <stop offset="1" stop-color="#2A78D6"/>
+    </linearGradient>
+  </defs>
+  <!-- The folded corner, the earmark, in the sound map's violet to blue. -->
+  <path d="M600 192 L762 354 H640 A40 40 0 0 1 600 314 Z" fill="url(#g)"/>
+</svg>

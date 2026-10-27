@@ -573,6 +573,13 @@ Settings → Repository name. Topics/description also have to be set there.
      on every reload. Checked in the app (accessibility): the sidebar row, the grouped list,
      both detail-pane lists.
 
+- **App icon** (owner, 2026-10-27): `app/Icon/AppIcon.icon`, an Icon Composer file (Xcode's
+  Icon Composer opens it): a white page with its top-right corner folded down (the earmark,
+  violet to blue) and a waveform in the sound map's colours, on dark blue; the waveform is a
+  Liquid Glass layer. `scripts/build-app.sh` compiles it with `actool` into `Assets.car` and an
+  `AppIcon.icns` for older systems (`CFBundleIconName`/`CFBundleIconFile` AppIcon).
+  `app/Icon/preview.png` is how macOS 27 draws it.
+
 ## Gotchas learned
 
 - **macOS 27 keeps freed large memory blocks counted as the app's.** malloc keeps freed large

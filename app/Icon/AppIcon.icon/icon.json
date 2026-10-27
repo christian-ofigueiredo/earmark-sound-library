@@ -1,0 +1,60 @@
+{
+  "fill": {
+    "automatic-gradient": "extended-srgb:0.09000,0.13000,0.24000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": true,
+          "image-name": "wave.svg",
+          "name": "wave",
+          "position": {
+            "scale": 1.2,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "glass": false,
+          "image-name": "fold.svg",
+          "name": "fold",
+          "position": {
+            "scale": 1.2,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "glass": false,
+          "image-name": "page.svg",
+          "name": "page",
+          "position": {
+            "scale": 1.2,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}
