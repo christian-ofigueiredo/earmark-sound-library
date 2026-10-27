@@ -1,4 +1,4 @@
-# Earmark: handoff (2026-10-26)
+# Earmark: handoff (2026-10-27)
 
 Notes for continuing in a new chat (for example Claude Code on the owner's Mac).
 Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped.
@@ -399,25 +399,40 @@ Settings → Repository name. Topics/description also have to be set there.
      after 120 ms). Back in the list, it scrolls to the selection. Help ▸ Keyboard Shortcuts
      has an "On the Sound Map" group. Code: `SoundMapView.swift` (state, legend, the AppKit
      canvas: Core Graphics, a grid for hit tests), `EarmarkCore/SoundMap.swift`.
+     **Look** (owner, 2026-10-27: "the dots are too big… small dots, gradient colours blending
+     into each other, small lines connecting the dots, everything really fine, tech style"):
+     dots of 1.4 pt radius (up to 4 as you zoom; the pointer still picks them within 6 pt);
+     each sound linked to its 3 nearest in the embedding space by 0.5 pt hairlines in the mix
+     of the two dots' colours (`SoundMap.Map.links`, ~62,000 for the library; links longer
+     than 3.5% of the map are left out, as are ones shorter than the dots); a glow of the
+     categories' colours that blends where groups meet (`MapGlow`: the lit dots splatted on a
+     512² field, Gaussian blur with vImage, colour = weighted average, made once per layout,
+     search, highlight or appearance and stretched with zoom); each lit dot shaded 30% towards
+     the colour around it (grey ones 50%); grey recedes (0.40 in dark, 0.72 in light); a faint
+     grid fixed to the map; near-black background in dark mode, white in light. Selected dots
+     get a pip in the text colour in their middle (a ring too while ≤ 40), so a big selection
+     reads as a stipple, not a patch. A drag that starts on a dot also selects an area. The
+     pointer's ring, its label, the selection and the playing ring are drawn by an overlay
+     view, so moving over dots doesn't redraw the map (~15 ms for the whole library; 0 draws
+     of the map while hovering).
      Layout: a Swift port of umap-learn 0.5 with Phase 0's settings (cosine, 15 neighbours,
      min_dist 0.15, a/b from `find_ab_params`, 200 epochs from 10,000 sounds, else 500) on
      PE-AV + CLAP combined as Phase 0 did; PCA start instead of spectral and its own seeded
-     random numbers (same sounds, same map; not Python's); under 20 sounds PCA only. 7 tests
-     (5 for the layout, 2 for loading the vectors).
+     random numbers (same sounds, same map; not Python's); under 20 sounds PCA only. 8 tests
+     (6 for the layout and its links, 2 for loading the vectors).
      Against umap-learn (`models/parity_map.py`, share of the 15 nearest kept): Ambience 0.559
      vs 0.552, Designed 0.438 vs 0.439, all 28,827 sounds 0.323 vs 0.326 (11.5 s vs 23.1 s).
      In the app the whole library takes ~15 s in the background with a progress bar; a
      category's map a second or less. The last 8 layouts are kept for the session, so going
      back to one is instant. Memory: the vectors (177 MB) are loaded only while the map shows;
-     with the all-sounds map Earmark is ~470 MB (peak ~520 MB) and back to ~265 MB in the list
+     with the all-sounds map Earmark is ~460 MB (peak ~480 MB) and back to ~265 MB in the list
      (it was 1.45 GB before the fixes under Gotchas). Checked in the app with real mouse
      events (`mouse` tool, CGEvent): selection, ⌘-click, area, scroll-wheel zoom, both pans,
      Fit, search dimming, the legend and its menu, a category map, Space, Play on hover,
      ⇧⌘M both ways, Music and back, the help window. Not checked: pinch (can't be made with
      CGEvent) and ← / → on a long sound (the list's code). Open: sounds analysed while the
      map shows join it only when the map is switched off and on (a new layout moves every
-     dot, so how to add them is the owner's call); hundreds of selected dots draw as a white
-     patch.
+     dot, so how to add them is the owner's call).
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
      only 13–16%).
 5. Phase 4: Resolve Studio bridge for sending only a selected range. Use the scripting
@@ -440,6 +455,13 @@ Settings → Repository name. Topics/description also have to be set there.
   found none, and nothing hid the other section's later. `LibraryView.syncOnceBuilt` tries
   again every 0.1 s until both exist (in 16 launches the second try was needed twice, and no
   overlap was left).
+- **Since macOS 14 a view draws outside its bounds** (`clipsToBounds` defaults to false): the
+  map's glow, stretched by zooming, covered the sidebar and the detail pane, and the dirty
+  rectangle passed to `draw` can be the whole window. The map's views set `clipsToBounds`.
+- **Drawing in a view is far faster than drawing into a bitmap.** AppKit hands a view's Core
+  Graphics drawing to the GPU; the same 28,827 dots took 6 ms there and 540 ms in an
+  off-screen `CGContext` (CPU). To avoid redrawing, split into views (the map's overlay)
+  rather than caching a rendered image.
 - **Testing the map:** the computer-use tool's background click also sends a second
   mouse-down outside the view (at −251, −89), which cleared the selection; the canvas now
   ignores events outside itself. Use the scratchpad's `mouse` tool (CGEvent: click, ⌘/⌥

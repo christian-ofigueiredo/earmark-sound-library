@@ -1,3 +1,4 @@
+import Accelerate
 import AppKit
 import EarmarkCore
 import SwiftUI
@@ -26,6 +27,8 @@ final class SoundMapState {
         var key: Int
         var ids: [Int64]
         var points: [SIMD2<Float>]
+        /// Each sound joined to its 3 nearest (`SoundMap.Map.links`), drawn as fine lines.
+        var links: [SIMD2<Int32>]
         var row: [Int64: Int]
     }
     private(set) var layout: Layout?
@@ -84,7 +87,7 @@ final class SoundMapState {
             missing = ids.count - have.count
             let flag = CancellationFlag()
             let ticker = ProgressRelay { [weak self] p in self?.progress = p }
-            let points: [SIMD2<Float>]? = await withTaskCancellationHandler {
+            let map: SoundMap.Map? = await withTaskCancellationHandler {
                 await Task.detached(priority: .userInitiated) {
                     let d = vectors.dimensions
                     // Every sound with vectors: the vectors as they are. Part of them: a copy of those rows.
@@ -97,15 +100,15 @@ final class SoundMapState {
                         }
                     }
                     return x.withFloats { f in
-                        SoundMap.layout(flat: UnsafeBufferPointer(rebasing: f[0 ..< rows.count * d]), count: rows.count, dimensions: d,
-                                        progress: { ticker.send($0) }, isCancelled: { flag.isSet })
+                        SoundMap.map(flat: UnsafeBufferPointer(rebasing: f[0 ..< rows.count * d]), count: rows.count, dimensions: d,
+                                     progress: { ticker.send($0) }, isCancelled: { flag.isSet })
                     }
                 }.value
             } onCancel: {
                 flag.set()
             }
-            guard let points, !Task.isCancelled, currentKey == key else { return }
-            let made = Layout(key: key, ids: have, points: points,
+            guard let map, !Task.isCancelled, currentKey == key else { return }
+            let made = Layout(key: key, ids: have, points: map.points, links: map.links,
                               row: Dictionary(uniqueKeysWithValues: have.enumerated().map { ($0.element, $0.offset) }))
             cache[key] = made
             recent.removeAll { $0 == key }
@@ -187,10 +190,26 @@ enum MapPalette {
     static let other = named, none = named + 1
 
     static func color(_ index: Int, dark isDark: Bool) -> NSColor {
-        if index >= named { return isDark ? NSColor(white: 0.55, alpha: 1) : NSColor(white: 0.62, alpha: 1) }
+        let c = rgb(index, dark: isDark)
+        return NSColor(srgbRed: CGFloat(c.x), green: CGFloat(c.y), blue: CGFloat(c.z), alpha: 1)
+    }
+
+    /// sRGB components, 0…1.
+    static func rgb(_ index: Int, dark isDark: Bool) -> SIMD3<Float> {
+        // Grey recedes, so the colours carry the map.
+        if index >= named { return SIMD3(repeating: isDark ? 0.40 : 0.72) }
         let hex = (isDark ? dark : light)[index]
-        return NSColor(srgbRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
-                       blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+        return SIMD3(Float(hex >> 16 & 0xFF), Float(hex >> 8 & 0xFF), Float(hex & 0xFF)) / 255
+    }
+
+    /// Behind the map: near black in dark mode (the glow and the fine lines show on it), white
+    /// in light mode.
+    static let background = NSColor(name: "soundMapBackground") { appearance in
+        background(dark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
+    }
+
+    static func background(dark: Bool) -> NSColor {
+        dark ? NSColor(srgbRed: 0.043, green: 0.051, blue: 0.063, alpha: 1) : NSColor(white: 1, alpha: 1)
     }
 }
 
@@ -260,7 +279,7 @@ struct SoundMapPane: View {
             if let layout = state.layout {
                 let style = MapStyle(layout: layout, model: model, highlight: state.highlight)
                 SoundMapRepresentable(
-                    points: layout.points, colors: style.colors, dimmed: style.dimmed,
+                    points: layout.points, links: layout.links, colors: style.colors, dimmed: style.dimmed,
                     selected: Set(browser.selection.compactMap { $0.flatMap { layout.row[$0] } }),
                     playing: model.playingSound?.id.flatMap { layout.row[$0] }, fitRequest: state.fitRequest,
                     name: { [model] i in Self.label(model, layout.ids[i]) },
@@ -290,7 +309,7 @@ struct SoundMapPane: View {
                                                          : "These sounds haven't been analysed yet. The map shows sounds once they have their embeddings."))
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color(nsColor: MapPalette.background))
         .shown(!model.sectionFaded)
         .task(id: MapKey(scope: browser.scope, version: model.version)) {
             state.update(scoped: await browser.scopedSounds(from: model), database: model.database)
@@ -410,8 +429,98 @@ struct SoundViewBar: View {
 
 // MARK: drawing
 
+/// The categories' colours as a soft field behind the dots: each lit dot spreads its colour
+/// around it (a Gaussian, a little over 1% of the map), and where groups meet their colours
+/// blend. One image for the whole map plus a margin (−`margin`…1 + `margin` both ways, in map
+/// space, so the glow fades out past the outermost dots instead of being cut off), and each
+/// lit dot's colour leaning towards the field's there, so the dots shade into each other too.
+enum MapGlow {
+    static let margin: Float = 0.06
+
+    struct Result {
+        var image: CGImage?
+        /// sRGB, per dot (dimmed ones keep their category's colour).
+        var dotColors: [SIMD3<Float>]
+    }
+
+    static func make(points: [SIMD2<Float>], colors: [UInt8], dimmed: [Bool], dark: Bool, size: Int = 512) -> Result {
+        let n = min(points.count, colors.count, dimmed.count), cells = size * size
+        var r = [Float](repeating: 0, count: cells), g = r, b = r, w = r
+        let palette = (0 ... MapPalette.none).map { MapPalette.rgb($0, dark: dark) }
+        let last = Float(size - 1)
+        func cell(_ p: SIMD2<Float>) -> SIMD2<Float> {
+            ((p + margin) / (1 + 2 * margin) * last).clamped(lowerBound: SIMD2(repeating: 0), upperBound: SIMD2(repeating: last))
+        }
+        for i in 0 ..< n where !dimmed[i] {
+            // Grey (other or no category) glows less: the colours are what the glow is for.
+            let c = palette[Int(colors[i])], weight: Float = colors[i] >= MapPalette.named ? 0.35 : 1
+            let xy = cell(points[i]), x = xy.x, y = xy.y
+            let x0 = min(size - 2, Int(x)), y0 = min(size - 2, Int(y))
+            let fx = x - Float(x0), fy = y - Float(y0)
+            for (dx, dy, f) in [(0, 0, (1 - fx) * (1 - fy)), (1, 0, fx * (1 - fy)), (0, 1, (1 - fx) * fy), (1, 1, fx * fy)] {
+                let k = (y0 + dy) * size + x0 + dx, wt = f * weight
+                r[k] += c.x * wt; g[k] += c.y * wt; b[k] += c.z * wt; w[k] += wt
+            }
+        }
+        // A Gaussian, sigma 1.2% of the map.
+        let sigma = Float(size) * 0.012, half = Int((3 * sigma).rounded(.up))
+        var kernel = (-half ... half).map { exp(-Float($0 * $0) / (2 * sigma * sigma)) }
+        let total = kernel.reduce(0, +)
+        kernel = kernel.map { $0 / total }
+        blur(&r, size: size, kernel: kernel)
+        blur(&g, size: size, kernel: kernel)
+        blur(&b, size: size, kernel: kernel)
+        blur(&w, size: size, kernel: kernel)
+        // Each lit dot: 30% of the colour around it (grey ones 50%, so they take on their
+        // neighbourhood's).
+        var dotColors = (0 ..< n).map { palette[Int(colors[$0])] }
+        for i in 0 ..< n where !dimmed[i] {
+            let xy = cell(points[i]), k = Int(xy.y.rounded()) * size + Int(xy.x.rounded())
+            guard w[k] > 1e-6 else { continue }
+            let around = SIMD3(r[k], g[k], b[k]) / w[k], share: Float = colors[i] >= MapPalette.named ? 0.5 : 0.3
+            dotColors[i] = dotColors[i] * (1 - share) + around * share
+        }
+        // How thick the glow gets: dense places (the 98th percentile of the field) are full.
+        let sorted = w.filter { $0 > 1e-6 }.sorted()
+        guard let top = sorted.isEmpty ? nil : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.98))], top > 0
+        else { return Result(image: nil, dotColors: dotColors) }
+        let strongest: Float = dark ? 0.42 : 0.30
+        var pixels = [UInt8](repeating: 0, count: cells * 4)
+        for k in 0 ..< cells where w[k] > 1e-6 {
+            let alpha = pow(min(1, w[k] / top), 0.65) * strongest
+            let c = SIMD3(r[k], g[k], b[k]) / w[k]
+            // Premultiplied.
+            pixels[k * 4] = UInt8(min(255, c.x * alpha * 255))
+            pixels[k * 4 + 1] = UInt8(min(255, c.y * alpha * 255))
+            pixels[k * 4 + 2] = UInt8(min(255, c.z * alpha * 255))
+            pixels[k * 4 + 3] = UInt8(min(255, alpha * 255))
+        }
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let provider = CGDataProvider(data: Data(pixels) as CFData) else { return Result(image: nil, dotColors: dotColors) }
+        let image = CGImage(width: size, height: size, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: size * 4, space: space,
+                            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        return Result(image: image, dotColors: dotColors)
+    }
+
+    /// The same kernel along rows, then columns (vImage), zeros beyond the edges.
+    private static func blur(_ plane: inout [Float], size: Int, kernel: [Float]) {
+        var out = [Float](repeating: 0, count: plane.count)
+        plane.withUnsafeMutableBytes { src in
+            out.withUnsafeMutableBytes { dst in
+                var s = vImage_Buffer(data: src.baseAddress, height: vImagePixelCount(size), width: vImagePixelCount(size), rowBytes: size * 4)
+                var d = vImage_Buffer(data: dst.baseAddress, height: vImagePixelCount(size), width: vImagePixelCount(size), rowBytes: size * 4)
+                _ = vImageSepConvolve_PlanarF(&s, &d, nil, 0, 0, kernel, UInt32(kernel.count), kernel, UInt32(kernel.count),
+                                              0, 0, vImage_Flags(kvImageBackgroundColorFill))
+            }
+        }
+        plane = out
+    }
+}
+
 struct SoundMapRepresentable: NSViewRepresentable {
     var points: [SIMD2<Float>]
+    var links: [SIMD2<Int32>]
     var colors: [UInt8]
     var dimmed: [Bool]
     var selected: Set<Int>
@@ -435,16 +544,18 @@ struct SoundMapRepresentable: NSViewRepresentable {
 
     private func update(_ v: SoundMapCanvas) {
         v.callbacks = .init(name: name, onSelect: onSelect, onOpen: onOpen, onHover: onHover, onPrimary: onPrimary, onSkip: onSkip)
-        v.set(points: points, colors: colors, dimmed: dimmed)
+        v.set(points: points, links: links, colors: colors, dimmed: dimmed)
         if v.selected != selected { v.selected = selected }
         if v.playing != playing { v.playing = playing }
         if v.fitRequest != fitRequest { v.fitRequest = fitRequest }
     }
 }
 
-/// Draws every dot (Core Graphics, grouped by colour), finds the one under the pointer through
-/// a grid, and handles zoom (pinch, scroll wheel, ⌘-scroll), pan (two fingers, ⌥-drag),
-/// click, ⌘-click, drag to select a region, Space and the arrow keys.
+/// Draws the map (Core Graphics): a fine grid fixed to the map, the categories' colours as a
+/// soft glow blending into each other (`MapGlow`, made once per layout, search or highlight and
+/// stretched with zoom), hairlines from each sound to its nearest, then small dots. Finds the
+/// dot under the pointer through a grid, and handles zoom (pinch, scroll wheel, ⌘-scroll), pan
+/// (two fingers, ⌥-drag), click, ⌘-click, drag to select a region, Space and the arrow keys.
 final class SoundMapCanvas: NSView {
     struct Callbacks {
         var name: (Int) -> String = { _ in "" }
@@ -457,44 +568,95 @@ final class SoundMapCanvas: NSView {
     var callbacks = Callbacks()
 
     private(set) var points: [SIMD2<Float>] = []
+    private var links: [SIMD2<Int32>] = []
     private var colors: [UInt8] = []
     private var dimmed: [Bool] = []
     /// Indices by colour (dimmed ones in their own groups, drawn first).
     private var groups: [[Int]] = []
-    var selected: Set<Int> = [] { didSet { needsDisplay = true } }
-    var playing: Int? { didSet { needsDisplay = true } }
-    var fitRequest = -1 { didSet { scale = 1; center = CGPoint(x: 0.5, y: 0.5); needsDisplay = true } }
+    /// The links to draw (both ends lit, not across the map) by their two colours (`linkKey`).
+    private var linkGroups: [[SIMD2<Int32>]] = []
+    /// Made when first drawn after a change, for the appearance it was made in: the glow and
+    /// the lit dots grouped by their shaded colour (`MapGlow`), grey ones first.
+    private var glow: (image: CGImage?, dots: [(color: CGColor, hollow: Bool, members: [Int])], dark: Bool)?
+    var selected: Set<Int> = [] { didSet { overlay.needsDisplay = true } }
+    var playing: Int? { didSet { overlay.needsDisplay = true } }
+    var fitRequest = -1 { didSet { scale = 1; center = CGPoint(x: 0.5, y: 0.5); redraw() } }
 
     private var scale: CGFloat = 1
     private var center = CGPoint(x: 0.5, y: 0.5)
     private var hovered: Int?
-    private var marquee: (start: CGPoint, end: CGPoint, extend: Bool)?
+    private var marquee: (start: CGPoint, end: CGPoint, extend: Bool)? { didSet { overlay.needsDisplay = true } }
+    /// Where the button went down on a dot: dragging from there still selects an area (dots
+    /// are packed so close that most drags start on one).
+    private var pressedOnDot: (point: CGPoint, extend: Bool)?
+    private let overlay = SoundMapOverlay()
     private var panning: CGPoint?
     private static let gridSize = 96
     private var grid: [[Int]] = []
+    /// Links longer than this (in map units, the map being 1 across) join sounds the layout put
+    /// apart: drawn, they'd cross the map.
+    private static let longestLink: Float = 0.035
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     /// A click on a dot selects it even while the window is in the background, as in the list.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    func set(points: [SIMD2<Float>], colors: [UInt8], dimmed: [Bool]) {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        // Since macOS 14 views draw outside their bounds unless told not to: the glow, stretched
+        // as you zoom, covered the sidebar and the detail pane.
+        clipsToBounds = true
+        overlay.clipsToBounds = true
+        overlay.canvas = self
+        addSubview(overlay)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        overlay.frame = bounds
+    }
+
+    /// The map and what's on top of it (after zooming, panning or new dots).
+    private func redraw() {
+        needsDisplay = true
+        overlay.needsDisplay = true
+    }
+
+    func set(points: [SIMD2<Float>], links: [SIMD2<Int32>], colors: [UInt8], dimmed: [Bool]) {
         let newPoints = points != self.points
         guard newPoints || colors != self.colors || dimmed != self.dimmed else { return }
         self.points = points
+        self.links = links
         self.colors = colors
         self.dimmed = dimmed
+        let n = min(points.count, colors.count, dimmed.count)
         groups = Array(repeating: [], count: (MapPalette.none + 1) * 2)
-        for i in points.indices where i < colors.count && i < dimmed.count {
+        for i in 0 ..< n {
             groups[Int(colors[i]) + (dimmed[i] ? 0 : MapPalette.none + 1)].append(i)
         }
+        linkGroups = Array(repeating: [], count: (MapPalette.none + 1) * (MapPalette.none + 1))
+        for link in links {
+            let i = Int(link.x), j = Int(link.y)
+            guard i < n, j < n, !dimmed[i], !dimmed[j] else { continue }
+            let d = points[i] - points[j]
+            guard (d * d).sum() <= Self.longestLink * Self.longestLink else { continue }
+            linkGroups[Self.linkKey(colors[i], colors[j])].append(link)
+        }
+        glow = nil
         if newPoints {
             grid = Array(repeating: [], count: Self.gridSize * Self.gridSize)
             for (i, p) in points.enumerated() { grid[cell(p)].append(i) }
             hovered = nil
         }
         if let h = hovered, dimmed[h] { hovered = nil }
-        needsDisplay = true
+        redraw()
+    }
+
+    private static func linkKey(_ a: UInt8, _ b: UInt8) -> Int {
+        Int(min(a, b)) * (MapPalette.none + 1) + Int(max(a, b))
     }
 
     /// The keyboard comes here when the map appears, unless a field or the sidebar has it.
@@ -524,13 +686,16 @@ final class SoundMapCanvas: NSView {
         return y * g + x
     }
 
-    private var radius: CGFloat { min(7, 3 + 0.9 * log2(max(1, scale))) }
+    /// Small dots, a little bigger as you zoom in.
+    private var radius: CGFloat { min(4, 1.4 + 0.6 * log2(max(1, scale))) }
+    /// How far from a dot the pointer still picks it: more than the dot, which is small.
+    private var reach: CGFloat { max(radius + 3, 6) }
 
-    /// The dot nearest `v` within a few points. Dimmed dots are background: they can't be picked.
+    /// The dot nearest `v` within `reach`. Dimmed dots are background: they can't be picked.
     private func dot(at v: CGPoint) -> Int? {
-        let p = normalised(v), reach = (radius + 4) / unit, g = CGFloat(Self.gridSize)
-        let x0 = max(0, Int((p.x - reach) * g)), x1 = min(Self.gridSize - 1, Int((p.x + reach) * g))
-        let y0 = max(0, Int((p.y - reach) * g)), y1 = min(Self.gridSize - 1, Int((p.y + reach) * g))
+        let p = normalised(v), reach = reach, g = CGFloat(Self.gridSize), r = reach / unit
+        let x0 = max(0, Int((p.x - r) * g)), x1 = min(Self.gridSize - 1, Int((p.x + r) * g))
+        let y0 = max(0, Int((p.y - r) * g)), y1 = min(Self.gridSize - 1, Int((p.y + r) * g))
         guard x0 <= x1, y0 <= y1 else { return nil }
         var best: (Int, CGFloat)?
         for y in y0 ... y1 {
@@ -538,7 +703,7 @@ final class SoundMapCanvas: NSView {
                 for i in grid[y * Self.gridSize + x] where !dimmed[i] {
                     let q = view(points[i])
                     let d = hypot(q.x - v.x, q.y - v.y)
-                    if d <= radius + 4, best.map({ d < $0.1 }) ?? true { best = (i, d) }
+                    if d <= reach, best.map({ d < $0.1 }) ?? true { best = (i, d) }
                 }
             }
         }
@@ -549,80 +714,185 @@ final class SoundMapCanvas: NSView {
         let p = normalised(v)
         scale = min(64, max(1, scale * factor))
         center = CGPoint(x: p.x - (v.x - bounds.midX) / unit, y: p.y - (v.y - bounds.midY) / unit)
-        needsDisplay = true
+        redraw()
     }
 
     // MARK: drawing
 
-    override func viewDidChangeEffectiveAppearance() { needsDisplay = true }
+    override func viewDidChangeEffectiveAppearance() { redraw() }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.controlBackgroundColor.setFill()
+        MapPalette.background.setFill()
         dirtyRect.fill()
-        guard let ctx = NSGraphicsContext.current?.cgContext, !points.isEmpty else { return }
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        drawGrid(ctx, in: dirtyRect, dark: dark)
+        guard !points.isEmpty else { return }
         let r = radius, visible = dirtyRect.insetBy(dx: -r - 3, dy: -r - 3)
-        for (g, members) in groups.enumerated() where !members.isEmpty {
-            let isDimmed = g <= MapPalette.none, colour = g % (MapPalette.none + 1)
+
+        // The glow: made once, stretched over the map; fainter as you zoom in and it blurs.
+        if glow == nil || glow?.dark != dark {
+            let made = MapGlow.make(points: points, colors: colors, dimmed: dimmed, dark: dark)
+            glow = (made.image, Self.litGroups(made.dotColors, colors: colors, dimmed: dimmed), dark)
+        }
+        if let image = glow?.image {
+            let a = view(SIMD2(repeating: -MapGlow.margin)), b = view(SIMD2(repeating: 1 + MapGlow.margin))
+            ctx.saveGState()
+            ctx.setAlpha(1 / (1 + 0.35 * log2(scale)))
+            ctx.interpolationQuality = .high
+            // The image's first row is the map's top; the view is flipped.
+            ctx.translateBy(x: a.x, y: b.y)
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: b.x - a.x, height: b.y - a.y))
+            ctx.restoreGState()
+        }
+
+        // Hairlines to each sound's nearest, in the mix of their two colours.
+        ctx.setLineWidth(0.5)
+        ctx.setLineCap(.round)
+        let colours = (0 ... MapPalette.none).map { MapPalette.rgb($0, dark: dark) }
+        for (key, members) in linkGroups.enumerated() where !members.isEmpty {
+            var segments: [CGPoint] = []
+            segments.reserveCapacity(members.count * 2)
+            for link in members {
+                let a = view(points[Int(link.x)]), b = view(points[Int(link.y)])
+                // Shorter than the dots: hidden under them anyway.
+                guard abs(a.x - b.x) + abs(a.y - b.y) > 2 * r, visible.contains(a) || visible.contains(b) else { continue }
+                segments.append(a)
+                segments.append(b)
+            }
+            guard !segments.isEmpty else { continue }
+            let mix = (colours[key / (MapPalette.none + 1)] + colours[key % (MapPalette.none + 1)]) / 2
+            ctx.setStrokeColor(CGColor(srgbRed: CGFloat(mix.x), green: CGFloat(mix.y), blue: CGFloat(mix.z),
+                                       alpha: dark ? 0.32 : 0.38))
+            ctx.strokeLineSegments(between: segments)
+        }
+
+        // The dots: dimmed ones first, faint, in their category's colour; then the lit ones,
+        // shaded. No category: hollow.
+        func dots(_ members: [Int], _ color: CGColor, hollow: Bool) {
             let path = CGMutablePath()
             for i in members {
                 let v = view(points[i])
                 if visible.contains(v) { path.addEllipse(in: CGRect(x: v.x - r, y: v.y - r, width: 2 * r, height: 2 * r)) }
             }
-            let c = MapPalette.color(colour, dark: dark).withAlphaComponent(isDimmed ? 0.15 : 1).cgColor
             ctx.addPath(path)
-            if colour == MapPalette.none {
-                ctx.setStrokeColor(c)
-                ctx.setLineWidth(1.25)
+            if hollow {
+                ctx.setStrokeColor(color)
+                ctx.setLineWidth(0.75)
                 ctx.strokePath()
             } else {
-                ctx.setFillColor(c)
+                ctx.setFillColor(color)
                 ctx.fillPath()
             }
         }
+        for (colour, members) in groups.prefix(MapPalette.none + 1).enumerated() where !members.isEmpty {
+            dots(members, MapPalette.color(colour, dark: dark).withAlphaComponent(0.16).cgColor, hollow: colour == MapPalette.none)
+        }
+        for group in glow?.dots ?? [] { dots(group.members, group.color, hollow: group.hollow) }
+    }
+
+    /// Lit dots by their colour rounded to 5 bits a channel (a few hundred groups: one fill each),
+    /// grey categories first so the colours sit on top.
+    private static func litGroups(_ shaded: [SIMD3<Float>], colors: [UInt8], dimmed: [Bool]) -> [(color: CGColor, hollow: Bool, members: [Int])] {
+        var byKey: [Int: [Int]] = [:]
+        for i in shaded.indices where i < dimmed.count && !dimmed[i] {
+            let q = (shaded[i] * 31).rounded(.toNearestOrAwayFromZero)
+            let grey = colors[i] >= MapPalette.named ? 0 : 1, hollow = colors[i] == MapPalette.none ? 1 : 0
+            byKey[((grey * 2 + hollow) << 15) | (Int(q.x) << 10) | (Int(q.y) << 5) | Int(q.z), default: []].append(i)
+        }
+        return byKey.keys.sorted().map { key in
+            let c = SIMD3(Float(key >> 10 & 31), Float(key >> 5 & 31), Float(key & 31)) / 31
+            return (CGColor(srgbRed: CGFloat(c.x), green: CGFloat(c.y), blue: CGFloat(c.z), alpha: 1), key >> 15 & 1 == 1, byKey[key]!)
+        }
+    }
+
+    /// What changes as you point and select, drawn by `overlay` on top of the map, so those
+    /// don't redraw the ~90,000 shapes below.
+    fileprivate func drawOverlay(in ctx: CGContext, dirtyRect: CGRect) {
+        guard !points.isEmpty else { return }
+        let r = radius, visible = dirtyRect.insetBy(dx: -r - 3, dy: -r - 3)
         func ring(_ i: Int, _ color: NSColor, _ width: CGFloat, _ extra: CGFloat) {
             let v = view(points[i])
             ctx.setStrokeColor(color.cgColor)
             ctx.setLineWidth(width)
             ctx.strokeEllipse(in: CGRect(x: v.x - r - extra, y: v.y - r - extra, width: 2 * (r + extra), height: 2 * (r + extra)))
         }
-        for i in selected where i < points.count { ring(i, .labelColor, 1.5, 2.5) }
-        if let p = playing, p < points.count { ring(p, .earmarkBlue, 2.5, 4.5) }
+        // Selected: a pip in the text colour in the middle of each dot, which keeps its colour
+        // round it (hundreds of selected dots read as a fine stipple, not a patch); a ring too
+        // while there are few, so one selected sound stands out.
+        let chosen = selected.filter { $0 < points.count }
+        if !chosen.isEmpty {
+            let path = CGMutablePath(), e = max(0.8, r * 0.55)
+            for i in chosen {
+                let v = view(points[i])
+                if visible.contains(v) { path.addEllipse(in: CGRect(x: v.x - e, y: v.y - e, width: 2 * e, height: 2 * e)) }
+            }
+            ctx.addPath(path)
+            ctx.setFillColor(NSColor.labelColor.cgColor)
+            ctx.fillPath()
+            if chosen.count <= 40 { for i in chosen { ring(i, .labelColor, 1, 2.5) } }
+        }
+        if let p = playing, p < points.count { ring(p, .earmarkBlue, 1.5, 3.5) }
         if let m = marquee {
             let rect = CGRect(x: min(m.start.x, m.end.x), y: min(m.start.y, m.end.y),
                               width: abs(m.end.x - m.start.x), height: abs(m.end.y - m.start.y))
-            ctx.setFillColor(NSColor.earmarkSelectionBlue.withAlphaComponent(0.12).cgColor)
+            ctx.setFillColor(NSColor.earmarkSelectionBlue.withAlphaComponent(0.1).cgColor)
             ctx.fill(rect)
             ctx.setStrokeColor(NSColor.earmarkBlue.cgColor)
-            ctx.setLineWidth(1)
+            ctx.setLineWidth(0.75)
             ctx.stroke(rect)
         }
         if let h = hovered, h < points.count {
-            ring(h, .secondaryLabelColor, 1.5, 2.5)
+            ring(h, .labelColor, 1, 2.5)
             drawLabel(callbacks.name(h), near: view(points[h]))
         }
+    }
+
+    /// A fine grid fixed to the map, its lines 1/16 of the map apart, halving as you zoom in
+    /// (so 60–120 points apart on screen).
+    private func drawGrid(_ ctx: CGContext, in rect: CGRect, dark: Bool) {
+        let step = 1 / (16 * pow(2, floor(log2(scale))))
+        let a = normalised(rect.origin), b = normalised(CGPoint(x: rect.maxX, y: rect.maxY))
+        var segments: [CGPoint] = []
+        var x = (a.x / step).rounded(.down) * step
+        while x <= b.x {
+            let v = view(SIMD2(Float(x), 0)).x
+            segments += [CGPoint(x: v, y: rect.minY), CGPoint(x: v, y: rect.maxY)]
+            x += step
+        }
+        var y = (a.y / step).rounded(.down) * step
+        while y <= b.y {
+            let v = view(SIMD2(0, Float(y))).y
+            segments += [CGPoint(x: rect.minX, y: v), CGPoint(x: rect.maxX, y: v)]
+            y += step
+        }
+        ctx.setStrokeColor((dark ? NSColor.white : NSColor.black).withAlphaComponent(dark ? 0.045 : 0.05).cgColor)
+        ctx.setLineWidth(0.5)
+        ctx.strokeLineSegments(between: segments)
     }
 
     /// The hovered sound's name (and category) in a small box beside it.
     private func drawLabel(_ text: String, near v: CGPoint) {
         let lines = text.split(separator: "\n", maxSplits: 1).map(String.init)
         guard let first = lines.first else { return }
-        let s = NSMutableAttributedString(string: first, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium),
+        let s = NSMutableAttributedString(string: first, attributes: [.font: NSFont.systemFont(ofSize: 11.5, weight: .medium),
                                                                         .foregroundColor: NSColor.labelColor])
         if lines.count > 1 {
-            s.append(NSAttributedString(string: "\n" + lines[1], attributes: [.font: NSFont.systemFont(ofSize: 11),
+            s.append(NSAttributedString(string: "\n" + lines[1], attributes: [.font: NSFont.systemFont(ofSize: 10.5),
                                                                                 .foregroundColor: NSColor.secondaryLabelColor]))
         }
         let size = s.boundingRect(with: CGSize(width: 320, height: 100), options: [.usesLineFragmentOrigin]).size
-        var box = CGRect(x: v.x + 12, y: v.y - size.height / 2 - 6, width: ceil(size.width) + 16, height: ceil(size.height) + 12)
-        if box.maxX > bounds.maxX - 4 { box.origin.x = v.x - 12 - box.width }
+        var box = CGRect(x: v.x + 10, y: v.y - size.height / 2 - 5, width: ceil(size.width) + 14, height: ceil(size.height) + 10)
+        if box.maxX > bounds.maxX - 4 { box.origin.x = v.x - 10 - box.width }
         box.origin.y = min(max(box.minY, bounds.minY + 4), bounds.maxY - box.height - 4)
-        let shape = NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6)
-        NSColor.windowBackgroundColor.withAlphaComponent(0.95).setFill()
+        let shape = NSBezierPath(roundedRect: box, xRadius: 5, yRadius: 5)
+        NSColor.windowBackgroundColor.withAlphaComponent(0.92).setFill()
         shape.fill()
         NSColor.separatorColor.setStroke()
+        shape.lineWidth = 0.5
         shape.stroke()
-        s.draw(with: box.insetBy(dx: 8, dy: 6), options: [.usesLineFragmentOrigin])
+        s.draw(with: box.insetBy(dx: 7, dy: 5), options: [.usesLineFragmentOrigin])
     }
 
     // MARK: events
@@ -640,7 +910,7 @@ final class SoundMapCanvas: NSView {
     private func hover(_ i: Int?) {
         guard i != hovered else { return }
         hovered = i
-        needsDisplay = true
+        overlay.needsDisplay = true
         callbacks.onHover(i)
     }
 
@@ -650,7 +920,7 @@ final class SoundMapCanvas: NSView {
             // Two fingers on a trackpad: pan.
             center.x -= event.scrollingDeltaX / unit
             center.y -= event.scrollingDeltaY / unit
-            needsDisplay = true
+            redraw()
         } else {
             let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY * 0.01 : event.scrollingDeltaY * 0.1
             zoom(by: exp(delta), around: v)
@@ -671,6 +941,7 @@ final class SoundMapCanvas: NSView {
             panning = v
         } else if let i = dot(at: v) {
             if event.clickCount == 2 { callbacks.onOpen(i) } else { callbacks.onSelect([i], extend) }
+            pressedOnDot = (v, extend)
         } else {
             marquee = (v, v, extend)
         }
@@ -682,15 +953,16 @@ final class SoundMapCanvas: NSView {
             center.x -= (v.x - p.x) / unit
             center.y -= (v.y - p.y) / unit
             panning = v
-            needsDisplay = true
+            redraw()
         } else if marquee != nil {
             marquee?.end = v
-            needsDisplay = true
+        } else if let press = pressedOnDot, hypot(v.x - press.point.x, v.y - press.point.y) > 4 {
+            marquee = (press.point, v, press.extend)
         }
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer { panning = nil; marquee = nil; needsDisplay = true }
+        defer { panning = nil; marquee = nil; pressedOnDot = nil }
         guard let m = marquee else { return }
         let a = normalised(m.start), b = normalised(m.end)
         let rect = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
@@ -715,5 +987,19 @@ final class SoundMapCanvas: NSView {
         } else {
             super.keyDown(with: event)
         }
+    }
+}
+
+/// Draws the canvas's selection, what's playing, the pointer's ring and label and the
+/// selection box, on top of the map; clicks go through to the map.
+final class SoundMapOverlay: NSView {
+    weak var canvas: SoundMapCanvas?
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        canvas?.drawOverlay(in: ctx, dirtyRect: dirtyRect)
     }
 }

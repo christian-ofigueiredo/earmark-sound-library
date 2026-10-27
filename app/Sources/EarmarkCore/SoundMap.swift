@@ -49,14 +49,30 @@ public enum SoundMap {
     /// so the caller keeps them how it likes, usually in a `PageBuffer`).
     public static func layout(flat x: UnsafeBufferPointer<Float>, count n: Int, dimensions d: Int, settings: Settings = .init(),
                               progress: (Double) -> Void = { _ in }, isCancelled: () -> Bool = { false }) -> [SIMD2<Float>]? {
-        guard n > 2 else { return n == 0 ? [] : n == 1 ? [SIMD2(0.5, 0.5)] : [SIMD2(0, 0.5), SIMD2(1, 0.5)] }
+        map(flat: x, count: n, dimensions: d, settings: settings, progress: progress, isCancelled: isCancelled)?.points
+    }
+
+    /// A layout and the lines to draw on it between sounds that are alike.
+    public struct Map: Sendable {
+        public var points: [SIMD2<Float>]
+        /// Each sound with its `linksPerSound` nearest in the embedding space, every pair once
+        /// (lower index first), in order.
+        public var links: [SIMD2<Int32>]
+    }
+
+    /// `layout(flat:…)` with the links between neighbours (none under 20 sounds: no neighbour search).
+    public static func map(flat x: UnsafeBufferPointer<Float>, count n: Int, dimensions d: Int, settings: Settings = .init(),
+                           linksPerSound: Int = 3, progress: (Double) -> Void = { _ in },
+                           isCancelled: () -> Bool = { false }) -> Map? {
+        guard n > 2 else { return Map(points: n == 0 ? [] : n == 1 ? [SIMD2(0.5, 0.5)] : [SIMD2(0, 0.5), SIMD2(1, 0.5)], links: []) }
         var rng = SplitMix(seed: settings.seed)
         var start = pca(x, n: n, d: d, rng: &rng)
         // Too few points for a neighbourhood graph: PCA alone, as Phase 0.
-        guard n >= 20 else { return fit(start) }
+        guard n >= 20 else { return Map(points: fit(start), links: []) }
         let k = min(settings.neighbours, n - 1)
         guard let (indices, distances) = neighbours(x, n: n, d: d, k: k, progress: { progress($0 * 0.4) }, isCancelled: isCancelled)
         else { return nil }
+        let links = Self.links(indices: indices, n: n, k: k, each: linksPerSound)
         let graph = fuzzyGraph(indices: indices, distances: distances, n: n, k: k)
         // umap-learn: PCA scaled so its largest coordinate is 10, a little noise, then into a 0…10 box.
         let extent = max(1e-12, start.map { max(abs($0.x), abs($0.y)) }.max() ?? 1)
@@ -66,7 +82,21 @@ public enum SoundMap {
         var y = start.map { 10 * ($0 - lo) / span }
         guard optimise(&y, graph: graph, n: n, settings: settings, rng: &rng,
                        progress: { progress(0.4 + $0 * 0.6) }, isCancelled: isCancelled) else { return nil }
-        return fit(y)
+        return Map(points: fit(y), links: links)
+    }
+
+    /// Each point with its `each` nearest (from the neighbour search, itself left out), every
+    /// pair once, sorted.
+    static func links(indices: [Int], n: Int, k: Int, each: Int) -> [SIMD2<Int32>] {
+        var pairs = Set<Int64>()
+        for i in 0 ..< n {
+            for c in 0 ..< k where c <= each {
+                let j = indices[i * k + c]
+                guard j != i else { continue }
+                pairs.insert(Int64(min(i, j)) * Int64(n) + Int64(max(i, j)))
+            }
+        }
+        return pairs.sorted().map { SIMD2(Int32($0 / Int64(n)), Int32($0 % Int64(n))) }
     }
 
     /// How well a layout keeps neighbours: for each point, the share of its `k` nearest in the

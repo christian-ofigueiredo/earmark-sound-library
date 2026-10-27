@@ -36,6 +36,20 @@ import Testing
         #expect(SoundMap.neighboursKept(vectors, layout: map) > 0.4)
     }
 
+    @Test func linksJoinNeighbours() throws {
+        let (vectors, labels) = Self.clustered(clusters: 4, each: 60)
+        let flat = vectors.flatMap { $0 }
+        let map = try #require(flat.withUnsafeBufferPointer { SoundMap.map(flat: $0, count: vectors.count, dimensions: 32) })
+        #expect(map.points == SoundMap.layout(vectors))
+        // Each sound's 3 nearest, each pair once: between 3n/2 and 3n.
+        #expect(map.links.count >= vectors.count * 3 / 2 && map.links.count <= vectors.count * 3)
+        #expect(map.links.allSatisfy { $0.x < $0.y })
+        #expect(Set(map.links.map { [$0.x, $0.y] }).count == map.links.count)
+        #expect(map.links == map.links.sorted { ($0.x, $0.y) < ($1.x, $1.y) })
+        let sameCluster = map.links.filter { labels[Int($0.x)] == labels[Int($0.y)] }.count
+        #expect(Double(sameCluster) / Double(map.links.count) > 0.97)
+    }
+
     @Test func theSameSoundsGiveTheSameMap() throws {
         let (vectors, _) = Self.clustered(clusters: 3, each: 30)
         let a = try #require(SoundMap.layout(vectors)), b = try #require(SoundMap.layout(vectors))
