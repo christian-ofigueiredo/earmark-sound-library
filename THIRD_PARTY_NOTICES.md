@@ -28,6 +28,15 @@ downloaded by `setup.sh` or on first use, under its own license.
 | `BeatThis.mlpackage` (Core ML) | Beat This! `final0` (CPJKU), the network only (the spectrogram and peak picking are in the app's code), converted unchanged except that its attention and rotary position embedding are written out as the equivalent plain operations | MIT, as the original, with the same note about its training audio |
 | `SKey.mlpackage` (Core ML) | S-KEY (Deezer) at the pinned commit with its constant-Q front end (nnAudio), converted unchanged except that its layer norm and final pooling are written out as the equivalent plain operations | MIT, as the original (nnAudio: MIT) |
 
+## Data made with these models (in the repository)
+
+| File | From | License |
+|---|---|---|
+| `app/Sources/EarmarkCore/Resources/group_words.bin` | Text embeddings of 99 English words that name similarity groups ("airy", "metallic", …), made with the text towers of PE-AV large and LAION CLAP by Phase 0 (`models/export_groups.py`) | Apache-2.0, as the models |
+
+Earmark's HDBSCAN and Ward clustering (`HDBSCAN.swift`, `SoundGroups.swift`) follow
+scikit-learn's (BSD-3-Clause); no scikit-learn code is included.
+
 ## Python libraries (installed by `setup.sh`, not distributed here)
 
 Mostly permissive (BSD, MIT, Apache-2.0, ISC): PyTorch, transformers,

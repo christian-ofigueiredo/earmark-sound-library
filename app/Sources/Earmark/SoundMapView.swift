@@ -170,8 +170,10 @@ extension SoundBrowser {
     func scopedSounds(from model: AppModel) async -> [SoundRecord] {
         let scope = self.scope ?? .all, scores = similar?.scores
         let sounds = model.sounds, haystacks = model.soundIndex.haystacks, hidden = model.soundIndex.twins.hidden
+        let membership = model.groups.membership
         return await Task.detached(priority: .userInitiated) {
-            Self.filtered(sounds, haystacks: haystacks, hidden: hidden, scope: scope, terms: [], scores: scores, order: [])
+            Self.filtered(sounds, haystacks: haystacks, hidden: hidden, scope: scope, terms: [], scores: scores,
+                          membership: membership, order: [])
         }.value
     }
 }
@@ -229,16 +231,23 @@ struct MapStyle {
     /// The categories folded into "Other", by size.
     var others: [Entry]
 
-    /// Inside one category the colours are its subcategories; elsewhere categories.
+    /// What the colours stand for: categories; inside one category its subcategories; inside a
+    /// subcategory with similarity groups, the groups.
+    enum Keying { case category, subcategory, group }
+
     @MainActor init(layout: SoundMapState.Layout, model: AppModel, highlight: String?) {
-        let bySub: Bool
-        switch model.soundBrowser.scope ?? .all {
-        case .category, .catID: bySub = true
-        default: bySub = false
+        let keying: Keying = switch model.soundBrowser.scope ?? .all {
+        case .catID(let c): model.groups(catID: c).isEmpty ? .subcategory : .group
+        case .category, .group: .subcategory
+        default: .category
         }
         let keys: [String?] = layout.ids.map { id in
             guard let s = model.sound(id: id), let category = s.category else { return nil }
-            return bySub ? (s.subcategory ?? category) : category
+            switch keying {
+            case .category: return category
+            case .subcategory: return s.subcategory ?? category
+            case .group: return model.group(of: s)?.title
+            }
         }
         var counts: [String: Int] = [:]
         for case let k? in keys { counts[k, default: 0] += 1 }
@@ -249,15 +258,21 @@ struct MapStyle {
         let visible = Set(model.soundBrowser.visible.compactMap(\.id))
         dimmed = zip(layout.ids, keys).map { id, k in !visible.contains(id) || (highlight != nil && k != highlight) }
         legend = ranked.prefix(MapPalette.named).enumerated().map { i, e in
-            Entry(key: e.key, title: e.key.capitalized, count: e.value, colorIndex: i)
+            Entry(key: e.key, title: keying == .group ? e.key : e.key.capitalized, count: e.value, colorIndex: i)
         }
-        others = ranked.dropFirst(MapPalette.named).map { Entry(key: $0.key, title: $0.key.capitalized, count: $0.value, colorIndex: MapPalette.other) }
+        others = ranked.dropFirst(MapPalette.named).map {
+            Entry(key: $0.key, title: keying == .group ? $0.key : $0.key.capitalized, count: $0.value, colorIndex: MapPalette.other)
+        }
         if !others.isEmpty {
-            legend.append(Entry(key: nil, title: "\(others.count) other \(bySub ? "subcategories" : "categories")",
+            let kind = switch keying { case .category: "categories"; case .subcategory: "subcategories"; case .group: "groups" }
+            legend.append(Entry(key: nil, title: "\(others.count) other \(kind)",
                                 count: others.reduce(0) { $0 + $1.count }, colorIndex: MapPalette.other))
         }
         let none = keys.filter { $0 == nil }.count
-        if none > 0 { legend.append(Entry(key: nil, title: "No category", count: none, colorIndex: MapPalette.none)) }
+        if none > 0 {
+            legend.append(Entry(key: nil, title: keying == .group ? "Not grouped yet" : "No category", count: none,
+                                colorIndex: MapPalette.none))
+        }
     }
 }
 
@@ -311,12 +326,14 @@ struct SoundMapPane: View {
         }
         .background(Color(nsColor: MapPalette.background))
         .shown(!model.sectionFaded)
-        .task(id: MapKey(scope: browser.scope, version: model.version)) {
+        .task(id: MapKey(scope: browser.scope, version: model.version, groups: showsGroup ? model.groupsVersion : 0)) {
             state.update(scoped: await browser.scopedSounds(from: model), database: model.database)
         }
     }
 
-    private struct MapKey: Hashable { var scope: SoundScope?; var version: Int }
+    private var showsGroup: Bool { if case .group = model.soundBrowser.scope { true } else { false } }
+
+    private struct MapKey: Hashable { var scope: SoundScope?; var version: Int; var groups: Int }
 
     /// Hovering plays the dot under the pointer (Play on Hover), after a moment, so sweeping
     /// across dots doesn't start each one.
@@ -332,7 +349,9 @@ struct SoundMapPane: View {
 
     static func label(_ model: AppModel, _ id: Int64) -> String {
         guard let s = model.sound(id: id) else { return "" }
-        return s.categoryText.isEmpty ? s.displayName : "\(s.displayName)\n\(s.categoryText)"
+        guard !s.categoryText.isEmpty else { return s.displayName }
+        let group = model.groups(catID: s.catID).isEmpty ? nil : model.group(of: s)?.title
+        return "\(s.displayName)\n\(s.categoryText)" + (group.map { " · \($0)" } ?? "")
     }
 }
 
@@ -767,20 +786,23 @@ final class SoundMapCanvas: NSView {
         ctx.setLineCap(.round)
         let colours = (0 ... MapPalette.none).map { MapPalette.rgb($0, dark: dark) }
         for (key, members) in linkGroups.enumerated() where !members.isEmpty {
-            var segments: [CGPoint] = []
-            segments.reserveCapacity(members.count * 2)
+            // A path per colour. Not strokeLineSegments: macOS 27's batched line drawing failed
+            // an assertion (cg-draw-lines.cpp, "color_element_itr") with the colours of a
+            // subcategory's groups, and the app crashed (2026-10-27).
+            let path = CGMutablePath()
             for link in members {
                 let a = view(points[Int(link.x)]), b = view(points[Int(link.y)])
                 // Shorter than the dots: hidden under them anyway.
                 guard abs(a.x - b.x) + abs(a.y - b.y) > 2 * r, visible.contains(a) || visible.contains(b) else { continue }
-                segments.append(a)
-                segments.append(b)
+                path.move(to: a)
+                path.addLine(to: b)
             }
-            guard !segments.isEmpty else { continue }
+            guard !path.isEmpty else { continue }
             let mix = (colours[key / (MapPalette.none + 1)] + colours[key % (MapPalette.none + 1)]) / 2
             ctx.setStrokeColor(CGColor(srgbRed: CGFloat(mix.x), green: CGFloat(mix.y), blue: CGFloat(mix.z),
                                        alpha: dark ? 0.32 : 0.38))
-            ctx.strokeLineSegments(between: segments)
+            ctx.addPath(path)
+            ctx.strokePath()
         }
 
         // The dots: dimmed ones first, faint, in their category's colour; then the lit ones,

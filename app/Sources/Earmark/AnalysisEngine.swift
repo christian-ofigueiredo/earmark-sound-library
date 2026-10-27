@@ -94,6 +94,9 @@ final class AnalysisEngine {
     private var loop: Task<Void, Never>?
     /// Keeps App Nap from throttling analysis while it runs (idle sleep is still allowed).
     private var activity: NSObjectProtocol?
+    /// Embeddings that came in since the groups were last brought up to date, and when that was.
+    private var embeddedSinceGrouping = 0
+    private var groupedAt = Date()
 
     init() {
         let saved = AnalysisGovernor.Mode(rawValue: UserDefaults.standard.string(forKey: "analysisMode") ?? "")
@@ -127,6 +130,9 @@ final class AnalysisEngine {
         peavStatus = (try? db.embeddingStatus(model: PeavEmbedder.modelName)) ?? peavStatus
         rebuildQueue()
     }
+
+    /// A line in Logs/errors.log (the grouping's too).
+    func note(_ message: String) { log.error(message) }
 
     /// Call after the library changes (scan, library added or removed).
     func libraryChanged() {
@@ -316,6 +322,12 @@ final class AnalysisEngine {
 
     private func tick() {
         if [peavRetryAt, musicRetryAt].contains(where: { $0.map { Date() >= $0 } ?? false }) { rebuildQueue() }
+        // Newly analysed sounds join the similarity groups every few minutes (once saved).
+        if embeddedSinceGrouping > 0, Date().timeIntervalSince(groupedAt) > 180, let model {
+            embeddedSinceGrouping = 0
+            groupedAt = Date()
+            model.groupBuilder.update(model: model)
+        }
         // A PE-AV batch running since the last tick means Earmark itself used the GPU.
         let signals = monitor.sample(ownGPUWork: peavBatch != nil || peavRanSinceTick)
         peavRanSinceTick = peavBatch != nil
@@ -485,6 +497,7 @@ final class AnalysisEngine {
             if e.error != nil, let s = model?.sound(id: e.soundId), !(model?.isOnline(libraryId: s.libraryId) ?? false) { continue }
             peavStatus[e.soundId] = .init(fingerprint: e.fingerprint, version: e.version)
             unsavedEmbeddings.append(e)
+            embeddedSinceGrouping += 1
         }
     }
 
@@ -538,6 +551,7 @@ final class AnalysisEngine {
         if let e = result.embedding {
             clapStatus[result.soundId] = .init(fingerprint: e.fingerprint, version: e.version)
             unsavedEmbeddings.append(e)
+            embeddedSinceGrouping += 1
         }
     }
 

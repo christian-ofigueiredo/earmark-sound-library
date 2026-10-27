@@ -35,6 +35,7 @@ struct LibrarySnapshot: Sendable {
     var songCorrections: [String: SongCorrection]
     var folderRules: [FolderRule]
     var folderGuesses: [FolderGuess]
+    var groups: SoundGroupSnapshot
 
     init(_ db: LibraryDatabase) throws {
         libraries = try db.libraries()
@@ -48,6 +49,7 @@ struct LibrarySnapshot: Sendable {
         songCorrections = Dictionary(try db.songCorrections().map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
         songs = SongCorrections.apply(songCorrections, to: try db.songs())
         songIndex = SongIndex(songs)
+        groups = try db.soundGroupSnapshot()
     }
 }
 
@@ -62,6 +64,7 @@ final class AppModel {
     let musicBrowser = MusicBrowser()
     let folderMapper = FolderMapper()
     let folderGuesser = FolderGuesser()
+    let groupBuilder = GroupBuilder()
     let analysis = AnalysisEngine()
 
     /// The library has been read once since launch (the sidebars are built then).
@@ -96,6 +99,16 @@ final class AppModel {
     /// Earmark guessing categories for folders (status bar).
     var guessProgress: (done: Int, total: Int)?
     @ObservationIgnored private var guessing = false
+    /// Similarity groups inside each subcategory (`GroupBuilder`).
+    private(set) var groups = SoundGroupSnapshot()
+    /// Bumped whenever the groups change, so lists and the sidebar refresh.
+    private(set) var groupsVersion = 0
+    /// Earmark making similarity groups (status bar).
+    var groupProgress: (done: Int, total: Int)?
+    /// The rename or new-group sheet, while it's open.
+    var groupNaming: GroupNaming?
+    /// The sidebar's categories → subcategories → groups (more than one), with counts.
+    private(set) var categoryTree: [SidebarNode] = []
     /// Bumped on every reload so the browsers refresh their lists.
     private(set) var version = 0
     /// Bumped whenever the songs change (a reload, or Earmark's own tempo and key coming in).
@@ -129,6 +142,7 @@ final class AppModel {
             // After the analysis has read which sounds it has done (the guesses note it).
             guessing = true
             folderGuesser.update(model: self)
+            groupBuilder.update(model: self)
         }
     }
 
@@ -179,10 +193,16 @@ final class AppModel {
             songCorrections = snap.songCorrections
             folderRules = snap.folderRules
             folderGuesses = snap.folderGuesses
+            groups = snap.groups
+            rebuildCategoryTree()
             version += 1
             songsVersion += 1
+            groupsVersion += 1
             analysis.libraryChanged()
-            if guessing { folderGuesser.update(model: self) }
+            if guessing {
+                folderGuesser.update(model: self)
+                groupBuilder.update(model: self)
+            }
         } catch {
             show(error, title: "Couldn't read Earmark's database")
         }
@@ -527,6 +547,123 @@ final class AppModel {
                                                scores: Dictionary(uniqueKeysWithValues: matches.map { ($0.id, $0.score) })))
             } catch {
                 show(error, title: "Couldn't find similar sounds")
+            }
+        }
+    }
+
+    // MARK: similarity groups
+
+    /// Reads the groups again (after `GroupBuilder` or the owner's changes).
+    func reloadGroups() async {
+        guard let db = database else { return }
+        if let snap = try? await Task.detached(priority: .userInitiated, operation: { try db.soundGroupSnapshot() }).value {
+            groups = snap
+            rebuildCategoryTree()
+            groupsVersion += 1
+            // A group shown in the list that's gone (merged, emptied): its subcategory instead.
+            if case .group(let g) = soundBrowser.scope, groups.byId[g] == nil {
+                soundBrowser.scope = soundBrowser.lastSubcategory.map { .catID($0) } ?? .all
+            }
+        }
+    }
+
+    /// Counts each group's sounds in the list and hangs the groups under their subcategory.
+    private func rebuildCategoryTree() {
+        let hidden = soundIndex.twins.hidden
+        var counts: [Int64: Int] = [:]
+        for s in sounds {
+            guard let id = s.id, !hidden.contains(id), let g = groups.membership[id],
+                  groups.memberFingerprints[id] == .some(s.fingerprint) else { continue }
+            counts[g, default: 0] += 1
+        }
+        categoryTree = soundIndex.categories.map { category in
+            var c = category
+            c.children = category.children?.map { sub in
+                guard case .catID(let catID) = sub.id else { return sub }
+                let groups = self.groups(catID: catID).filter { (counts[$0.id ?? -1] ?? 0) > 0 }
+                guard groups.count > 1 else { return sub }
+                var s = sub
+                s.children = groups.map { SidebarNode(id: .group($0.id!), title: $0.title, count: counts[$0.id!] ?? 0) }
+                return s
+            }
+            return c
+        }
+    }
+
+    /// The group a sound is in, if it has one and its file hasn't changed since.
+    func group(of sound: SoundRecord) -> SoundGroupRecord? {
+        guard let id = sound.id, let g = groups.membership[id], groups.memberFingerprints[id] == .some(sound.fingerprint) else { return nil }
+        return groups.byId[g]
+    }
+
+    /// A subcategory's groups, when it has more than one.
+    func groups(catID: String?) -> [SoundGroupRecord] {
+        guard let catID, let list = groups.groups[catID], list.count > 1 else { return [] }
+        return list
+    }
+
+    /// Runs one of the owner's changes to the groups, then shows the result.
+    private func changeGroups(_ title: String, _ change: @escaping @Sendable (LibraryDatabase) throws -> Void) {
+        guard let db = database else { return }
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) { try change(db) }.value
+            } catch {
+                show(error, title: title)
+            }
+            await reloadGroups()
+        }
+    }
+
+    func renameGroup(_ group: SoundGroupRecord, to name: String?) {
+        guard let id = group.id else { return }
+        changeGroups("Couldn't rename the group") { try $0.renameGroup(id, to: name) }
+    }
+
+    /// Moves sounds into a group of their subcategory (the others are left where they are).
+    func move(_ ids: [Int64], to group: SoundGroupRecord) {
+        guard let target = group.id else { return }
+        let picked = ids.compactMap { sound(id: $0) }.filter { $0.catID == group.catID }.map { (id: $0.id!, fingerprint: $0.fingerprint) }
+        guard !picked.isEmpty else { return }
+        changeGroups("Couldn't move the sounds") { try $0.moveSounds(picked, toGroup: target) }
+    }
+
+    /// A new group of these sounds (all of one subcategory), then shows it.
+    func newGroup(from ids: [Int64], name: String) {
+        let picked = ids.compactMap { sound(id: $0) }
+        guard let catID = picked.first?.catID, picked.allSatisfy({ $0.catID == catID }), let db = database else { return }
+        let members = picked.map { (id: $0.id!, fingerprint: $0.fingerprint) }
+        Task {
+            do {
+                let id = try await Task.detached(priority: .userInitiated) { try db.newGroup(catID: catID, name: name, sounds: members) }.value
+                await reloadGroups()
+                soundBrowser.scope = .group(id)
+            } catch {
+                show(error, title: "Couldn't make the group")
+            }
+        }
+    }
+
+    func merge(_ groups: [SoundGroupRecord], into target: SoundGroupRecord) {
+        guard let t = target.id else { return }
+        let ids = groups.compactMap(\.id).filter { $0 != t }
+        if case .group(let shown) = soundBrowser.scope, ids.contains(shown) { soundBrowser.scope = .group(t) }
+        changeGroups("Couldn't merge the groups") { try $0.mergeGroups(ids, into: t) }
+    }
+
+    /// Forgets a subcategory's groups and the owner's changes to them; Earmark groups it afresh.
+    func confirmRegroup(catID: String, title: String) {
+        alert = AppAlert(
+            title: "Regroup “\(title)”?",
+            message: "Earmark makes this subcategory's groups again from the sounds. Names you gave and sounds you moved are forgotten.",
+            actionTitle: "Regroup", isDestructive: true
+        ) { [weak self] in
+            guard let self, let db = self.database else { return }
+            if case .group(let g) = self.soundBrowser.scope, self.groups.byId[g]?.catID == catID { self.soundBrowser.scope = .catID(catID) }
+            Task {
+                try? await Task.detached(priority: .userInitiated) { try db.regroup(catID: catID) }.value
+                await self.reloadGroups()
+                self.groupBuilder.update(model: self)
             }
         }
     }

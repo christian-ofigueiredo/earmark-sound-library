@@ -32,6 +32,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $model.showWelcome) { WelcomeView().environment(model) }
         .sheet(item: $model.exportRequest) { ExportAnalysisSheet(request: $0).environment(model) }
+        .sheet(item: $model.groupNaming) { GroupNameSheet(naming: $0).environment(model) }
         .alert(model.alert?.title ?? "", isPresented: alertShown, presenting: model.alert) { alert in
             if let actionTitle = alert.actionTitle {
                 Button(actionTitle, role: alert.isDestructive ? ButtonRole.destructive : nil) { alert.action?() }
@@ -115,7 +116,7 @@ struct LibraryView: View {
                 DispatchQueue.main.async { SectionViews.sync(showing: model.section, faded: false, animated: false) }
             }
         }
-        .task(id: sounds.filterKey(version: model.version)) { await sounds.refresh(from: model) }
+        .task(id: sounds.filterKey(version: model.version, groups: model.groupsVersion)) { await sounds.refresh(from: model) }
         .task(id: songs.filterKey(version: model.songsVersion)) { songs.refresh(from: model) }
         .onChange(of: sounds.selection) { _, ids in
             guard autoplaySounds, !music, ids.count == 1, let s = model.sound(id: ids.first ?? nil),
@@ -376,6 +377,9 @@ struct StatusBar: View {
             } else if let guess = model.guessProgress {
                 ProgressView(value: Double(guess.done), total: Double(max(1, guess.total))).frame(width: 120)
                 Text("Guessing categories for folders: \(guess.done) of \(guess.total)").lineLimit(1)
+            } else if let grouping = model.groupProgress {
+                ProgressView(value: Double(grouping.done), total: Double(max(1, grouping.total))).frame(width: 120)
+                Text("Grouping similar sounds: \(grouping.done) of \(grouping.total) subcategories").lineLimit(1)
             } else {
                 Text(summary).foregroundStyle(.secondary)
             }

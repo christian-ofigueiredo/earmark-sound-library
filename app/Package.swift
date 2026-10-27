@@ -8,7 +8,7 @@ var targets: [Target] = [
     .target(
         name: "EarmarkCore",
         dependencies: [.product(name: "GRDB", package: "GRDB.swift")],
-        resources: [.copy("Resources/ucs_v8.2.1.csv")]
+        resources: [.copy("Resources/ucs_v8.2.1.csv"), .copy("Resources/group_words.bin")]
     ),
     .testTarget(name: "EarmarkCoreTests", dependencies: ["EarmarkCore"], resources: [.copy("Fixtures")]),
 ]

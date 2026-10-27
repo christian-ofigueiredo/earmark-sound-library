@@ -294,6 +294,33 @@ public final class LibraryDatabase: Sendable {
                 t.column("correctedAt", .datetime).notNull()
             }
         }
+        // Similarity groups inside each subcategory (SoundGroups, SoundGroupStore). Members are
+        // keyed by sound id with no foreign key to sound, like the analysis tables.
+        m.registerMigration("v8-sound-groups") { db in
+            try db.create(table: "soundGroupSet") { t in
+                t.primaryKey("catID", .text)
+                t.column("version", .integer).notNull()
+                t.column("grouped", .integer).notNull()
+                t.column("changed", .integer).notNull()
+                t.column("edited", .boolean).notNull()
+                t.column("groupedAt", .datetime).notNull()
+            }
+            try db.create(table: "soundGroup") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("catID", .text).notNull().indexed()
+                t.column("name", .text).notNull()
+                t.column("userName", .text)
+                t.column("aiWords", .text).notNull()
+                t.column("shapeWords", .text).notNull()
+                t.column("keywords", .text).notNull()
+                t.column("position", .integer).notNull()
+            }
+            try db.create(table: "soundGroupMember") { t in
+                t.primaryKey("soundId", .integer)
+                t.column("fingerprint", .text)
+                t.belongsTo("soundGroup", onDelete: .cascade).notNull()
+            }
+        }
         return m
     }
 
@@ -446,14 +473,17 @@ public final class LibraryDatabase: Sendable {
     /// The same for sounds that have a vector from every one of `models`, in sound id order, one
     /// sound at a time (`body` gets them in `models`' order), so a caller can keep them its own
     /// way without them all in memory twice. `count` first gets how many sounds there will be.
-    public func forEachVectors(models: [String], count: (Int) -> Void = { _ in },
+    /// `ids`: only these sounds.
+    public func forEachVectors(models: [String], ids: [Int64]? = nil, count: (Int) -> Void = { _ in },
                                _ body: (_ id: Int64, _ vectors: [[Float]]) -> Void) throws {
-        let joins = models.indices.map { i in
+        var joins = models.indices.map { i in
             """
             JOIN soundEmbedding e\(i) ON e\(i).soundId = s.id AND e\(i).model = ? AND e\(i).vector IS NOT NULL
                 AND e\(i).version >= ? AND e\(i).fingerprint IS s.fingerprint
             """
         }
+        // Only these sounds (ids are integers, so written in).
+        if let ids { joins.append("AND s.id IN (\(ids.map(String.init).joined(separator: ",")))") }
         let columns = models.indices.map { "e\($0).vector" }.joined(separator: ", ")
         var values: [any DatabaseValueConvertible] = []
         for model in models { values += [model, SoundEmbedding.versions[model] ?? 1] }

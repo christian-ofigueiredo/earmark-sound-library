@@ -197,6 +197,47 @@ if args.count >= 4, args[1] == "map" {
     exit(0)
 }
 
+// Similarity groups on real sounds, for models/parity_groups.py to compare with Phase 0's:
+//   earmark-parity groups <copy of library.sqlite> <out.json> [CatID,CatID,…]
+// Every subcategory (or those given) as the app groups it: effective categories, format twins left out.
+if args.count >= 4, args[1] == "groups" {
+    let db = try LibraryDatabase(path: args[2])
+    let wanted = args.count > 4 ? Set(args[4].split(separator: ",").map(String.init)) : nil
+    let peav = Dictionary(uniqueKeysWithValues: try db.vectors(model: "pe-av-large").map { ($0.id, $0.vector) })
+    let clap = Dictionary(uniqueKeysWithValues: try db.vectors(model: "clap-general").map { ($0.id, $0.vector) })
+    let all = FolderRules.apply(try db.folderRules(), guesses: try db.folderGuesses(), to: try db.sounds())
+    let hidden = FormatTwins.group(all).hidden
+    var buckets: [String: [SoundRecord]] = [:]
+    for s in all {
+        guard let id = s.id, let catID = s.catID, !hidden.contains(id), peav[id] != nil, clap[id] != nil,
+              wanted?.contains(catID) ?? true else { continue }
+        buckets[catID, default: []].append(s)
+    }
+    var mean = [Float](repeating: 0, count: 1536), counted = 0
+    for (id, v) in peav { if let c = clap[id] { for (k, x) in SoundMap.combine([v, c]).enumerated() { mean[k] += x }; counted += 1 } }
+    mean = mean.map { $0 / Float(max(1, counted)) }
+    struct Bucket: Encodable { var catID: String; var ids: [Int64]; var labels: [Int]; var names: [SoundGroups.Name]; var seconds: Double }
+    var out: [Bucket] = []
+    let start = Date()
+    for (catID, sounds) in buckets.sorted(by: { $0.value.count > $1.value.count }) {
+        let ordered = sounds.sorted { $0.id! < $1.id! }
+        let x = ordered.flatMap { SoundMap.combine([peav[$0.id!]!, clap[$0.id!]!]) }
+        let t = Date()
+        let labels = SoundGroups.cluster(x, count: ordered.count, dimensions: 1536)!
+        let groups = Set(labels).filter { $0 >= 0 }.sorted().map { g in labels.indices.filter { labels[$0] == g } }
+        let names = SoundGroups.names(groups: groups, x: x, dimensions: 1536, members: ordered.map(SoundGroups.Member.init),
+                                      libraryMean: mean, exclude: SoundGroups.excludedWords(for: ordered))
+        let seconds = Date().timeIntervalSince(t)
+        out.append(Bucket(catID: catID, ids: ordered.map { $0.id! }, labels: labels, names: names, seconds: seconds))
+        print(String(format: "%@ %d sounds: %d groups, %d left over, %.2f s", catID, ordered.count, groups.count,
+                     labels.filter { $0 < 0 }.count, seconds))
+    }
+    print(String(format: "%d subcategories, %d sounds in %.1f s", out.count, out.reduce(0) { $0 + $1.ids.count },
+                 Date().timeIntervalSince(start)))
+    try JSONEncoder().encode(out).write(to: URL(fileURLWithPath: args[3]))
+    exit(0)
+}
+
 // Analysis files at full size, on copies (never the app's own database):
 //   earmark-parity analysis-files <copy of library.sqlite> <out folder>
 // Exports every library, clears the analysis in a second copy, imports into it, compares the two.

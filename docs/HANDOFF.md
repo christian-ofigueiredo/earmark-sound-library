@@ -7,6 +7,11 @@ Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped
 
 - **Ask the owner before changing anything** (code, docs, repository, settings).
   Work on branches; merge to `main` only when the owner approves.
+  Exception (owner, 2026-10-27): **the next five features need no plan or approval first.**
+  Build each to the end, then tell the owner; if a real problem comes up, describe it and
+  let the owner decide. Merging to `main` still needs approval. The five: similarity
+  groups, refreshing the sound map for new sounds, suggested categories for single sounds
+  (with a review list), sending a selected range to Resolve, and finding duplicates.
 - Never write to, rename or move original sound/music files. Earmark only reads them;
   state lives in its own database (`~/Library/Application Support/Earmark/library.sqlite`).
 - Quality over speed; best models available.
@@ -438,6 +443,53 @@ Settings → Repository name. Topics/description also have to be set there.
      CGEvent) and ← / → on a long sound (the list's code). Open: sounds analysed while the
      map shows join it only when the map is switched off and on (a new layout moves every
      dot, so how to add them is the owner's call).
+   - ~~Similarity groups~~ Done, 2026-10-27 (first of the five features built without a plan
+     first). Inside each subcategory, sounds that sound alike are grouped and named; the
+     sidebar shows them under the subcategory (when it has more than one), the list and the map
+     show one when picked, the map colours a subcategory's sounds by group (legend: group
+     names), the pointer's label and the detail pane name a sound's group (with the words most
+     of its files share, "#sewer"). **Method** (`EarmarkCore/SoundGroups.swift`): Phase 0's
+     space (PE-AV + CLAP combined, centred on the subcategory) laid out in 10 dimensions by UMAP
+     (min_dist 0, `SoundMap.reduce`; PCA under 30 sounds), then **Ward's clustering into
+     √(n/8) groups, 2–12** (under 20 sounds: one group; groups under 5 join their nearest).
+     Phase 0 used HDBSCAN: ported exactly (`HDBSCAN.swift`, same labels as scikit-learn 1.9 on
+     test data), and it behaves as Phase 0's on the real library (adjusted Rand index Swift vs
+     Python 0.36–0.82, the same as Phase 0 against itself with another seed; `models/
+     parity_groups.py`), but at this size it made 120 groups of whooshes and 356 of human
+     footsteps, nearly all tiny, 5–15% left out (Phase 0 had only tried 243 whooshes). Ward on
+     the same layout puts every sound in a group, keeps sizes even, and keeps as many of each
+     sound's 10 nearest in its group as anything tried (92–97% on six large subcategories;
+     HDBSCAN's tiny groups 56–68%). Ward matches scikit-learn's on test data. **Names**:
+     Phase 0's: the AI words (99 descriptors, their PE-AV + CLAP text embeddings exported from
+     Phase 0's caches, `Resources/group_words.bin`, `models/export_groups.py`) nearest the
+     group's centre, less 0.6 × the subcategory's average and 0.3 × the library's, after
+     "short"/"long" from the sounds' lengths; one word per family of near-synonyms (by hand:
+     the embeddings don't tell synonyms apart); a duplicate name takes the next word.
+     Keywords: Phase 0's TF-IDF of file names, FX names, descriptions and keywords, leaving out
+     CatIDs, library/manufacturer/designer/pack words and any word most of the subcategory's
+     groups share. Examples: footsteps "Long · Splashy · Watery #sewer", "Long · Crunchy ·
+     Sparkly #weeds #leaves"; male voices "Long · Vocal · Breathy #tiredbreath". Not done:
+     Phase 0's shape features (brightness, envelope; they'd need another pass over every file),
+     so only length gives shape words.
+     **Storage** (schema v8, `SoundGroupStore.swift`): `soundGroupSet` (per subcategory:
+     version, sounds grouped, changed since, `edited`), `soundGroup` (Earmark's name, the
+     owner's `userName`, words, position), `soundGroupMember` (sound id + fingerprint, no FK to
+     sound). **Keeping them** (`SoundGroupPlan`, `GroupBuilder` in the app): after loading and
+     every 3 minutes while analysis brings embeddings, subcategories with no groups are
+     grouped; new sounds join the group with the nearest centre and gone ones leave; a
+     subcategory is grouped afresh when a quarter of it changed or `SoundGroups.version` was
+     bumped, **unless the owner changed its groups** (rename, move, new group, merge), which
+     Earmark then never redoes by itself (Regroup … Automatically does, after asking). Whole
+     library: 238 subcategories, 605 groups, 32 s on one core at background priority, peak
+     303 MB (vectors in `PageBuffer`s; with plain arrays it was 481 MB and stayed 70 MB up).
+     **The owner's changes**: detail pane "Move" menu (to another group, New Group…, Rename);
+     list row menu (Move to Group ▸, New Group from Selection…); sidebar group menu (Rename…,
+     Merge Into ▸, Regroup "…" Automatically…). Checked in the app (through accessibility, no
+     mouse): sidebar, a group's list, a subcategory's map by group, the detail line, Rename,
+     Move, New Group; the test changes were then undone (Human regrouped). Not checked in the
+     app: the sidebar's and list's right-click menus (accessibility can't open them; same
+     calls as the detail pane's, which are tested). Groups aren't in analysis files yet (made
+     again on the other Mac; the owner's changes don't travel).
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
      only 13–16%).
 5. Phase 4: Resolve Studio bridge for sending only a selected range. Use the scripting
@@ -467,6 +519,17 @@ Settings → Repository name. Topics/description also have to be set there.
   Graphics drawing to the GPU; the same 28,827 dots took 6 ms there and 540 ms in an
   off-screen `CGContext` (CPU). To avoid redrawing, split into views (the map's overlay)
   rather than caching a rendered image.
+- **macOS 27's batched line drawing crashed the app** (2026-10-27): with a subcategory's map
+  coloured by group, `CGContext.strokeLineSegments` (one call per colour pair) failed an
+  assertion inside QuartzCore ("color_element_itr != _colors.end ()", cg-draw-lines.cpp) on its
+  rendering queue, every time. The links are now a path per colour (`move`/`addLine`,
+  `strokePath`): no crash, and the whole map still redraws in 14–15 ms.
+- **Testing without the mouse:** when the owner is at the Mac, CGEvent clicks land on whatever
+  window is in front. The scratchpad's `diag` has accessibility tools that work in the
+  background: `axselect "<sidebar row>"` (sets the outline's selected rows; pressing a row
+  only toggles its disclosure), `axrowselect <n>` (a row of the visible list), `axmenu
+  "<menu button>" 1 "<item>"` (a SwiftUI Menu's item), `axresize w h` (forces a redraw).
+  Right-click menus can't be opened this way (AXShowMenu fails on SwiftUI's rows).
 - **Testing the map:** the computer-use tool's background click also sends a second
   mouse-down outside the view (at −251, −89), which cleared the selection; the canvas now
   ignores events outside itself. Use the scratchpad's `mouse` tool (CGEvent: click, ⌘/⌥

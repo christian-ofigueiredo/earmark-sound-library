@@ -13,12 +13,18 @@ enum SoundScope: Hashable, Sendable {
     case guessed
     /// The sounds most like this one (Find Similar Sounds).
     case similar(Int64)
+    /// A similarity group inside a subcategory.
+    case group(Int64)
 }
 
 /// What the sound list shows: scope, search, sort and selection.
 @MainActor @Observable
 final class SoundBrowser {
-    var scope: SoundScope? = .all
+    var scope: SoundScope? = .all {
+        didSet { if case .catID(let c) = scope { lastSubcategory = c } }
+    }
+    /// The last subcategory shown, to go back to when its group goes.
+    private(set) var lastSubcategory: String?
     var search = ""
     var selection: Set<SoundRecord.ID> = []
     var sortOrder = [KeyPathComparator(\SoundRecord.displayName)]
@@ -83,10 +89,13 @@ final class SoundBrowser {
         var search: String
         var sortOrder: [KeyPathComparator<SoundRecord>]
         var version: Int
+        /// The groups' version, while a group is shown.
+        var groups: Int
     }
 
-    func filterKey(version: Int) -> FilterKey {
-        FilterKey(scope: scope, search: search, sortOrder: sortOrder, version: version)
+    func filterKey(version: Int, groups: Int = 0) -> FilterKey {
+        let showsGroup = if case .group = scope { true } else { false }
+        return FilterKey(scope: scope, search: search, sortOrder: sortOrder, version: version, groups: showsGroup ? groups : 0)
     }
 
     /// Filters and sorts off the main thread (tens of milliseconds for the whole library).
@@ -94,8 +103,10 @@ final class SoundBrowser {
         let terms = search.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         let scope = self.scope ?? .all, order = sortOrder, scores = similar?.scores
         let sounds = model.sounds, haystacks = model.soundIndex.haystacks, hidden = model.soundIndex.twins.hidden
+        let membership = model.groups.membership
         let result = await Task.detached(priority: .userInitiated) {
-            Self.filtered(sounds, haystacks: haystacks, hidden: hidden, scope: scope, terms: terms, scores: scores, order: order)
+            Self.filtered(sounds, haystacks: haystacks, hidden: hidden, scope: scope, terms: terms, scores: scores,
+                          membership: membership, order: order)
         }.value
         guard !Task.isCancelled else { return }
         visible = result
@@ -107,6 +118,7 @@ final class SoundBrowser {
 
     nonisolated static func filtered(_ sounds: [SoundRecord], haystacks: [String], hidden: Set<Int64>,
                                              scope: SoundScope, terms: [String], scores: [Int64: Float]?,
+                                             membership: [Int64: Int64] = [:],
                                              order: [KeyPathComparator<SoundRecord>]) -> [SoundRecord] {
         let found = sounds.indices.filter { i in
             let s = sounds[i]
@@ -120,6 +132,8 @@ final class SoundBrowser {
             case .guessed: if s.categorySource != FolderRules.guessSource { return false }
             case .similar(let source):
                 guard let id = s.id, id == source || scores?[id] != nil else { return false }
+            case .group(let g):
+                guard let id = s.id, membership[id] == g else { return false }
             }
             return terms.allSatisfy { haystacks[i].contains($0) }
         }
@@ -189,8 +203,15 @@ struct SoundSidebar: View {
             }
             if !model.sounds.isEmpty {
                 Section("Categories") {
-                    OutlineGroup(model.soundIndex.categories, children: \.children) { node in
-                        Text(node.title).badge(node.count).tag(node.id)
+                    OutlineGroup(model.categoryTree, children: \.children) { node in
+                        if case .group(let id) = node.id, let group = model.groups.byId[id] {
+                            Text(node.title).badge(node.count).tag(node.id)
+                                .help(([group.title, "sounds that sound alike"] + group.keywordList.map { "#\($0)" })
+                                    .joined(separator: " · "))
+                                .contextMenu { GroupMenu(group: group) }
+                        } else {
+                            Text(node.title).badge(node.count).tag(node.id)
+                        }
                     }
                     if model.soundIndex.guessed > 0 {
                         Label("Guessed by Earmark", systemImage: "wand.and.stars")
@@ -279,6 +300,7 @@ struct SoundTable: View {
                 copyToPasteboard(picked.map(\.path).joined(separator: "\n"))
             })
         }
+        items += groupMenuItems(for: picked, model: model)
         return items
     }
 }
@@ -354,6 +376,7 @@ struct SoundDetail: View {
                                 Text(catID).font(.caption.monospaced()).foregroundStyle(.secondary)
                             }
                         }
+                        GroupLine(sound: sound)
                         if let guess {
                             HStack(spacing: 6) {
                                 Text("Guessed by Earmark")

@@ -136,3 +136,18 @@ that are among its 15 nearest on the map.
 | AMBIENCE, 537 | 0.559 (0.4 s) | 0.552 (5.5 s) |
 | DESIGNED, 1,512 | 0.438 (1.0 s) | 0.439 (4.1 s) |
 | All of SoundFX, 28,827 | 0.323 (11.5 s) | 0.326 (23.1 s) |
+
+## Similarity groups
+
+`export_groups.py` (Phase 0's environment) writes the app's naming words' text embeddings
+(`app/Sources/EarmarkCore/Resources/group_words.bin`, from Phase 0's caches) and the HDBSCAN and
+Ward test fixtures (sklearn's labels on random points). `parity_groups.py` compares the app's
+grouping (`earmark-parity groups <copy.sqlite> <out.json> [CatID,…]`) with Phase 0's
+`grouping.cluster` on the same vectors.
+
+Results on the owner's library (2026-10-27), Phase 0's HDBSCAN in Swift vs Python, adjusted Rand
+index (Python against itself with another seed in brackets): metal impacts 0.52 (0.53), whooshes
+0.54 (0.47), sci-fi misc 0.36 (0.38), sports ambiences 0.79 (0.79), risers 0.48 (0.52), evil magic
+0.82 (0.82): the port is as close to Phase 0 as Phase 0 is to itself. But HDBSCAN made 100+ tiny
+groups in large subcategories, so the app clusters the same UMAP layout with Ward into 2–12
+groups instead (see docs/HANDOFF.md).

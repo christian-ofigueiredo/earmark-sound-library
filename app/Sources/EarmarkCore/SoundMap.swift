@@ -22,6 +22,15 @@ public enum SoundMap {
 
         public init() {}
 
+        /// For grouping (Phase 0's `reduce_for_clustering`): min_dist 0, so alike sounds pack
+        /// tight. umap-learn's find_ab_params(spread 1, min_dist 0).
+        public static var clustering: Settings {
+            var s = Settings()
+            s.a = 1.932808397545408
+            s.b = 0.7904949735905139
+            return s
+        }
+
         /// umap-learn's default: 500 for small data, 200 from 10,000 points.
         func epochs(_ n: Int) -> Int { n <= 10_000 ? 500 : 200 }
     }
@@ -83,6 +92,33 @@ public enum SoundMap {
         guard optimise(&y, graph: graph, n: n, settings: settings, rng: &rng,
                        progress: { progress(0.4 + $0 * 0.6) }, isCancelled: isCancelled) else { return nil }
         return Map(points: fit(y), links: links)
+    }
+
+    /// The same layout in `components` dimensions instead of 2, flat (n × components), for
+    /// grouping: Phase 0 clustered in 10. `x`: unit-length rows. Nil if cancelled.
+    public static func reduce(flat x: UnsafeBufferPointer<Float>, count n: Int, dimensions d: Int, components m: Int,
+                              settings: Settings = .clustering, isCancelled: () -> Bool = { false }) -> [Float]? {
+        guard n > 2, m > 0 else { return [Float](repeating: 0, count: n * m) }
+        var rng = SplitMix(seed: settings.seed)
+        let start = principal(x, n: n, d: d, count: m, rng: &rng)
+        guard n >= 20 else { return (0 ..< n).flatMap { i in start.map { $0[i] } } }
+        let k = min(settings.neighbours, n - 1)
+        guard let (indices, distances) = neighbours(x, n: n, d: d, k: k, progress: { _ in }, isCancelled: isCancelled)
+        else { return nil }
+        let graph = fuzzyGraph(indices: indices, distances: distances, n: n, k: k)
+        // As `map`: largest coordinate 10, a little noise, then each dimension into 0…10.
+        let extent = max(1e-12, start.map { $0.map(abs).max() ?? 0 }.max() ?? 1)
+        var y = [Float](repeating: 0, count: n * m)
+        for i in 0 ..< n { for c in 0 ..< m { y[i * m + c] = start[c][i] * (10 / extent) + rng.normal(0.0001) } }
+        for c in 0 ..< m {
+            var lo = Float.infinity, hi = -Float.infinity
+            for i in 0 ..< n { lo = min(lo, y[i * m + c]); hi = max(hi, y[i * m + c]) }
+            let span = max(hi - lo, 1e-12)
+            for i in 0 ..< n { y[i * m + c] = 10 * (y[i * m + c] - lo) / span }
+        }
+        guard optimise(&y, dimensions: m, graph: graph, n: n, settings: settings, rng: &rng, isCancelled: isCancelled)
+        else { return nil }
+        return y
     }
 
     /// Each point with its `each` nearest (from the neighbour search, itself left out), every
@@ -321,9 +357,65 @@ public enum SoundMap {
         return true
     }
 
+    /// `optimise` in any number of dimensions (`y`: n × `m`, flat), for `reduce`.
+    static func optimise(_ y: inout [Float], dimensions m: Int, graph: [Edge], n: Int, settings: Settings,
+                         rng: inout SplitMix, isCancelled: () -> Bool) -> Bool {
+        let epochs = settings.epochs(n)
+        let maxWeight = graph.map(\.weight).max() ?? 1
+        let edges = graph.filter { $0.weight >= maxWeight / Float(epochs) }
+        let perSample = edges.map { Float(epochs) / (Float(epochs) * $0.weight / maxWeight) }
+        let perNegative = perSample.map { $0 / Float(settings.negativeSamples) }
+        var nextSample = perSample, nextNegative = perNegative
+        let a = settings.a, b = settings.b
+        func clip(_ v: Float) -> Float { min(4, max(-4, v)) }
+        var current = [Float](repeating: 0, count: m)
+        return y.withUnsafeMutableBufferPointer { y in
+            func distance2(_ p: [Float], _ o: Int) -> Float {
+                var s: Float = 0
+                for c in 0 ..< m { let t = p[c] - y[o * m + c]; s += t * t }
+                return s
+            }
+            for epoch in 0 ..< epochs {
+                let alpha = 1 - Float(epoch) / Float(epochs), e = Float(epoch)
+                for i in edges.indices where nextSample[i] <= e {
+                    let j = Int(edges[i].head), t = Int(edges[i].tail)
+                    for c in 0 ..< m { current[c] = y[j * m + c] }
+                    let dist2 = distance2(current, t)
+                    if dist2 > 0 {
+                        let coeff = -2 * a * b * pow(dist2, b - 1) / (a * pow(dist2, b) + 1)
+                        for c in 0 ..< m {
+                            let grad = clip(coeff * (current[c] - y[t * m + c])) * alpha
+                            current[c] += grad
+                            y[t * m + c] -= grad
+                        }
+                    }
+                    nextSample[i] += perSample[i]
+                    let negatives = max(0, Int((e - nextNegative[i]) / perNegative[i]))
+                    for _ in 0 ..< negatives {
+                        let r = Int(rng.next() % UInt64(n))
+                        if r == j { continue }
+                        let d2 = distance2(current, r)
+                        let coeff = d2 > 0 ? 2 * b / ((0.001 + d2) * (a * pow(d2, b) + 1)) : 0
+                        for c in 0 ..< m { current[c] += (d2 > 0 ? clip(coeff * (current[c] - y[r * m + c])) : 4) * alpha }
+                    }
+                    for c in 0 ..< m { y[j * m + c] = current[c] }
+                    nextNegative[i] += Float(negatives) * perNegative[i]
+                }
+                if epoch % 10 == 0, isCancelled() { return false }
+            }
+            return true
+        }
+    }
+
     /// The first two principal components (power iteration on the centred XᵀX), as starting
     /// positions. Centred arithmetically: Xc v = X v − (m·v), Xcᵀ u = Xᵀ u − m Σu (no centred copy).
     static func pca(_ x: UnsafeBufferPointer<Float>, n: Int, d: Int, rng: inout SplitMix) -> [SIMD2<Float>] {
+        let p = principal(x, n: n, d: d, count: 2, rng: &rng)
+        return (0 ..< n).map { SIMD2(p[0][$0], p[1][$0]) }
+    }
+
+    /// The first `count` principal components' coordinates, one array per component.
+    static func principal(_ x: UnsafeBufferPointer<Float>, n: Int, d: Int, count: Int, rng: inout SplitMix) -> [[Float]] {
         var mean = [Float](repeating: 0, count: d)
         for i in 0 ..< n { for c in 0 ..< d { mean[c] += x[i * d + c] } }
         mean = mean.map { $0 / Float(n) }
@@ -350,7 +442,7 @@ public enum SoundMap {
         }
         func normalised(_ v: [Float]) -> [Float] { let l = max(1e-20, v.reduce(0) { $0 + $1 * $1 }.squareRoot()); return v.map { $0 / l } }
         var components: [[Float]] = []
-        for _ in 0 ..< 2 {
+        for _ in 0 ..< count {
             var v = normalised((0 ..< d).map { _ in rng.normal(1) })
             for _ in 0 ..< 40 {
                 var w = times(v)
@@ -359,8 +451,7 @@ public enum SoundMap {
             }
             components.append(v)
         }
-        let first = project(components[0]), second = project(components[1])
-        return (0 ..< n).map { SIMD2(first[$0], second[$0]) }
+        return components.map(project)
     }
 
     /// Into 0…1 on the longer side, centred on the shorter.
