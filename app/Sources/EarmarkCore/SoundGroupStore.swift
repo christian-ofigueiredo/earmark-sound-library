@@ -143,6 +143,7 @@ extension LibraryDatabase {
     public func soundGroupSnapshot() throws -> SoundGroupSnapshot {
         try dbQueue.read { db in
             var snap = SoundGroupSnapshot()
+            guard try db.tableExists("soundGroup") else { return snap }
             for s in try SoundGroupSet.fetchAll(db) { snap.sets[s.catID] = s }
             for g in try SoundGroupRecord.order(Column("catID"), Column("position"), Column("id")).fetchAll(db) {
                 snap.groups[g.catID, default: []].append(g)

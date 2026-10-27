@@ -20,11 +20,14 @@ MIN_MACOS="14.0"   # as in app/Package.swift
 
 cd "$PKG"
 swift build -c release --product Earmark
+swift build -c release --product earmark-mcp
 BIN="$(swift build -c release --show-bin-path)"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/Earmark" "$APP/Contents/MacOS/Earmark"
+# The MCP server agents start (docs/mcp-plan.md), beside the app.
+cp "$BIN/earmark-mcp" "$APP/Contents/MacOS/earmark-mcp"
 # SwiftPM records the deployment target as the SDK the binary was built with
 # (LC_BUILD_VERSION "sdk 14.0"), and macOS draws apps built for an old SDK in the
 # old design: old window buttons and controls, no Liquid Glass. Record the SDK
@@ -50,6 +53,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleExecutable</key><string>Earmark</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key><string>$BUNDLE_ID</string>
+            <key>CFBundleURLSchemes</key><array><string>earmark</string></array>
+        </dict>
+    </array>
     <key>CFBundleIconName</key><string>AppIcon</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>

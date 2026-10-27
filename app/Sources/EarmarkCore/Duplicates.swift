@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 /// Sounds that are the same: byte-identical copies (the same fingerprint, anywhere), and the
 /// same recording in another file (renamed, in another folder or pack, a little processed),
@@ -101,5 +102,28 @@ public enum Duplicates {
         out.members = groups
         for (n, g) in groups.enumerated() { for id in g { out.setOf[id] = n } }
         return out
+    }
+}
+
+extension LibraryDatabase {
+    /// The same-recording pairs last found (byte-identical copies come from the fingerprints).
+    public func nearDuplicates() throws -> [Duplicates.Pair] {
+        try dbQueue.read { db in
+            // A database the app hasn't opened since this table came (read-only readers can't migrate).
+            guard try db.tableExists("soundDuplicate") else { return [] }
+            return try Row.fetchAll(db, sql: "SELECT soundA, soundB, similarity FROM soundDuplicate").map {
+                Duplicates.Pair(a: $0[0], b: $0[1], identical: false, similarity: Float($0[2] as Double))
+            }
+        }
+    }
+
+    public func saveNearDuplicates(_ pairs: [Duplicates.Pair]) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM soundDuplicate")
+            for p in pairs where !p.identical {
+                try db.execute(sql: "INSERT OR REPLACE INTO soundDuplicate (soundA, soundB, similarity) VALUES (?, ?, ?)",
+                               arguments: [p.a, p.b, Double(p.similarity)])
+            }
+        }
     }
 }

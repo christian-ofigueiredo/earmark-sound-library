@@ -37,6 +37,7 @@ struct LibrarySnapshot: Sendable {
     var folderGuesses: [FolderGuess]
     var soundChoices: [Int64: SoundCategoryChoice]
     var groups: SoundGroupSnapshot
+    var nearDuplicates: [Duplicates.Pair]
 
     init(_ db: LibraryDatabase) throws {
         libraries = try db.libraries()
@@ -53,6 +54,7 @@ struct LibrarySnapshot: Sendable {
         songs = SongCorrections.apply(songCorrections, to: try db.songs())
         songIndex = SongIndex(songs)
         groups = try db.soundGroupSnapshot()
+        nearDuplicates = try db.nearDuplicates()
     }
 }
 
@@ -87,6 +89,8 @@ final class AppModel {
     let soundMap = SoundMapState()
     /// File ▸ Export Analysis…'s sheet, while it's open.
     var exportRequest: ExportRequest?
+    /// An earmark:// link that came before the library was read (`open`).
+    @ObservationIgnored var pendingLink: URL?
     /// The waveform's selection in the detail pane, in seconds (for File ▸ Add to DaVinci Resolve Timeline).
     @ObservationIgnored var playerSelection: (url: URL, range: ClosedRange<Double>)?
 
@@ -153,6 +157,12 @@ final class AppModel {
         Task {
             await reload()
             hasLoaded = true
+            if let link = pendingLink {
+                pendingLink = nil
+                // Once the list has its rows, so it can scroll to the sound.
+                try? await Task.sleep(for: .milliseconds(800))
+                open(link)
+            }
             analysis.start(model: self)
             // After the analysis has read which sounds it has done (the guesses note it).
             guessing = true
@@ -213,6 +223,7 @@ final class AppModel {
             groups = snap.groups
             rebuildCategoryTree()
             identicalPairs = Duplicates.identicalPairs(sounds, hidden: soundIndex.twins.hidden)
+            nearPairs = snap.nearDuplicates
             duplicates = Duplicates.sets(identicalPairs + nearPairs)
             version += 1
             songsVersion += 1
@@ -711,10 +722,16 @@ final class AppModel {
         let name = url.lastPathComponent
         activity = "Adding “\(name)” to DaVinci Resolve…"
         progress = nil
+        let known = sounds.first { $0.path == url.path }
+        let item = ResolveBridge.Item(path: url.path, start: range?.lowerBound, end: range?.upperBound, track: .free,
+                                      length: known?.duration, channels: known?.channels)
         Task {
             do {
-                let placed = try await ResolveBridge.add(.init(path: url.path, start: range?.lowerBound, end: range?.upperBound))
-                let done = "Added \(range == nil ? "“\(name)”" : "the selection") to “\(placed.timeline)” in DaVinci Resolve, track A\(placed.track)"
+                let added = try await ResolveBridge.add([item], movePlayhead: true)
+                guard let placed = added.items.first, placed.ok == true, let track = placed.track else {
+                    throw ResolveBridge.Failure.other(added.items.first?.problem ?? "no answer")
+                }
+                let done = "Added \(range == nil ? "“\(name)”" : "the selection") to “\(added.timeline)” in DaVinci Resolve, track A\(track)"
                 activity = done
                 try? await Task.sleep(for: .seconds(4))
                 if activity == done { activity = nil }

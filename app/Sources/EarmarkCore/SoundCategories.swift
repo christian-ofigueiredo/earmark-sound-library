@@ -69,7 +69,8 @@ public enum SoundCategories {
 extension LibraryDatabase {
     public func soundCategoryChoices() throws -> [Int64: SoundCategoryChoice] {
         try dbQueue.read { db in
-            Dictionary(try SoundCategoryChoice.fetchAll(db).map { ($0.soundId, $0) }, uniquingKeysWith: { a, _ in a })
+            guard try db.tableExists("soundCategory") else { return [:] }
+            return Dictionary(try SoundCategoryChoice.fetchAll(db).map { ($0.soundId, $0) }, uniquingKeysWith: { a, _ in a })
         }
     }
 

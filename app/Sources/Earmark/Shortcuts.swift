@@ -201,6 +201,8 @@ struct HelpMenu: View {
     var body: some View {
         Button("Welcome to Earmark") { model.showWelcome = true }
         Button("Keyboard Shortcuts") { openWindow(id: KeyboardShortcutsView.windowID) }
+        Divider()
+        Button("Connect an AI Agent…") { openWindow(id: ConnectAgentView.windowID) }
     }
 }
 

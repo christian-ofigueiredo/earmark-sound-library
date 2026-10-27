@@ -13,6 +13,7 @@ struct EarmarkApp: App {
                 .environment(model)
                 .tint(.earmarkBlue)
                 .fixedMinimumSize(CGSize(width: 980, height: 600))
+                .onOpenURL { model.open($0) }
         }
         Settings {
             Preferences()
@@ -28,6 +29,10 @@ struct EarmarkApp: App {
         .defaultSize(width: 1100, height: 680)
         Window("Keyboard Shortcuts", id: KeyboardShortcutsView.windowID) {
             KeyboardShortcutsView()
+        }
+        .windowResizability(.contentSize)
+        Window("Connect an AI Agent", id: ConnectAgentView.windowID) {
+            ConnectAgentView()
         }
         .windowResizability(.contentSize)
         .commands {

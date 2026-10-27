@@ -573,6 +573,35 @@ Settings → Repository name. Topics/description also have to be set there.
      on every reload. Checked in the app (accessibility): the sidebar row, the grouped list,
      both detail-pane lists.
 
+- **MCP server** (owner approved the plan, docs/mcp-plan.md, 2026-10-27): `earmark-mcp` in
+  `Earmark.app/Contents/MacOS`, which MCP clients start (stdio; official MCP Swift SDK 0.12.x,
+  pinned to the minor version). Tools: `library_overview`, `search_sounds`, `get_sound`,
+  `find_similar`, `list_groups`, `show_in_earmark`, `resolve_status`, `add_to_resolve`; the
+  server's instructions tell agents how to use them. Read-only for the libraries and Earmark's
+  data, works with Earmark closed: it opens the database read-only (`LibraryDatabase(path:,
+  readOnly: true)`, no migrations; tables missing from an older database read as empty) and
+  reads it again when the app has saved (file dates, at most every 10 s). Code: `EarmarkMCP`
+  (tools in `EarmarkTools`, definitions in `ToolList.swift`, `EarmarkServer`), shared pieces
+  moved to the core for it: `SoundCatalog` (the sounds as the app shows them, the search),
+  `SoundText` (names, format text, search text), `ResolveBridge`. **Database now in WAL mode**
+  (GRDB `DatabasePool`, busy timeout 5 s) so the server reads while the app writes; the
+  same-recording pairs are saved (`soundDuplicate`, schema v10) so the server sees them.
+  **Resolve:** `add_to_resolve` takes items {sound_id, start, end, at (seconds from the
+  timeline's start, or a timecode), track ("new": tracks named Earmark, the default for
+  agents; "free"; a number)} and `preview`; the bridge now places several at once, can preview,
+  reports Resolve's status, and puts the playhead back where the editor had it (appending moves
+  it; ⌘T still moves it to the end of the cut). `show_in_earmark` opens `earmark://sound/<id>`
+  (Info.plist URL type; a link that launches Earmark is shown once the library is read). Help ▸
+  Connect an AI Agent… shows the setup line for Claude Code and the desktop app's config, with
+  copy buttons. **Checked:** 4 protocol tests through the SDK's client (in-memory transport, a
+  fake Resolve); a scripted stdio client on the owner's library (all tools; 1–2 s for the first
+  load, then 0.01–0.2 s; errors read as messages); the server reading while the app started
+  and wrote (6 rounds, no errors) and with Earmark closed; show_in_earmark with Earmark running
+  and closed; in a temporary Resolve project (deleted, Resolve quit): status, preview and real
+  placement (new Earmark tracks when busy, same track when free, a range's in point, a track
+  number, a timecode), the preview matching the real cuts to the frame, the playhead left in
+  place, and ⌘T afterwards. Not done: registering the server in the owner's Claude Code or
+  desktop app (their config; the help window gives the lines).
 - **App icon** (owner, 2026-10-27): `app/Icon/AppIcon.icon`, an Icon Composer file (Xcode's
   Icon Composer opens it): a white page with its top-right corner folded down (the earmark,
   violet to blue) and a waveform in the sound map's colours, on dark blue; the waveform is a

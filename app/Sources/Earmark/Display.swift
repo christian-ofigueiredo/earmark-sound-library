@@ -26,29 +26,8 @@ func copyToPasteboard(_ text: String) {
 // MARK: sounds
 
 extension SoundRecord {
-    var displayName: String {
-        if let fxName, !fxName.isEmpty { return fxName }
-        return url.deletingPathExtension().lastPathComponent
-    }
-
-    var categoryText: String { ucsLabel?.capitalized ?? "" }
+    // displayName, categoryText, formatText and searchText are in the core (the MCP server uses them too).
     var durationValue: Double { duration ?? 0 }
-
-    var formatText: String {
-        var parts: [String] = []
-        if let sr = sampleRate, sr > 0 {
-            parts.append(sr.truncatingRemainder(dividingBy: 1000) == 0
-                ? "\(Int(sr / 1000)) kHz" : String(format: "%.1f kHz", sr / 1000))
-        }
-        if let bits = bitsPerSample, bits > 0 { parts.append("\(bits)-bit") }
-        if let ch = channels, ch > 0 { parts.append(ch == 1 ? "Mono" : ch == 2 ? "Stereo" : "\(ch) ch") }
-        return parts.joined(separator: " · ")
-    }
-
-    var searchText: String {
-        [fileName, fxName, details, keywords, category, subcategory, catID, vendorLibrary, manufacturer, designer, folder]
-            .compactMap { $0 }.joined(separator: " ").lowercased()
-    }
 }
 
 struct SidebarNode: Identifiable, Hashable, Sendable {

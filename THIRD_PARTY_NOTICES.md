@@ -37,6 +37,15 @@ downloaded by `setup.sh` or on first use, under its own license.
 Earmark's HDBSCAN and Ward clustering (`HDBSCAN.swift`, `SoundGroups.swift`) follow
 scikit-learn's (BSD-3-Clause); no scikit-learn code is included.
 
+## Swift packages (built into the app by SwiftPM)
+
+| Package | Used for | License |
+|---|---|---|
+| GRDB.swift (Gwendal Roué) | Earmark's database | MIT |
+| MCP Swift SDK (`modelcontextprotocol/swift-sdk`) | The `earmark-mcp` server | MIT, moving to Apache-2.0 (see its LICENSE) |
+| swift-nio, swift-log, swift-system, swift-atomics, swift-collections (Apple) | Used by the MCP Swift SDK | Apache-2.0 |
+| eventsource (Mattt) | Used by the MCP Swift SDK | MIT |
+
 ## Python libraries (installed by `setup.sh`, not distributed here)
 
 Mostly permissive (BSD, MIT, Apache-2.0, ISC): PyTorch, transformers,

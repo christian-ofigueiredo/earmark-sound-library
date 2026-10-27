@@ -150,16 +150,37 @@ public struct SongRecord: Codable, FetchableRecord, MutablePersistableRecord, Se
 
 /// Earmark's own database (in Application Support), the only place it writes.
 public final class LibraryDatabase: Sendable {
-    let dbQueue: DatabaseQueue
+    /// A pool in WAL mode for a file, so other processes (the MCP server) can read while the app
+    /// writes; a queue in memory (tests).
+    let dbQueue: any DatabaseWriter
 
-    /// `path == nil` opens an in-memory database (tests).
-    public init(path: String?) throws {
+    public enum OpenError: Error, LocalizedError {
+        case missing(String)
+        public var errorDescription: String? {
+            switch self {
+            case .missing(let path): "There's no Earmark database at \(path). Open Earmark once and add a library."
+            }
+        }
+    }
+
+    /// `path == nil` opens an in-memory database (tests). `readOnly`: for another process
+    /// reading what the app saved (the MCP server); it never migrates or writes.
+    public init(path: String?, readOnly: Bool = false) throws {
+        var config = Configuration()
+        // Wait for a moment rather than fail while the other process holds a lock.
+        config.busyMode = .timeout(5)
         if let path {
+            if readOnly {
+                guard FileManager.default.fileExists(atPath: path) else { throw OpenError.missing(path) }
+                config.readonly = true
+                dbQueue = try DatabasePool(path: path, configuration: config)
+                return
+            }
             try FileManager.default.createDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
-            dbQueue = try DatabaseQueue(path: path)
+            dbQueue = try DatabasePool(path: path, configuration: config)
         } else {
-            dbQueue = try DatabaseQueue()
+            dbQueue = try DatabaseQueue(configuration: config)
         }
         try Self.migrator.migrate(dbQueue)
     }
@@ -333,6 +354,16 @@ public final class LibraryDatabase: Sendable {
                 t.column("replaced", .text)
                 t.column("version", .integer).notNull()
                 t.column("createdAt", .datetime).notNull()
+            }
+        }
+        // Sounds that are the same recording, found by their audio (`Duplicates.nearPairs`),
+        // saved so the MCP server sees them too. Remade with each neighbour search.
+        m.registerMigration("v10-sound-duplicates") { db in
+            try db.create(table: "soundDuplicate") { t in
+                t.column("soundA", .integer).notNull()
+                t.column("soundB", .integer).notNull()
+                t.column("similarity", .double).notNull()
+                t.primaryKey(["soundA", "soundB"])
             }
         }
         return m

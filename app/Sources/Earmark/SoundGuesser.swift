@@ -77,6 +77,7 @@ final class SoundGuesser {
                   let g = byFolder["\(s.libraryId)/\(f)"] else { return [] }
             return Set(g.alternativeIDs)
         }
+        try db.saveNearDuplicates(duplicates)
         return (try db.replaceSoundGuesses(made), duplicates)
     }
 }
