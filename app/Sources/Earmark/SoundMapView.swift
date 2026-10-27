@@ -54,11 +54,14 @@ final class SoundMapState {
     @ObservationIgnored private var vectors: Vectors?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var currentKey: Int?
+    /// The sounds of the sidebar's choice, as last given to `update`.
+    @ObservationIgnored private var scoped: [SoundRecord] = []
 
     func fit() { fitRequest += 1 }
 
     /// The map for these sounds (the sidebar's choice): from the cache, or worked out in the background.
     func update(scoped sounds: [SoundRecord], database: LibraryDatabase?) {
+        scoped = sounds
         let ids = sounds.compactMap(\.id).sorted()
         let key = ids.hashValue
         guard key != currentKey else { return }
@@ -118,6 +121,32 @@ final class SoundMapState {
             progress = nil
             fitRequest += 1
         }
+    }
+
+    /// Sounds of the sidebar's choice analysed since the map was made (both models): not on it yet.
+    func newlyAnalysed(_ analysis: AnalysisEngine) -> Int {
+        guard progress == nil, let layout else { return 0 }
+        let clap = analysis.clapStatus, peav = analysis.peavStatus
+        return scoped.count { s in
+            guard let id = s.id, layout.row[id] == nil else { return false }
+            return SoundEmbedding.isCurrent(clap[id], model: "clap-general", for: s)
+                && SoundEmbedding.isCurrent(peav[id], model: "pe-av-large", for: s)
+        }
+    }
+
+    /// Makes the map again with the sounds analysed since (owner, 2026-10-27: a button rather
+    /// than the map changing under the pointer). A fresh layout, not one grown from the old:
+    /// it starts from the same seeded PCA, so what was there stays about where it was. Tried on
+    /// the library, 5% new: the old dots moved a median 0.14 (ambiences) and 0.24 (designed) of
+    /// the map's spread; grown from the old map (new dots among their neighbours, then UMAP
+    /// again briefly) 0.20–0.33, no steadier. Every map made before is dropped (their sounds'
+    /// vectors may have changed too).
+    func addNewSounds(database: LibraryDatabase?) {
+        vectors = nil
+        cache = [:]
+        recent = []
+        currentKey = nil
+        update(scoped: scoped, database: database)
     }
 
     /// The memory the map needs goes back while it isn't shown (the layouts stay: small).
@@ -434,8 +463,15 @@ struct SoundViewBar: View {
                 Button("Fit") { state.fit() }
                     .help("Show the whole map")
                 Spacer()
-                if state.missing > 0 {
-                    Text("\(state.missing.formatted()) not on the map yet (not analysed)").foregroundStyle(.secondary).font(.callout)
+                let ready = state.newlyAnalysed(model.analysis)
+                let waiting = state.missing - ready
+                if waiting > 0 {
+                    Text("\(waiting.formatted()) not analysed yet").foregroundStyle(.secondary).font(.callout)
+                        .help("Sounds here that aren't on the map: they join once analysed")
+                }
+                if ready > 0 {
+                    Button("Add \(ready.formatted()) New \(ready == 1 ? "Sound" : "Sounds")") { state.addNewSounds(database: model.database) }
+                        .help("Make the map again with the sounds analysed since it was made. The others stay about where they are.")
                 }
             } else {
                 Spacer()

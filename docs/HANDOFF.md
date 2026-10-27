@@ -10,7 +10,7 @@ Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped
   Exception (owner, 2026-10-27): **the next five features need no plan or approval first.**
   Build each to the end, then tell the owner; if a real problem comes up, describe it and
   let the owner decide. Merging to `main` still needs approval. The five: similarity
-  groups, refreshing the sound map for new sounds, suggested categories for single sounds
+  groups (done), refreshing the sound map for new sounds (done), suggested categories for single sounds
   (with a review list), sending a selected range to Resolve, and finding duplicates.
 - Never write to, rename or move original sound/music files. Earmark only reads them;
   state lives in its own database (`~/Library/Application Support/Earmark/library.sqlite`).
@@ -440,9 +440,20 @@ Settings → Repository name. Topics/description also have to be set there.
      events (`mouse` tool, CGEvent): selection, ⌘-click, area, scroll-wheel zoom, both pans,
      Fit, search dimming, the legend and its menu, a category map, Space, Play on hover,
      ⇧⌘M both ways, Music and back, the help window. Not checked: pinch (can't be made with
-     CGEvent) and ← / → on a long sound (the list's code). Open: sounds analysed while the
-     map shows join it only when the map is switched off and on (a new layout moves every
-     dot, so how to add them is the owner's call).
+     CGEvent) and ← / → on a long sound (the list's code).
+     **New sounds** (2026-10-27, second of the five features): sounds of the map's choice
+     analysed since it was made are counted in the bar above it, "Add 37 New Sounds"; the
+     button makes the map again with them (`SoundMapState.addNewSounds`: vectors read again,
+     every cached layout dropped). Not automatic, so the map doesn't change under the pointer.
+     A fresh layout rather than one grown from the old: it starts from the same seeded PCA,
+     so the rest stays about where it was. Measured on the library with 5% new
+     (`earmark-parity map-grow` while it existed, since removed): old dots moved a median 0.14
+     (ambiences) and 0.24 (designed) of the map's spread; grown from the old map (new dots
+     among their neighbours, UMAP again for 50–200 epochs at learning rate 0.1–1) 0.20–0.33,
+     no steadier and no better at keeping neighbours. Small maps change more (a few hundred
+     sounds). Sounds still waiting for analysis: "12 not analysed yet". Checked in the app by
+     taking one sound's PE-AV row out while the map loaded, putting it back and pressing the
+     button.
    - ~~Similarity groups~~ Done, 2026-10-27 (first of the five features built without a plan
      first). Inside each subcategory, sounds that sound alike are grouped and named; the
      sidebar shows them under the subcategory (when it has more than one), the list and the map
