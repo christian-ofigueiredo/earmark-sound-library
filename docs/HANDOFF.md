@@ -36,7 +36,7 @@ Settings → Repository name. Topics/description also have to be set there.
 - `main`: Phase 0 (Python tools in `phase0/`, CI in `.github/workflows/checks.yml` and
   `mac-selftest.yml`), plan and docs.
 - `phase1` branch: the Swift app in `app/` (SwiftPM, tools 6.0, macOS 14+, Swift 6 mode,
-  GRDB 7.11.1), plus `.github/workflows/app.yml` (macos-15: `swift build` + `swift test`
+  GRDB 7.11.1), plus `.github/workflows/app.yml` (macos-26: `swift build` + `swift test`
   in `app/`).
 
 ### app/ layout
@@ -82,7 +82,9 @@ Settings → Repository name. Topics/description also have to be set there.
 ## Next steps (in order)
 
 1. ~~Get the app compiling on macOS.~~ Done: builds clean with Swift 6.4 on macOS 27 and on the
-   GitHub macos-15 runner (`app.yml` green).
+   GitHub macos-26 runner (`app.yml` green again since 2026-10-27). It had failed on macos-15
+   from the loudness stage on, unnoticed: Swift 6.1 gave up type-checking two closures, and
+   Xcode 16's SDK lacks the macOS 26 Liquid Glass APIs. Check the App run after pushing.
 2. Try it on the real library (read-only). Done for sound effects on Banana 01
    (`02 RESOURCES/AUDIO/SoundFX`, 29,177 files): scan, UCS categories, waveform, playback,
    range playback, search. Fixed: squeezed table (detail is now an `.inspector`), stale
