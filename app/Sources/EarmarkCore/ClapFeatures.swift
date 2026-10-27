@@ -147,15 +147,18 @@ public enum ClapAudio {
         }
         let bins = nFFT / 2 + 1
         let lo = toMel(50), hi = toMel(14000)
-        let melPoints = (0 ..< mels + 2).map { i in i == mels + 1 ? hi : lo + Double(i) * ((hi - lo) / Double(mels + 1)) }
-        let edges = melPoints.map(toHz)
+        // Explicit types: Swift 6.1 (the GitHub runner) gave up type-checking this closure.
+        let step: Double = (hi - lo) / Double(mels + 1)
+        let melPoints: [Double] = (0 ..< mels + 2).map { (i: Int) -> Double in i == mels + 1 ? hi : lo + Double(i) * step }
+        let edges: [Double] = melPoints.map(toHz)
         let nyquist = Double(sampleRate / 2)
-        let fftFreqs = (0 ..< bins).map { i in i == bins - 1 ? nyquist : Double(i) * (nyquist / Double(bins - 1)) }
-        return (0 ..< mels).map { m in
-            let enorm = 2 / (edges[m + 2] - edges[m])
-            let weights = fftFreqs.map { f -> Double in
-                let down = (f - edges[m]) / (edges[m + 1] - edges[m])
-                let up = (edges[m + 2] - f) / (edges[m + 2] - edges[m + 1])
+        let binWidth: Double = nyquist / Double(bins - 1)
+        let fftFreqs: [Double] = (0 ..< bins).map { (i: Int) -> Double in i == bins - 1 ? nyquist : Double(i) * binWidth }
+        return (0 ..< mels).map { (m: Int) -> Band in
+            let enorm: Double = 2 / (edges[m + 2] - edges[m])
+            let weights: [Double] = fftFreqs.map { (f: Double) -> Double in
+                let down: Double = (f - edges[m]) / (edges[m + 1] - edges[m])
+                let up: Double = (edges[m + 2] - f) / (edges[m + 2] - edges[m + 1])
                 return max(0, min(down, up)) * enorm
             }
             let first = weights.firstIndex { $0 > 0 } ?? 0

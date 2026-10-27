@@ -17,7 +17,9 @@ concurrency:
 jobs:
   macos:
     name: Build and test (macOS)
-    runs-on: macos-15
+    # The app uses macOS 26 APIs (Liquid Glass), so it needs Xcode 26's SDK: macos-15 has
+    # Xcode 16 and couldn't build it.
+    runs-on: macos-26
     timeout-minutes: 30
     defaults:
       run:

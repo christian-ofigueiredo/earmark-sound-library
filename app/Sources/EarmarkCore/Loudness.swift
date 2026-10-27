@@ -120,7 +120,10 @@ public struct LoudnessMeter: Sendable {
         let peak: Double? = peakSample > 0 ? 20 * log10(Double(peakSample)) : nil
         var blocks: [Double] = []
         if steps.count >= 4 {
-            blocks = (0 ... steps.count - 4).map { i in (steps[i] + steps[i + 1] + steps[i + 2] + steps[i + 3]) / 4 }
+            blocks = (0 ... steps.count - 4).map { (i: Int) -> Double in
+                let sum: Double = steps[i] + steps[i + 1] + steps[i + 2] + steps[i + 3]
+                return sum / 4
+            }
         } else if totalFrames > 0 {
             // Shorter than one 400 ms block (short effects): measure the whole sound as one block.
             var weighted = totalEnergy
