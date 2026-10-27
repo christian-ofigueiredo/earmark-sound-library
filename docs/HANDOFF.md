@@ -409,8 +409,11 @@ Settings → Repository name. Topics/description also have to be set there.
      than 3.5% of the map are left out, as are ones shorter than the dots); a glow of the
      categories' colours that blends where groups meet (`MapGlow`: the lit dots splatted on a
      512² field, Gaussian blur with vImage, colour = weighted average, made once per layout,
-     search, highlight or appearance and stretched with zoom); each lit dot shaded 30% towards
-     the colour around it (grey ones 50%); grey recedes (0.40 in dark, 0.72 in light); a faint
+     search, highlight or appearance and stretched with zoom, ~17 ms). The glow was toned down
+     the same day (owner: "dim it down… as soft as possible"): sigma 2.6% of the map, at most
+     20% opacity in dark and 11% in light, easing in with a smoothstep so small groups on their
+     own get no halo, dithered so the faint wash doesn't band. Each lit dot is shaded 30%
+     towards the colour around it at a narrower 1.2% (grey ones 50%); grey recedes (0.40 in dark, 0.72 in light); a faint
      grid fixed to the map; near-black background in dark mode, white in light. Selected dots
      get a pip in the text colour in their middle (a ring too while ≤ 40), so a big selection
      reads as a stipple, not a patch. A drag that starts on a dot also selects an area. The

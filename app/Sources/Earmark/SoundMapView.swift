@@ -429,13 +429,17 @@ struct SoundViewBar: View {
 
 // MARK: drawing
 
-/// The categories' colours as a soft field behind the dots: each lit dot spreads its colour
-/// around it (a Gaussian, a little over 1% of the map), and where groups meet their colours
+/// The categories' colours as a faint wash behind the dots: each lit dot spreads its colour
+/// around it (a wide Gaussian, `spread` of the map), and where groups meet their colours
 /// blend. One image for the whole map plus a margin (−`margin`…1 + `margin` both ways, in map
 /// space, so the glow fades out past the outermost dots instead of being cut off), and each
-/// lit dot's colour leaning towards the field's there, so the dots shade into each other too.
+/// lit dot's colour leaning towards the colours close around it (a narrower Gaussian,
+/// `shading`), so the dots shade into each other too.
 enum MapGlow {
-    static let margin: Float = 0.06
+    static let margin: Float = 0.1
+    /// Sigmas, in map units. The glow is wide so it reads as a wash, not halos around groups
+    /// (owner, 2026-10-27: "dim it down… as soft as possible").
+    static let shading: Float = 0.012, spread: Float = 0.026
 
     struct Result {
         var image: CGImage?
@@ -462,15 +466,15 @@ enum MapGlow {
                 r[k] += c.x * wt; g[k] += c.y * wt; b[k] += c.z * wt; w[k] += wt
             }
         }
-        // A Gaussian, sigma 1.2% of the map.
-        let sigma = Float(size) * 0.012, half = Int((3 * sigma).rounded(.up))
-        var kernel = (-half ... half).map { exp(-Float($0 * $0) / (2 * sigma * sigma)) }
-        let total = kernel.reduce(0, +)
-        kernel = kernel.map { $0 / total }
-        blur(&r, size: size, kernel: kernel)
-        blur(&g, size: size, kernel: kernel)
-        blur(&b, size: size, kernel: kernel)
-        blur(&w, size: size, kernel: kernel)
+        // Map units to cells.
+        let toCells = last / (1 + 2 * margin)
+        func blurAll(_ sigma: Float) {
+            blur(&r, size: size, sigma: sigma)
+            blur(&g, size: size, sigma: sigma)
+            blur(&b, size: size, sigma: sigma)
+            blur(&w, size: size, sigma: sigma)
+        }
+        blurAll(shading * toCells)
         // Each lit dot: 30% of the colour around it (grey ones 50%, so they take on their
         // neighbourhood's).
         var dotColors = (0 ..< n).map { palette[Int(colors[$0])] }
@@ -480,20 +484,27 @@ enum MapGlow {
             let around = SIMD3(r[k], g[k], b[k]) / w[k], share: Float = colors[i] >= MapPalette.named ? 0.5 : 0.3
             dotColors[i] = dotColors[i] * (1 - share) + around * share
         }
-        // How thick the glow gets: dense places (the 98th percentile of the field) are full.
+        // Wider for the glow (Gaussians add up: spread² = shading² + the rest²).
+        blurAll((spread * spread - shading * shading).squareRoot() * toCells)
+        // How thick the glow gets: the densest places (the 98th percentile of the field) are
+        // full, and it eases out (smoothstep) so a few dots on their own get no halo.
         let sorted = w.filter { $0 > 1e-6 }.sorted()
         guard let top = sorted.isEmpty ? nil : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.98))], top > 0
         else { return Result(image: nil, dotColors: dotColors) }
-        let strongest: Float = dark ? 0.42 : 0.30
+        let strongest: Float = dark ? 0.2 : 0.11
         var pixels = [UInt8](repeating: 0, count: cells * 4)
         for k in 0 ..< cells where w[k] > 1e-6 {
-            let alpha = pow(min(1, w[k] / top), 0.65) * strongest
+            let t = min(1, w[k] / top), alpha = t * t * (3 - 2 * t) * strongest
             let c = SIMD3(r[k], g[k], b[k]) / w[k]
-            // Premultiplied.
-            pixels[k * 4] = UInt8(min(255, c.x * alpha * 255))
-            pixels[k * 4 + 1] = UInt8(min(255, c.y * alpha * 255))
-            pixels[k * 4 + 2] = UInt8(min(255, c.z * alpha * 255))
-            pixels[k * 4 + 3] = UInt8(min(255, alpha * 255))
+            // Premultiplied and dithered (interleaved gradient noise), or so faint a wash shows
+            // steps in 8 bits. The same offset for all four keeps colour ≤ alpha.
+            let x = Float(k % size), y = Float(k / size)
+            let noise = (52.982919 * (0.06711056 * x + 0.00583715 * y).truncatingRemainder(dividingBy: 1)).truncatingRemainder(dividingBy: 1)
+            func byte(_ v: Float) -> UInt8 { UInt8(min(255, v * 255 + noise)) }
+            pixels[k * 4] = byte(c.x * alpha)
+            pixels[k * 4 + 1] = byte(c.y * alpha)
+            pixels[k * 4 + 2] = byte(c.z * alpha)
+            pixels[k * 4 + 3] = byte(alpha)
         }
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let provider = CGDataProvider(data: Data(pixels) as CFData) else { return Result(image: nil, dotColors: dotColors) }
@@ -503,8 +514,12 @@ enum MapGlow {
         return Result(image: image, dotColors: dotColors)
     }
 
-    /// The same kernel along rows, then columns (vImage), zeros beyond the edges.
-    private static func blur(_ plane: inout [Float], size: Int, kernel: [Float]) {
+    /// A Gaussian (sigma in cells) along rows, then columns (vImage), zeros beyond the edges.
+    private static func blur(_ plane: inout [Float], size: Int, sigma: Float) {
+        let half = Int((3 * sigma).rounded(.up))
+        var kernel = (-half ... half).map { exp(-Float($0 * $0) / (2 * sigma * sigma)) }
+        let total = kernel.reduce(0, +)
+        kernel = kernel.map { $0 / total }
         var out = [Float](repeating: 0, count: plane.count)
         plane.withUnsafeMutableBytes { src in
             out.withUnsafeMutableBytes { dst in
