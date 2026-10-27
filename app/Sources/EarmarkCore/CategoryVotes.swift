@@ -22,6 +22,13 @@ public enum CategoryVotes {
         let k = min(candidates, n)
         guard let (indices, distances) = SoundMap.neighbours(x, n: n, d: d, k: k, progress: { _ in }, isCancelled: isCancelled)
         else { return nil }
+        return votes(indices: indices, distances: distances, k: k, labels: labels, folders: folders, voters: voters)
+    }
+
+    /// The same from a neighbour search already made (n × k, each row's nearest first).
+    public static func votes(indices: [Int], distances: [Float], k: Int, labels: [String?], folders: [String],
+                             voters: Int = 15) -> [[Vote]] {
+        let n = labels.count
         return (0 ..< n).map { i in
             var weights: [String: Double] = [:], counted = 0, total = 0.0
             for c in 0 ..< k where counted < voters {

@@ -339,6 +339,78 @@ if args.count >= 3, args[1] == "votes" {
     exit(0)
 }
 
+// How alike copies of one recording are, against takes of one sound, to set the duplicates'
+// threshold: each sound's nearest (PE-AV + CLAP, cosine), pairs sorted into byte-identical
+// copies, format twins (FormatTwins), numbered takes in one folder ("Hit 01"/"Hit 02") and the rest.
+//   earmark-parity duplicates <copy of library.sqlite> [--band <low> <high>] [--show <from cosine>]
+// --band counts the pairs in that cosine band with the same length or not; --show prints some.
+if args.count >= 3, args[1] == "duplicates" {
+    let db = try LibraryDatabase(path: args[2])
+    let all = try db.sounds()
+    let byId = Dictionary(uniqueKeysWithValues: all.compactMap { s in s.id.map { ($0, s) } })
+    let twins = FormatTwins.group(all)
+    var twinPairs = Set<String>()
+    for (best, others) in twins.alternates { for o in others { twinPairs.insert("\(min(best, o)) \(max(best, o))") } }
+    var ids: [Int64] = [], capacity = 0
+    var buffer = PageBuffer(count: 0)
+    try db.forEachVectors(models: ["pe-av-large", "clap-general"], count: { capacity = $0; buffer = PageBuffer(count: $0 * 1536) }) { id, blocks in
+        guard byId[id] != nil, ids.count < capacity else { return }
+        let r = ids.count
+        buffer.withFloats { x in for (c, v) in SoundMap.combine(blocks).enumerated() { x[r * 1536 + c] = v } }
+        ids.append(id)
+    }
+    let k = 6
+    let found = buffer.withFloats { x in
+        SoundMap.nearestNeighbours(UnsafeBufferPointer(rebasing: x[0 ..< ids.count * 1536]), n: ids.count, d: 1536, k: k)
+    }
+    func stem(_ s: SoundRecord) -> String {
+        let name = (s.fileName as NSString).deletingPathExtension.lowercased()
+        return String(name.map { $0.isNumber ? "#" : $0 })
+    }
+    var sims: [String: [Float]] = [:], seen = Set<String>()
+    var durationOff: [String: [Double]] = [:], bandCounts: [String: Int] = [:]
+    for i in 0 ..< ids.count {
+        for c in 0 ..< k {
+            let j = found.indices[i * k + c]
+            guard j != i else { continue }
+            let key = "\(min(ids[i], ids[j])) \(max(ids[i], ids[j]))"
+            guard seen.insert(key).inserted else { continue }
+            let a = byId[ids[i]]!, b = byId[ids[j]]!
+            let kind: String
+            if a.fingerprint != nil && a.fingerprint == b.fingerprint { kind = "identical" }
+            else if twinPairs.contains(key) { kind = "format twins" }
+            else if a.folder == b.folder && a.libraryId == b.libraryId && stem(a) == stem(b) && a.fileName != b.fileName { kind = "numbered takes" }
+            else { kind = "other" }
+            sims[kind, default: []].append(1 - found.distances[i * k + c])
+            let cos = 1 - found.distances[i * k + c]
+            let band = args.firstIndex(of: "--band").map { (Float(args[$0 + 1])!, Float(args[$0 + 2])!) }
+            if let (lo, hi) = band, kind != "identical", cos >= lo, cos < hi, let x = a.duration, let y = b.duration {
+                let same = abs(x - y) <= max(0.02, 0.01 * max(x, y))
+                bandCounts[same ? "same length" : "other length", default: 0] += 1
+            }
+            if args.contains("--show"), kind != "identical", cos >= Float(args.last!) ?? 0.999, Int.random(in: 0 ..< 8) == 0 {
+                func d(_ s: SoundRecord) -> String {
+                    String(format: "%@/%@ %.2fs %.0fHz %db", String(s.folder.split(separator: "/").suffix(2).joined(separator: "/")), s.fileName,
+                           s.duration ?? 0, s.sampleRate ?? 0, s.bitsPerSample ?? 0)
+                }
+                print(String(format: "  %.4f %@ | %@ | %@", cos, kind, d(a), d(b)))
+            }
+            if let x = a.duration, let y = b.duration, max(x, y) > 0 { durationOff[kind, default: []].append(abs(x - y) / max(x, y)) }
+        }
+    }
+    if !bandCounts.isEmpty { print("band: \(bandCounts)") }
+    for (kind, list) in sims.sorted(by: { $0.key < $1.key }) {
+        let s = list.sorted()
+        func p(_ q: Double) -> Float { s[min(s.count - 1, Int(Double(s.count - 1) * q))] }
+        let d = (durationOff[kind] ?? []).sorted()
+        func dp(_ q: Double) -> Double { d.isEmpty ? 0 : d[min(d.count - 1, Int(Double(d.count - 1) * q))] }
+        print(String(format: "%@: %d pairs; cosine min %.4f, 1%% %.4f, 5%% %.4f, median %.4f, 99%% %.4f; length off median %.3f, 95%% %.3f",
+                     kind, s.count, s[0], p(0.01), p(0.05), p(0.5), p(0.99), dp(0.5), dp(0.95)))
+        for t: Float in [0.98, 0.99, 0.995, 0.998, 0.999] { print(String(format: "    ≥ %.3f: %d", t, s.filter { $0 >= t }.count)) }
+    }
+    exit(0)
+}
+
 // Analysis files at full size, on copies (never the app's own database):
 //   earmark-parity analysis-files <copy of library.sqlite> <out folder>
 // Exports every library, clears the analysis in a second copy, imports into it, compares the two.

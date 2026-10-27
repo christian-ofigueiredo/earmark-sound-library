@@ -166,6 +166,11 @@ public enum SoundMap {
 
     // MARK: steps
 
+    /// `neighbours` for callers outside the module (the app's background jobs, earmark-parity).
+    public static func nearestNeighbours(_ x: UnsafeBufferPointer<Float>, n: Int, d: Int, k: Int) -> (indices: [Int], distances: [Float]) {
+        neighbours(x, n: n, d: d, k: k, progress: { _ in }, isCancelled: { false })!
+    }
+
     /// Each point's `k` nearest by cosine distance (1 − dot), itself first: flat n × k indices and distances.
     static func neighbours(_ x: UnsafeBufferPointer<Float>, n: Int, d: Int, k: Int, progress: (Double) -> Void,
                            isCancelled: () -> Bool) -> (indices: [Int], distances: [Float])? {

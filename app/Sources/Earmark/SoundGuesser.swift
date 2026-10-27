@@ -20,10 +20,11 @@ final class SoundGuesser {
         let inputs = Self.inputs(model)
         guard inputs != lastInputs else { return }
         task = Task {
-            let changed = await Task.detached(priority: .background) { (try? Self.run(db)) ?? false }.value
+            let result = await Task.detached(priority: .background) { try? Self.run(db) }.value
             lastInputs = inputs
             task = nil
-            if changed { await model.reload() }
+            if let result { model.setNearDuplicates(result.duplicates) }
+            if result?.changed == true { await model.reload() }
             if again {
                 again = false
                 update(model: model)
@@ -41,8 +42,9 @@ final class SoundGuesser {
             + "\(model.analysis.clapStatus.count) \(model.analysis.peavStatus.count) \(model.sounds.count)"
     }
 
-    /// Votes on every analysed sound and saves Earmark's guesses. True if they changed.
-    nonisolated static func run(_ db: LibraryDatabase) throws -> Bool {
+    /// Votes on every analysed sound and saves Earmark's guesses (`changed`: whether they did).
+    /// The same neighbour search finds sounds that are one recording (`Duplicates.nearPairs`).
+    nonisolated static func run(_ db: LibraryDatabase) throws -> (changed: Bool, duplicates: [Duplicates.Pair]) {
         // The categories without Earmark's per-sound guesses: they'd otherwise vote for themselves.
         let rules = try db.folderRules(), guesses = try db.folderGuesses()
         let owners = try db.soundCategoryChoices().filter { $0.value.byOwner }
@@ -58,11 +60,15 @@ final class SoundGuesser {
             buffer.withFloats { x in for (c, v) in SoundMap.combine(blocks).enumerated() { x[r * d + c] = v } }
             rows.append(s)
         }
-        guard rows.count > 1 else { return try db.replaceSoundGuesses([]) }
-        guard let votes = buffer.withFloats({ x in
-            CategoryVotes.votes(UnsafeBufferPointer(rebasing: x[0 ..< rows.count * d]), count: rows.count, dimensions: d,
-                                labels: rows.map(\.catID), folders: rows.map { "\($0.libraryId)/\($0.folder)" })
-        }) else { return false }
+        guard rows.count > 1 else { return (try db.replaceSoundGuesses([]), []) }
+        let k = min(60, rows.count)
+        let (indices, distances) = buffer.withFloats { x in
+            SoundMap.nearestNeighbours(UnsafeBufferPointer(rebasing: x[0 ..< rows.count * d]), n: rows.count, d: d, k: k)
+        }
+        let votes = CategoryVotes.votes(indices: indices, distances: distances, k: k, labels: rows.map(\.catID),
+                                        folders: rows.map { "\($0.libraryId)/\($0.folder)" })
+        let duplicates = Duplicates.nearPairs(ids: rows.map { $0.id! }, durations: rows.map(\.duration), indices: indices,
+                                              distances: distances, k: k)
         // The runners-up of the guess for each sound's folder (or the folder above it that has one).
         let folders = Dictionary(grouping: guesses, by: \.libraryId).mapValues { Set($0.map(\.folder)) }
         let byFolder = Dictionary(guesses.map { ("\($0.libraryId)/\($0.folder)", $0) }, uniquingKeysWith: { a, _ in a })
@@ -71,6 +77,6 @@ final class SoundGuesser {
                   let g = byFolder["\(s.libraryId)/\(f)"] else { return [] }
             return Set(g.alternativeIDs)
         }
-        return try db.replaceSoundGuesses(made)
+        return (try db.replaceSoundGuesses(made), duplicates)
     }
 }

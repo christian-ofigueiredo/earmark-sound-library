@@ -11,7 +11,8 @@ Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped
   Build each to the end, then tell the owner; if a real problem comes up, describe it and
   let the owner decide. Merging to `main` still needs approval. The five: similarity
   groups (done), refreshing the sound map for new sounds (done), suggested categories for single sounds
-  (with a review list; done), sending a selected range to Resolve (done), and finding duplicates.
+  (with a review list; done), sending a selected range to Resolve (done), and finding duplicates (done). All five
+  were done on 2026-10-27: the old rule applies again.
 - Never write to, rename or move original sound/music files. Earmark only reads them;
   state lives in its own database (`~/Library/Application Support/Earmark/library.sqlite`).
 - Quality over speed; best models available.
@@ -555,6 +556,22 @@ Settings → Repository name. Topics/description also have to be set there.
      through the File menu (placed on A2 because A1 was busy at the playhead), and the no
      timeline and Resolve-closed messages. Not done: the free Resolve's fallback (an FCPXML
      with the cut) from the plan; the owner has Studio.
+   - ~~Duplicates~~ Done, 2026-10-27 (fifth of the five). Sidebar "Duplicates" (under the
+     libraries) lists sounds that are in the libraries more than once, each set together;
+     the detail pane names the others: "Copies of this file" (byte-identical: the same
+     fingerprint, anywhere) and "The same recording" (by the audio), with their folders, to
+     play, drag or show. Earmark only shows them, never deletes. Format twins (MP3 beside the
+     WAV) stay as before. **Threshold measured first** (`earmark-parity duplicates <copy>`,
+     each sound's nearest, PE-AV + CLAP): byte-identical copies are cosine 1.0000; every pair at
+     ≥ 0.999 (289) and 0.998–0.999 (10) had the same length, and they are the same recording
+     reused under another name (Sound Ideas: a car loop in Automobiles and in Trucks, door and
+     fire loops under several numbers, a splat in two packs); from 0.995 down, versions come
+     in (dry and wet, construction-kit layers, takes). So `Duplicates`: cosine ≥ 0.998 and
+     lengths within 1% (0.02 s for short sounds), joined into sets. On the library: 410 sounds
+     are copies (204 sets) and ~550 more the same recording: 958 sounds. The near pairs come
+     from `SoundGuesser`'s neighbour search (one search for both); copies from the fingerprints
+     on every reload. Checked in the app (accessibility): the sidebar row, the grouped list,
+     both detail-pane lists.
 
 ## Gotchas learned
 

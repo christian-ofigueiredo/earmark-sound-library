@@ -17,6 +17,8 @@ enum SoundScope: Hashable, Sendable {
     case group(Int64)
     /// Sounds whose category is Earmark's guess from how they sound, and the owner's for one sound.
     case guessedFromSound, chosenByYou
+    /// Sounds that are the same as another (`Duplicates`), each set together.
+    case duplicates
 }
 
 /// What the sound list shows: scope, search, sort and selection.
@@ -105,10 +107,10 @@ final class SoundBrowser {
         let terms = search.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         let scope = self.scope ?? .all, order = sortOrder, scores = similar?.scores
         let sounds = model.sounds, haystacks = model.soundIndex.haystacks, hidden = model.soundIndex.twins.hidden
-        let membership = model.groups.membership
+        let membership = model.groups.membership, duplicateSets = model.duplicates.setOf
         let result = await Task.detached(priority: .userInitiated) {
             Self.filtered(sounds, haystacks: haystacks, hidden: hidden, scope: scope, terms: terms, scores: scores,
-                          membership: membership, order: order)
+                          membership: membership, duplicateSets: duplicateSets, order: order)
         }.value
         guard !Task.isCancelled else { return }
         visible = result
@@ -120,7 +122,7 @@ final class SoundBrowser {
 
     nonisolated static func filtered(_ sounds: [SoundRecord], haystacks: [String], hidden: Set<Int64>,
                                              scope: SoundScope, terms: [String], scores: [Int64: Float]?,
-                                             membership: [Int64: Int64] = [:],
+                                             membership: [Int64: Int64] = [:], duplicateSets: [Int64: Int] = [:],
                                              order: [KeyPathComparator<SoundRecord>]) -> [SoundRecord] {
         let found = sounds.indices.filter { i in
             let s = sounds[i]
@@ -134,6 +136,7 @@ final class SoundBrowser {
             case .guessed: if s.categorySource != FolderRules.guessSource { return false }
             case .guessedFromSound: if s.categorySource != SoundCategories.soundGuessSource { return false }
             case .chosenByYou: if s.categorySource != SoundCategories.ownerSource { return false }
+            case .duplicates: guard let id = s.id, duplicateSets[id] != nil else { return false }
             case .similar(let source):
                 guard let id = s.id, id == source || scores?[id] != nil else { return false }
             case .group(let g):
@@ -142,6 +145,16 @@ final class SoundBrowser {
             return terms.allSatisfy { haystacks[i].contains($0) }
         }
         var result = FastSort.sorted(found.map { sounds[$0] }, by: order)
+        if case .duplicates = scope {
+            // Each set together, in the list's order inside it; sets by their first sound there.
+            var first: [Int: Int] = [:]
+            for (i, s) in result.enumerated() { if let set = duplicateSets[s.id ?? -1], first[set] == nil { first[set] = i } }
+            let position = Dictionary(uniqueKeysWithValues: result.enumerated().map { ($0.element.id ?? -1, $0.offset) })
+            result.sort { a, b in
+                let fa = first[duplicateSets[a.id ?? -1] ?? -1] ?? 0, fb = first[duplicateSets[b.id ?? -1] ?? -1] ?? 0
+                return fa != fb ? fa < fb : position[a.id ?? -1, default: 0] < position[b.id ?? -1, default: 0]
+            }
+        }
         if case .similar(let source) = scope, let scores {
             // Best match first, the sound it started from at the top.
             result.sort { a, b in
@@ -185,6 +198,13 @@ struct SoundSidebar: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
+                if !model.duplicates.setOf.isEmpty {
+                    Label("Duplicates", systemImage: "doc.on.doc")
+                        .badge(model.duplicates.setOf.count)
+                        .tag(SoundScope.duplicates)
+                        .help("Sounds that are in the libraries more than once: copies of one file, or the same recording "
+                              + "under another name. Earmark only shows them; it never deletes files.")
+                }
             }
             if let similar = browser.similar {
                 Section("Similar") {
@@ -441,6 +461,7 @@ struct SoundDetail: View {
                     PlayerPanel(url: sound.url, knownDuration: sound.duration)
                     FileChip(url: sound.url)
                     OtherFormats(sound: sound)
+                    SameSounds(sound: sound)
                 } else {
                     OfflineNotice(library: model.library(id: sound.libraryId))
                 }
@@ -484,6 +505,37 @@ struct OtherFormats: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Also in this pack as").font(.caption).foregroundStyle(.secondary)
                 ForEach(copies) { copy in FileChip(url: copy.url) }
+            }
+        }
+    }
+}
+
+/// The sound's duplicates (`Duplicates`): copies of the file and the same recording elsewhere.
+struct SameSounds: View {
+    @Environment(AppModel.self) private var model
+    let sound: SoundRecord
+
+    var body: some View {
+        let others = model.duplicates.others[sound.id ?? -1] ?? []
+        let copies = others.filter(\.identical).compactMap { model.sound(id: $0.id) }
+        let same = others.filter { !$0.identical }.compactMap { model.sound(id: $0.id) }
+        if !copies.isEmpty { list("Copies of this file", copies) }
+        if !same.isEmpty { list("The same recording", same) }
+    }
+
+    private func list(_ title: String, _ sounds: [SoundRecord]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            ForEach(sounds) { s in
+                VStack(alignment: .leading, spacing: 2) {
+                    FileChip(url: s.url)
+                    Text([model.library(id: s.libraryId)?.name, s.folder].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " › "))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(s.path)
+                }
             }
         }
     }

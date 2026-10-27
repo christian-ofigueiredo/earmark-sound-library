@@ -106,6 +106,11 @@ final class AppModel {
     private(set) var soundChoices: [Int64: SoundCategoryChoice] = [:]
     /// The category chooser for selected sounds, while it's open.
     var categoryChoosing: CategoryChoosing?
+    /// Sounds that are the same: byte-identical copies (from the fingerprints, on every reload)
+    /// and the same recording (from `SoundGuesser`'s neighbour search).
+    private(set) var duplicates = Duplicates.Sets()
+    @ObservationIgnored private var identicalPairs: [Duplicates.Pair] = []
+    @ObservationIgnored private var nearPairs: [Duplicates.Pair] = []
     /// Earmark guessing categories for folders (status bar).
     var guessProgress: (done: Int, total: Int)?
     @ObservationIgnored private var guessing = false
@@ -207,6 +212,8 @@ final class AppModel {
             soundChoices = snap.soundChoices
             groups = snap.groups
             rebuildCategoryTree()
+            identicalPairs = Duplicates.identicalPairs(sounds, hidden: soundIndex.twins.hidden)
+            duplicates = Duplicates.sets(identicalPairs + nearPairs)
             version += 1
             songsVersion += 1
             groupsVersion += 1
@@ -678,6 +685,17 @@ final class AppModel {
                 await self.reloadGroups()
                 self.groupBuilder.update(model: self)
             }
+        }
+    }
+
+    // MARK: duplicates
+
+    func setNearDuplicates(_ pairs: [Duplicates.Pair]) {
+        nearPairs = pairs
+        let sets = Duplicates.sets(identicalPairs + nearPairs)
+        if sets != duplicates {
+            duplicates = sets
+            if soundBrowser.scope == .duplicates { version += 1 }
         }
     }
 
