@@ -78,8 +78,12 @@ struct LibraryView: View {
             .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 380)
         } detail: {
             ZStack {
-                SoundTable()
-                    .edgeBar(.bottom, shown: soundsShown) { StatusBar() }
+                ZStack {
+                    SoundTable()
+                    SoundMapPane()
+                }
+                .edgeBar(.top, shown: soundsShown) { SoundViewBar() }
+                .edgeBar(.bottom, shown: soundsShown) { StatusBar() }
                 SongTable()
                     .edgeBar(.top, shown: songsShown) { MusicFilterBar() }
                     .edgeBar(.bottom, shown: songsShown) { StatusBar() }
@@ -101,11 +105,15 @@ struct LibraryView: View {
         }
         .onChange(of: model.hasLoaded) {
             // The sidebars' lists exist from now on: hide the other section's.
-            DispatchQueue.main.async { SectionViews.sync(showing: model.section, faded: model.sectionFaded, animated: false) }
+            syncOnceBuilt()
         }
         .onAppear {
             // As soon as the window has its lists (the next turn of the run loop).
-            DispatchQueue.main.async { SectionViews.sync(showing: model.section, faded: false, animated: false) }
+            if model.hasLoaded {
+                syncOnceBuilt()
+            } else {
+                DispatchQueue.main.async { SectionViews.sync(showing: model.section, faded: false, animated: false) }
+            }
         }
         .task(id: sounds.filterKey(version: model.version)) { await sounds.refresh(from: model) }
         .task(id: songs.filterKey(version: model.songsVersion)) { songs.refresh(from: model) }
@@ -170,6 +178,21 @@ extension View {
     }
 }
 
+extension LibraryView {
+    /// `SectionViews.sync` for the section shown at the time, again every 0.1 s (3 s at most)
+    /// until both sidebar lists exist: SwiftUI sometimes makes them a few turns after the
+    /// library has loaded, and then both sidebars stayed on screen, one over the other (1 launch
+    /// in 8 with the sound map drawing, 2026-10-26).
+    func syncOnceBuilt(attempts: Int = 30) {
+        DispatchQueue.main.async {
+            let found = SectionViews.sync(showing: model.section, faded: model.sectionFaded, animated: false)
+            if !found, attempts > 1 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { syncOnceBuilt(attempts: attempts - 1) }
+            }
+        }
+    }
+}
+
 /// The two sections' views overlap (both stay built and laid out, so a switch is quick), and
 /// SwiftUI's opacity doesn't stop AppKit from sending the hidden ones clicks, scrolling and
 /// keys; SwiftUI also hit-tests its views in the order they were made, whatever their order
@@ -177,9 +200,11 @@ extension View {
 /// to lay out again: cheap). The big lists hide themselves (`RecordTable`).
 @MainActor enum SectionViews {
     /// `faded`: the shown sidebar is transparent too, during a switch; `animated` fades it.
-    static func sync(showing section: AppSection, faded: Bool, animated: Bool) {
+    /// False if the sidebar lists aren't both there yet (neither could be hidden).
+    @discardableResult
+    static func sync(showing section: AppSection, faded: Bool, animated: Bool) -> Bool {
         guard let window = NSApp.windows.first(where: { $0.title == "Earmark" && $0.contentView != nil }),
-              let content = window.contentView else { return }
+              let content = window.contentView else { return false }
         var sidebars: [NSScrollView] = [], fields: [NSView] = []
         func visit(_ view: NSView) {
             if let table = view as? NSTableView {
@@ -216,6 +241,7 @@ extension View {
             }
             for view in hidden { view.isHidden = true }
         }
+        return sidebars.count == 2
     }
 
     /// Fades an AppKit view with Core Animation, which runs off the main thread.

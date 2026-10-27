@@ -60,6 +60,12 @@ struct EarmarkApp: App {
                 Button("Music") { model.show(.music) }
                     .keyboardShortcut("2")
                 Divider()
+                Toggle("Sound Map", isOn: Binding(get: { model.soundMap.showing }, set: { on in
+                    model.soundMap.showing = on
+                    if on, model.switchSection == .music { model.show(.sounds) }
+                }))
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                Divider()
             }
             CommandMenu("Playback") { PlaybackMenu(model: model) }
             CommandMenu("Song") { SongMenu(model: model) }

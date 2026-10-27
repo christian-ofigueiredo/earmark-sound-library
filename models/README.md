@@ -19,6 +19,8 @@ cd ../app
 swift run -c release earmark-parity clap ../models/build/CLAPAudio.mlpackage ../models/build/clap_reference.json 300
 swift run -c release earmark-parity peav ../models/build/PEAV ../models/build/peav_reference.json 300
 swift run -c release earmark-parity music ../models/build <copy of library.sqlite> 300 7 all
+swift run -c release earmark-parity map <copy of library.sqlite> map.json [CATEGORY]
+../phase0/.venv/bin/python -I ../models/parity_map.py <copy of library.sqlite> map.json
 ```
 
 `parity_clap.py` needs Phase 0's CLAP cache (`~/SoundLab/cache/clap-general.pkl`).
@@ -117,3 +119,20 @@ How it's converted and ported:
   low-pass fitted to soxr's response (0.01% RMS from soxr on music).
 - `coremltools.convert` changes the PyTorch module's tensors in place: take reference
   outputs before converting (S-KEY's moved by 0.05 afterwards, the Core ML model didn't).
+
+## Sound map results (2026-10-26)
+
+The sound map (`EarmarkCore/SoundMap.swift`) is a Swift port of umap-learn 0.5 with Phase 0's
+settings (cosine, 15 neighbours, min_dist 0.15) on PE-AV + CLAP combined as Phase 0 did. It
+starts from PCA instead of umap-learn's spectral layout and has its own seeded random numbers,
+so it gives the same map every time but not Python's. `earmark-parity map` writes the app's
+map for a copy of the database (one UCS category, or everything); `parity_map.py` (Phase 0's
+environment, which has umap-learn) runs umap-learn on the same vectors and scores both the
+same way: the share of each sound's 15 nearest neighbours (cosine, in the embedding space)
+that are among its 15 nearest on the map.
+
+| Sounds | Swift | umap-learn |
+|---|---|---|
+| AMBIENCE, 537 | 0.559 (0.4 s) | 0.552 (5.5 s) |
+| DESIGNED, 1,512 | 0.438 (1.0 s) | 0.439 (4.1 s) |
+| All of SoundFX, 28,827 | 0.323 (11.5 s) | 0.326 (23.1 s) |

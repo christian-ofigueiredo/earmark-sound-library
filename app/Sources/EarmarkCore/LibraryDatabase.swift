@@ -443,6 +443,34 @@ public final class LibraryDatabase: Sendable {
         }
     }
 
+    /// The same for sounds that have a vector from every one of `models`, in sound id order, one
+    /// sound at a time (`body` gets them in `models`' order), so a caller can keep them its own
+    /// way without them all in memory twice. `count` first gets how many sounds there will be.
+    public func forEachVectors(models: [String], count: (Int) -> Void = { _ in },
+                               _ body: (_ id: Int64, _ vectors: [[Float]]) -> Void) throws {
+        let joins = models.indices.map { i in
+            """
+            JOIN soundEmbedding e\(i) ON e\(i).soundId = s.id AND e\(i).model = ? AND e\(i).vector IS NOT NULL
+                AND e\(i).version >= ? AND e\(i).fingerprint IS s.fingerprint
+            """
+        }
+        let columns = models.indices.map { "e\($0).vector" }.joined(separator: ", ")
+        var values: [any DatabaseValueConvertible] = []
+        for model in models { values += [model, SoundEmbedding.versions[model] ?? 1] }
+        try dbQueue.read { db in
+            count(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sound s \(joins.joined(separator: " "))",
+                                   arguments: StatementArguments(values)) ?? 0)
+            let rows = try Row.fetchCursor(db, sql: "SELECT s.id, \(columns) FROM sound s \(joins.joined(separator: " ")) ORDER BY s.id",
+                                           arguments: StatementArguments(values))
+            while let r = try rows.next() {
+                body(r[0], models.indices.map { i in
+                    let data: Data = r[i + 1]
+                    return data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+                })
+            }
+        }
+    }
+
     public func embedding(soundId: Int64, model: String) throws -> SoundEmbedding? {
         try dbQueue.read { db in
             try SoundEmbedding.filter(Column("soundId") == soundId && Column("model") == model).fetchOne(db)

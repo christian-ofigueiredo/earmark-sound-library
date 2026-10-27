@@ -111,7 +111,7 @@ import Testing
             paths.map { p in
                 let url = root.appendingPathComponent(p)
                 let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-                return SongFile(path: url.path, fileSize: size ?? 0, modified: Date())
+                return SongFile(path: url.path, fileSize: size, modified: Date())
             }
         }
         let lib = try here.addLibrary(kind: .music, path: a.path, bookmark: nil)

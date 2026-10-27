@@ -76,6 +76,8 @@ final class AppModel {
     @ObservationIgnored private var switching: Task<Void, Never>?
     var showWelcome: Bool
     var alert: AppAlert?
+    /// The sound list as a map (View ▸ Sound Map).
+    let soundMap = SoundMapState()
     /// File ▸ Export Analysis…'s sheet, while it's open.
     var exportRequest: ExportRequest?
 

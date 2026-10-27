@@ -175,6 +175,28 @@ if args.count >= 3, args[1] == "folders" {
 
 // Tempo and key, checked against the values Phase 0 stored for the same songs:
 //   earmark-parity music <folder with BeatThis/SKey.mlpackage> <copy of library.sqlite> [songs=300] [seed=1] [cpu|gpu|all]
+// The sound map's layout on real sounds, for models/parity_map.py to compare with umap-learn:
+//   earmark-parity map <copy of library.sqlite> <out.json> [category]
+if args.count >= 4, args[1] == "map" {
+    let db = try LibraryDatabase(path: args[2])
+    let category = args.count > 4 ? args[4] : nil
+    let peav = Dictionary(uniqueKeysWithValues: try db.vectors(model: "pe-av-large").map { ($0.id, $0.vector) })
+    let clap = Dictionary(uniqueKeysWithValues: try db.vectors(model: "clap-general").map { ($0.id, $0.vector) })
+    let sounds = try db.sounds().filter { s in
+        guard let id = s.id, peav[id] != nil, clap[id] != nil else { return false }
+        return category == nil || s.category == category
+    }.sorted { $0.id! < $1.id! }
+    let vectors = sounds.map { SoundMap.combine([peav[$0.id!]!, clap[$0.id!]!]) }
+    let t = Date()
+    let map = SoundMap.layout(vectors)!
+    let seconds = Date().timeIntervalSince(t)
+    print(String(format: "%d sounds%@: layout in %.1f s", sounds.count, category.map { " in \($0)" } ?? "", seconds))
+    struct Out: Encodable { var ids: [Int64]; var x: [Float]; var y: [Float]; var seconds: Double }
+    try JSONEncoder().encode(Out(ids: sounds.map { $0.id! }, x: map.map(\.x), y: map.map(\.y), seconds: seconds))
+        .write(to: URL(fileURLWithPath: args[3]))
+    exit(0)
+}
+
 // Analysis files at full size, on copies (never the app's own database):
 //   earmark-parity analysis-files <copy of library.sqlite> <out folder>
 // Exports every library, clears the analysis in a second copy, imports into it, compares the two.

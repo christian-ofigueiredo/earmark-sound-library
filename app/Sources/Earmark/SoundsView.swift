@@ -49,6 +49,9 @@ final class SoundBrowser {
         revealRequest += 1
     }
 
+    /// Scrolls the list to the selection: back from the map, where it may have changed.
+    func revealSelection() { revealRequest += 1 }
+
     // The sidebar's Similar row is never added or removed while it's selected: done in one
     // update, the sidebar left a copy of the row drawn over it (its text doubled, in the
     // selected and plain styles), which also took the first click on its ✕.
@@ -102,7 +105,7 @@ final class SoundBrowser {
         if kept != selection { selection = kept }
     }
 
-    nonisolated private static func filtered(_ sounds: [SoundRecord], haystacks: [String], hidden: Set<Int64>,
+    nonisolated static func filtered(_ sounds: [SoundRecord], haystacks: [String], hidden: Set<Int64>,
                                              scope: SoundScope, terms: [String], scores: [Int64: Float]?,
                                              order: [KeyPathComparator<SoundRecord>]) -> [SoundRecord] {
         let found = sounds.indices.filter { i in
@@ -213,7 +216,8 @@ struct SoundTable: View {
 
     var body: some View {
         @Bindable var browser = model.soundBrowser
-        let shown = model.section == .sounds
+        // Hidden (in AppKit) while the map is in its place.
+        let shown = model.section == .sounds && !model.soundMap.showing
         let faded = model.sectionFaded
         let playing = model.playingSound
         RecordTable(rows: browser.visible, rowsVersion: browser.generation, filter: browser.filterKey(version: 0),
@@ -242,6 +246,7 @@ struct SoundTable: View {
             }
             .shown(shown && !faded)
         }
+        .onChange(of: model.soundMap.showing) { _, map in if !map { browser.revealSelection() } }
     }
 
     private static func columns(_ browser: SoundBrowser) -> [RecordColumn<SoundRecord>] {

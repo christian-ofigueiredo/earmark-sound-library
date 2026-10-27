@@ -194,6 +194,41 @@ import Testing
         #expect(v.map(\.id) == [sounds[0].id!])
         #expect(v.first?.vector == [1, 0])
     }
+
+    /// The sound map's vectors: sounds with a current vector from every model, in id order.
+    @Test func vectorsFromSeveralModelsComeTogether() async throws {
+        let db = try LibraryDatabase(path: nil)
+        let root = TestFiles.tempDir()
+        for (i, name) in ["a.wav", "b.wav", "c.wav"].enumerated() {
+            TestFiles.write(TestFiles.wav(seconds: Double(i + 1)), to: root.appendingPathComponent(name))
+        }
+        let lib = try db.addLibrary(kind: .sounds, path: root.path, bookmark: nil)
+        try db.replaceSounds(libraryId: lib.id!, root: root, scanned: await LibraryScanner().scan(root: root))
+        let s = try db.sounds().sorted { $0.id! < $1.id! }
+        try db.save([
+            SoundEmbedding(soundId: s[2].id!, model: "pe-av-large", fingerprint: s[2].fingerprint, vector: [3, 3, 3]),
+            SoundEmbedding(soundId: s[2].id!, model: "clap-general", fingerprint: s[2].fingerprint, vector: [3]),
+            SoundEmbedding(soundId: s[0].id!, model: "pe-av-large", fingerprint: s[0].fingerprint, vector: [1, 1, 1]),
+            SoundEmbedding(soundId: s[0].id!, model: "clap-general", fingerprint: s[0].fingerprint, vector: [1]),
+            SoundEmbedding(soundId: s[1].id!, model: "pe-av-large", fingerprint: s[1].fingerprint, vector: [2, 2, 2]),   // no CLAP
+        ])
+        var count = -1, got: [(Int64, [[Float]])] = []
+        try db.forEachVectors(models: ["pe-av-large", "clap-general"], count: { count = $0 }) { got.append(($0, $1)) }
+        #expect(count == 2)
+        #expect(got.map(\.0) == [s[0].id!, s[2].id!])
+        #expect(got.first?.1 == [[1, 1, 1], [1]])
+    }
+
+    @Test func pageBuffersStartAsZerosAndHoldWhatsWritten() {
+        let page = PageBuffer(count: 1_000_000)
+        #expect(page.count == 1_000_000)
+        page.withFloats { f in
+            #expect(f[0] == 0 && f[999_999] == 0)
+            f[123_456] = 4.5
+        }
+        #expect(page.withFloats { $0[123_456] } == 4.5)
+        #expect(PageBuffer(count: 0).count == 0)
+    }
 }
 
 @Suite struct FolderRuleTests {

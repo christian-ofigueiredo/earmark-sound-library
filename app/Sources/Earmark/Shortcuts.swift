@@ -217,6 +217,15 @@ struct KeyboardShortcutsView: View {
             ("⇧← ⇧→", "Back or forward \(Int(Shortcuts.skip(sound: false, more: true))) s in a song, "
                 + "\(Int(Shortcuts.skip(sound: true, more: true))) s in a sound effect"),
         ]),
+        Group(title: "On the Sound Map", rows: [
+            ("Click", "Select a sound (double-click plays or pauses it)"),
+            ("⌘-click  ⇧-click", "Add a sound to the selection, or take it out"),
+            ("Drag", "Select the sounds in an area"),
+            ("Space  ↩  ← →", "Play or pause, back or forward, as in the list"),
+            ("Pinch  Scroll wheel", "Zoom (⌘ and two fingers on a trackpad)"),
+            ("Two fingers  ⌥-drag", "Move around"),
+            ("Esc", "Clear the selection"),
+        ]),
         Group(title: "Playback", rows: [
             (s(Shortcuts.stop), "Stop and go back to the start"),
             (s(Shortcuts.showNowPlaying), "Show what's playing in its list"),
@@ -236,6 +245,7 @@ struct KeyboardShortcutsView: View {
         ]),
         Group(title: "Window", rows: [
             ("⌘1  ⌘2", "Sound effects or music"),
+            ("⇧⌘M", "Sound effects as a map or a list"),
             ("⌘O  ⇧⌘O", "Add a sound library or a music folder"),
             ("⇧⌘R", "Rescan all folders"),
             ("⌥⌘P  ⌥⌘R", "Pause or resume analysis"),

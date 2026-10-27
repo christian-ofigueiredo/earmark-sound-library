@@ -385,6 +385,39 @@ Settings → Repository name. Topics/description also have to be set there.
      driven by me: the folder and file pickers (out of process), so the owner should try one
      export and import. Folder categories and corrections were only tested in unit tests
      (the owner has none yet).
+   - ~~Sound map~~ Done, 2026-10-26 (owner approved the plan and chose 8 colours). A List |
+     Map switch above the sound list (also View ▸ Sound Map ⇧⌘M; the choice is remembered):
+     one dot per sound of the sidebar's choice (all, a library, a category, Similar…), sounds
+     that sound alike close together; a search dims the others without moving them. Colours:
+     the 7 biggest categories (inside one category: its subcategories) from the dataviz
+     reference palette, every other one grey, no category hollow grey. Only 3 of those colours
+     pass the all-pairs colour-blindness check; the owner chose 8, so pointing at a dot names
+     it and the legend lights one category up (click; the folded ones from a menu; Show All).
+     Click selects (Auto-play as in the list), ⌘/⇧-click adds or removes, drag selects an
+     area, double-click, Space and ↩ play, ← / → skip, Esc clears; pinch or scroll wheel zoom
+     (⌘-scroll on a trackpad), two fingers or ⌥-drag move, Fit; Play on hover (off by default,
+     after 120 ms). Back in the list, it scrolls to the selection. Help ▸ Keyboard Shortcuts
+     has an "On the Sound Map" group. Code: `SoundMapView.swift` (state, legend, the AppKit
+     canvas: Core Graphics, a grid for hit tests), `EarmarkCore/SoundMap.swift`.
+     Layout: a Swift port of umap-learn 0.5 with Phase 0's settings (cosine, 15 neighbours,
+     min_dist 0.15, a/b from `find_ab_params`, 200 epochs from 10,000 sounds, else 500) on
+     PE-AV + CLAP combined as Phase 0 did; PCA start instead of spectral and its own seeded
+     random numbers (same sounds, same map; not Python's); under 20 sounds PCA only. 7 tests
+     (5 for the layout, 2 for loading the vectors).
+     Against umap-learn (`models/parity_map.py`, share of the 15 nearest kept): Ambience 0.559
+     vs 0.552, Designed 0.438 vs 0.439, all 28,827 sounds 0.323 vs 0.326 (11.5 s vs 23.1 s).
+     In the app the whole library takes ~15 s in the background with a progress bar; a
+     category's map a second or less. The last 8 layouts are kept for the session, so going
+     back to one is instant. Memory: the vectors (177 MB) are loaded only while the map shows;
+     with the all-sounds map Earmark is ~470 MB (peak ~520 MB) and back to ~265 MB in the list
+     (it was 1.45 GB before the fixes under Gotchas). Checked in the app with real mouse
+     events (`mouse` tool, CGEvent): selection, ⌘-click, area, scroll-wheel zoom, both pans,
+     Fit, search dimming, the legend and its menu, a category map, Space, Play on hover,
+     ⇧⌘M both ways, Music and back, the help window. Not checked: pinch (can't be made with
+     CGEvent) and ← / → on a long sound (the list's code). Open: sounds analysed while the
+     map shows join it only when the map is switched off and on (a new layout moves every
+     dot, so how to add them is the owner's call); hundreds of selected dots draw as a white
+     patch.
    - learning from the owner's labelled files (kNN gave 62% exact in Phase 0; zero-shot
      only 13–16%).
 5. Phase 4: Resolve Studio bridge for sending only a selected range. Use the scripting
@@ -393,6 +426,25 @@ Settings → Repository name. Topics/description also have to be set there.
    preferences.
 
 ## Gotchas learned
+
+- **macOS 27 keeps freed large memory blocks counted as the app's.** malloc keeps freed large
+  blocks to use again; they stay in the footprint (compressed when memory is short), and
+  `malloc_zone_pressure_relief` returns nothing (tested: a 177 MB block freed, footprint
+  unchanged; `MallocLargeCache=0` does give it back). The sound map's first version left
+  Earmark at 1.45 GB. Now its big buffers are `PageBuffer`s (mmap, unmapped when freed): the
+  combined vectors (one buffer in id order, read from the database one sound at a time with
+  `forEachVectors`) and the neighbour search's score blocks (64 rows at a time, 7 MB each).
+  The map is bit-for-bit the same as before (old and new code compared on test data).
+- **Both sidebars on screen at once** (about 1 launch in 8 with the sound map drawing at launch,
+  never in 14 without): `SectionViews.sync` ran before SwiftUI had made the sidebar lists,
+  found none, and nothing hid the other section's later. `LibraryView.syncOnceBuilt` tries
+  again every 0.1 s until both exist (in 16 launches the second try was needed twice, and no
+  overlap was left).
+- **Testing the map:** the computer-use tool's background click also sends a second
+  mouse-down outside the view (at −251, −89), which cleared the selection; the canvas now
+  ignores events outside itself. Use the scratchpad's `mouse` tool (CGEvent: click, ⌘/⌥
+  modifiers, drag, line or pixel scroll) for the map. Don't attach lldb to the running app
+  and then stop it: stopping lldb mid-expression killed Earmark (a breakpoint trap).
 
 - **The app looked pre-macOS 27 (old window buttons and controls, no Liquid Glass)** because
   SwiftPM wrote the deployment target as the SDK in the binary (`otool -l … LC_BUILD_VERSION`
