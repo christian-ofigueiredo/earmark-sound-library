@@ -34,8 +34,8 @@ Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped
 | D: Phase 1 app with both sections, built on a GitHub Mac at every push | **In progress, branch `phase1`** |
 | A: recompute Phase 0 report fixes | **Not approved.** The owner only asked how long it takes. Answer given: it's quick, but I recommended skipping it and fixing these things in the app instead. Waiting for the owner's decision. |
 
-The repository rename (sound-library → earmark) can only be done by the owner in GitHub
-Settings → Repository name. Topics/description also have to be set there.
+The repository was renamed sound-library → earmark-sound-library on 2026-10-28 (the old
+address redirects). The local folder is still `~/Documents/sound-library`.
 
 ## Where the code is
 
