@@ -14,7 +14,11 @@ PKG="$ROOT/app"
 OUT="$PKG/build"
 APP="$OUT/Earmark.app"
 BUNDLE_ID="io.github.christian-ofigueiredo.Earmark"
-VERSION="$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo 0)"
+# The release tag (v0.1.0-alpha.1): the full name for display, and its numbers alone for
+# CFBundleShortVersionString, which macOS wants as three integers.
+VERSION="$(git -C "$ROOT" describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo v0.0.0)"
+VERSION="${VERSION#v}"
+SHORT_VERSION="${VERSION%%-*}"
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
 MIN_MACOS="14.0"   # as in app/Package.swift
 
@@ -66,13 +70,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>Earmark</string>
     <key>CFBundleDisplayName</key><string>Earmark</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>CFBundleShortVersionString</key><string>$SHORT_VERSION</string>
+    <key>EarmarkVersion</key><string>$VERSION</string>
     <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
-    <key>NSHumanReadableCopyright</key><string>MIT License</string>
+    <key>NSHumanReadableCopyright</key><string>Version $VERSION · MIT License</string>
     <key>NSRemovableVolumesUsageDescription</key>
     <string>Earmark reads the sound and music libraries you add from external drives. It never changes your files.</string>
     <key>NSNetworkVolumesUsageDescription</key>
