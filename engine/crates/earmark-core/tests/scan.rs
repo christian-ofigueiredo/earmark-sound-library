@@ -9,16 +9,18 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::SystemTime;
 
-fn snapshot(root: &Path) -> BTreeMap<String, SystemTime> {
-    fn walk(dir: &Path, out: &mut BTreeMap<String, SystemTime>) {
+/// Every entry under `root`, with each file's modified time. Folders' own times aren't compared:
+/// NTFS updates them lazily, so they can differ between two reads with nothing written.
+fn snapshot(root: &Path) -> BTreeMap<String, Option<SystemTime>> {
+    fn walk(dir: &Path, out: &mut BTreeMap<String, Option<SystemTime>>) {
         for e in std::fs::read_dir(dir).unwrap().flatten() {
             let m = e.metadata().unwrap();
-            out.insert(
-                e.path().to_string_lossy().into_owned(),
-                m.modified().unwrap(),
-            );
+            let path = e.path().to_string_lossy().into_owned();
             if m.is_dir() {
+                out.insert(path, None);
                 walk(&e.path(), out);
+            } else {
+                out.insert(path, Some(m.modified().unwrap()));
             }
         }
     }
