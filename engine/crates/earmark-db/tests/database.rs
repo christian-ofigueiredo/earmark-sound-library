@@ -136,10 +136,11 @@ fn format_twins_keep_the_best_copy() {
     db.replace_sounds(lib.id, &root_str(&root), &scanned(&root))
         .unwrap();
     let sounds = db.sounds(None).unwrap();
+    // By folder and name, which use "/" on every system.
     let id = |suffix: &str| {
         sounds
             .iter()
-            .find(|s| s.path.ends_with(suffix))
+            .find(|s| format!("{}/{}", s.folder, s.file_name).ends_with(suffix))
             .unwrap()
             .id
             .unwrap()
