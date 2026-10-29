@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreML
 import EarmarkCore
 import EarmarkML
@@ -12,7 +13,7 @@ import Foundation
 //
 // The reference files come from models/parity_clap.py / parity_peav.py --reference.
 //
-//   earmark-parity metadata|scan|twins|keys|phase0|db-new|db-ops …   (see below; for the Rust engine)
+//   earmark-parity metadata|scan|twins|keys|phase0|db-new|db-ops|audio|similar …   (see below; for the Rust engine)
 
 /// Embeds a batch of files (PE-AV runs part by part over the whole batch).
 protocol BatchEmbedder { func embed(batch: [[Float]]) throws -> [[Float]?] }
@@ -43,6 +44,88 @@ if args.count >= 2, args[1] == "metadata" {
         let row = Row(path: path, raw: raw, normalized: MetadataNormalizer.normalize(raw, url: url),
                       timeReference: MetadataReader.timeReference(url: url))
         FileHandle.standardOutput.write(try encoder.encode(row) + Data("\n".utf8))
+    }
+    exit(0)
+}
+
+// Decoded audio and what Swift measures from it, for the Rust engine's parity check
+// (engine/parity/compare.py audio). For each file whose path comes on stdin: <n>.pcm (the file at
+// its own rate, float32, channel after channel), <n>.mono (mono 48 kHz, as the CLAP stage decodes
+// it) and <n>.clap (CLAP's features of each window), then one JSON line. Reads the files only.
+//   earmark-parity audio <work folder> < paths.txt
+if args.count >= 3, args[1] == "audio" {
+    struct Window: Encodable { var length: Int; var rms: Double }
+    struct Row: Encodable {
+        var index: Int; var path: String; var rate: Double; var channels: Int; var frames: Int
+        var loudness: LoudnessMeter.Result; var monoFrames: Int; var prepared: Int?; var windows: [Window]; var peavLengths: [Int]
+    }
+    let work = URL(fileURLWithPath: args[2], isDirectory: true)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    var index = 0
+    while let path = readLine(), !path.isEmpty {
+        defer { index += 1 }
+        let url = URL(fileURLWithPath: path)
+        guard let file = try? AVAudioFile(forReading: url),
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)) else { continue }
+        try file.read(into: buffer)
+        let channels = Int(buffer.format.channelCount), frames = Int(buffer.frameLength)
+        var meter = LoudnessMeter(sampleRate: buffer.format.sampleRate, channels: channels)
+        var pcm = Data()
+        var pointers: [UnsafeBufferPointer<Float>] = []
+        for c in 0 ..< channels {
+            let p = UnsafeBufferPointer(start: buffer.floatChannelData![c], count: frames)
+            pointers.append(p)
+            pcm.append(Data(buffer: p))
+        }
+        // In the app's chunks (64 K frames).
+        var start = 0
+        while start < frames {
+            let n = min(1 << 16, frames - start)
+            meter.process(pointers.map { UnsafeBufferPointer(rebasing: $0[start ..< start + n]) }, frames: n)
+            start += n
+        }
+        try pcm.write(to: work.appendingPathComponent("\(index).pcm"))
+        let mono = try AudioDecoder.mono(url: url, sampleRate: Double(Phase0Audio.sampleRate), maxSeconds: Phase0Audio.maxSeconds)
+        try mono.withUnsafeBufferPointer { try Data(buffer: $0).write(to: work.appendingPathComponent("\(index).mono")) }
+        let prepared = Phase0Audio.prepare(mono)
+        let windows = prepared.map(Phase0Audio.windows) ?? []
+        var clap = Data()
+        for w in windows { ClapAudio.features(w).withUnsafeBufferPointer { clap.append(Data(buffer: $0)) } }
+        try clap.write(to: work.appendingPathComponent("\(index).clap"))
+        let row = Row(index: index, path: path, rate: buffer.format.sampleRate, channels: channels, frames: frames, loudness: meter.result,
+                      monoFrames: mono.count, prepared: prepared?.count,
+                      windows: windows.map { w in Window(length: w.count, rms: (w.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(w.count)).squareRoot()) },
+                      peavLengths: windows.map { PeavAudio.input($0).count })
+        FileHandle.standardOutput.write(try encoder.encode(row) + Data("\n".utf8))
+    }
+    exit(0)
+}
+
+// Neighbours and duplicate sets on the database's vectors, for the Rust engine's parity check.
+//   earmark-parity similar <library.sqlite> < ids.txt   each sound's 20 nearest by CLAP
+//   earmark-parity dupsets <library.sqlite>             identical copies and saved near pairs, as sets
+if args.count >= 3, ["similar", "dupsets"].contains(args[1]) {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    func emit(_ value: some Encodable) throws { FileHandle.standardOutput.write(try encoder.encode(value) + Data("\n".utf8)) }
+    if args[1] == "similar" {
+        struct Row: Encodable { var id: Int64; var ids: [Int64]; var scores: [Float] }
+        let index = SimilarityIndex(vectors: try db.vectors(model: "clap-general"))
+        while let line = readLine(), let id = Int64(line) {
+            let near = index.nearest(to: id, count: 20)
+            try emit(Row(id: id, ids: near.map(\.id), scores: near.map(\.score)))
+        }
+    } else {
+        struct Other: Encodable { var id: Int64; var identical: Bool; var similarity: Float }
+        struct Out: Encodable { var identical: Int; var near: Int; var members: [[Int64]]; var others: [String: [Other]] }
+        let sounds = try db.sounds()
+        let identical = Duplicates.identicalPairs(sounds, hidden: FormatTwins.group(sounds).hidden)
+        let near = try db.nearDuplicates()
+        let sets = Duplicates.sets(identical + near)
+        try emit(Out(identical: identical.count, near: near.count, members: sets.members,
+                     others: Dictionary(uniqueKeysWithValues: sets.others.map { ("\($0.key)", $0.value.map { Other(id: $0.id, identical: $0.identical, similarity: $0.similarity) }) })))
     }
     exit(0)
 }

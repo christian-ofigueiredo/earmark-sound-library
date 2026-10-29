@@ -388,3 +388,59 @@ fn facts_and_embeddings_follow_the_sound() {
             .is_none()
     );
 }
+
+/// The sound map's vectors: sounds with a current vector from every model, in id order.
+#[test]
+fn vectors_from_several_models_come_together() {
+    use earmark_db::SoundEmbedding;
+    let db = LibraryDatabase::open(None, false).unwrap();
+    let root = temp_dir("db-vectors");
+    let r = root_str(&root);
+    for (i, name) in ["a.wav", "b.wav", "c.wav"].iter().enumerate() {
+        write(&root, name, &wav((i + 1) as f64, 48000, &[]));
+    }
+    let lib = db.add_library("sounds", &r, None).unwrap();
+    db.replace_sounds(lib.id, &r, &scanned(&root)).unwrap();
+    let mut s = db.sounds(None).unwrap();
+    s.sort_by_key(|x| x.id);
+    let e = |i: usize, model: &str, v: &[f32]| SoundEmbedding {
+        sound_id: s[i].id.unwrap(),
+        model: model.into(),
+        fingerprint: s[i].fingerprint.clone(),
+        version: 1,
+        vector: Some(SoundEmbedding::bytes(v)),
+        error: None,
+        analyzed_at: "2026-10-29 12:00:00.000".into(),
+    };
+    db.save_embeddings(&[
+        e(2, "pe-av-large", &[3.0, 3.0, 3.0]),
+        e(2, "clap-general", &[3.0]),
+        e(0, "pe-av-large", &[1.0, 1.0, 1.0]),
+        e(0, "clap-general", &[1.0]),
+        e(1, "pe-av-large", &[2.0, 2.0, 2.0]), // no CLAP
+    ])
+    .unwrap();
+    let (mut count, mut got) = (0, Vec::new());
+    db.for_each_vectors(
+        &["pe-av-large", "clap-general"],
+        None,
+        &mut |n| count = n,
+        &mut |id, v| got.push((id, v)),
+    )
+    .unwrap();
+    assert_eq!(count, 2);
+    assert_eq!(
+        got.iter().map(|g| g.0).collect::<Vec<_>>(),
+        [s[0].id.unwrap(), s[2].id.unwrap()]
+    );
+    assert_eq!(got[0].1, vec![vec![1.0, 1.0, 1.0], vec![1.0]]);
+    let mut only = Vec::new();
+    db.for_each_vectors(
+        &["pe-av-large"],
+        Some(&[s[1].id.unwrap()]),
+        &mut |_| {},
+        &mut |id, _| only.push(id),
+    )
+    .unwrap();
+    assert_eq!(only, [s[1].id.unwrap()]);
+}

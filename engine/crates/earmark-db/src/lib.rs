@@ -516,6 +516,61 @@ impl LibraryDatabase {
         })
     }
 
+    /// The same for sounds that have a current vector from every one of `models`, in sound id
+    /// order, one sound at a time (`body` gets them in `models`' order). `count` first gets how
+    /// many there will be. `ids`: only these sounds.
+    pub fn for_each_vectors(
+        &self,
+        models: &[&str],
+        ids: Option<&[i64]>,
+        count: &mut dyn FnMut(usize),
+        body: &mut dyn FnMut(i64, Vec<Vec<f32>>),
+    ) -> Result<()> {
+        let mut joins: Vec<String> = (0..models.len())
+            .map(|i| {
+                format!(
+                    "JOIN soundEmbedding e{i} ON e{i}.soundId = s.id AND e{i}.model = ? AND e{i}.vector IS NOT NULL \
+                     AND e{i}.version >= ? AND e{i}.fingerprint IS s.fingerprint"
+                )
+            })
+            .collect();
+        // Only these sounds (ids are integers, so written in).
+        if let Some(ids) = ids {
+            joins.push(format!(
+                "AND s.id IN ({})",
+                ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
+            ));
+        }
+        let joins = joins.join(" ");
+        let columns: Vec<String> = (0..models.len()).map(|i| format!("e{i}.vector")).collect();
+        let mut values: Vec<rusqlite::types::Value> = Vec::new();
+        for m in models {
+            values.push(m.to_string().into());
+            values.push(SoundEmbedding::version_of(m).into());
+        }
+        self.with(|c| {
+            let n: i64 = c.query_row(
+                &format!("SELECT COUNT(*) FROM sound s {joins}"),
+                rusqlite::params_from_iter(values.iter()),
+                |r| r.get(0),
+            )?;
+            count(n as usize);
+            let mut st = c.prepare(&format!(
+                "SELECT s.id, {} FROM sound s {joins} ORDER BY s.id",
+                columns.join(", ")
+            ))?;
+            let mut rows = st.query(rusqlite::params_from_iter(values.iter()))?;
+            while let Some(r) = rows.next()? {
+                let mut vectors = Vec::with_capacity(models.len());
+                for i in 0..models.len() {
+                    vectors.push(SoundEmbedding::floats(&r.get::<_, Vec<u8>>(i + 1)?));
+                }
+                body(r.get(0)?, vectors);
+            }
+            Ok(())
+        })
+    }
+
     pub fn embedding(&self, sound_id: i64, model: &str) -> Result<Option<SoundEmbedding>> {
         self.with(|c| {
             c.query_row(
@@ -550,6 +605,43 @@ impl LibraryDatabase {
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(soundId, model) DO UPDATE SET fingerprint = ?3, \
                      version = ?4, vector = ?5, error = ?6, analyzedAt = ?7",
                     params![e.sound_id, e.model, e.fingerprint, e.version, e.vector, e.error, e.analyzed_at],
+                )?;
+            }
+            tx.commit()
+        })
+    }
+
+    // MARK: duplicates
+
+    /// The same-recording pairs last found (byte-identical copies come from the fingerprints).
+    pub fn near_duplicates(&self) -> Result<Vec<earmark_core::analysis::duplicates::Pair>> {
+        use earmark_core::analysis::duplicates::Pair;
+        self.with(|c| {
+            // A database the app hasn't opened since this table came (read-only readers can't migrate).
+            let exists: bool = c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'soundDuplicate')",
+                [],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                return Ok(Vec::new());
+            }
+            let mut st = c.prepare("SELECT soundA, soundB, similarity FROM soundDuplicate")?;
+            st.query_map([], |r| Ok(Pair::new(r.get(0)?, r.get(1)?, false, r.get::<_, f64>(2)? as f32)))?.collect()
+        })
+    }
+
+    pub fn save_near_duplicates(
+        &self,
+        pairs: &[earmark_core::analysis::duplicates::Pair],
+    ) -> Result<()> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            tx.execute("DELETE FROM soundDuplicate", [])?;
+            for p in pairs.iter().filter(|p| !p.identical) {
+                tx.execute(
+                    "INSERT OR REPLACE INTO soundDuplicate (soundA, soundB, similarity) VALUES (?1, ?2, ?3)",
+                    params![p.a, p.b, p.similarity as f64],
                 )?;
             }
             tx.commit()

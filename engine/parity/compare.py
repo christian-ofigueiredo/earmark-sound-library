@@ -5,6 +5,9 @@
     python3 engine/parity/compare.py twins <library.sqlite>
     python3 engine/parity/compare.py keys [<music_analysis.json>]
     python3 engine/parity/compare.py phase0 <music_analysis.json>
+    python3 engine/parity/compare.py audio <library.sqlite> [--count N]
+    python3 engine/parity/compare.py similar <library.sqlite> [--count N]
+    python3 engine/parity/compare.py dupsets <library.sqlite>
     python3 engine/parity/compare.py db <library.sqlite> <sounds folder> <music folder> <music_analysis.json>
 
 Runs the same mode of `earmark-parity` (Swift, app/.build/release) and `earmark-engine`
@@ -38,6 +41,9 @@ def run(cmd, stdin=""):
     return [json.loads(line) for line in r.stdout.splitlines()]
 
 
+TOLERANCE = 1e-9
+
+
 def diff(a, b, where, out):
     if isinstance(a, dict) and isinstance(b, dict):
         for k in sorted(set(a) | set(b)):
@@ -52,7 +58,7 @@ def diff(a, b, where, out):
         for i, (x, y) in enumerate(zip(a, b)):
             diff(x, y, f"{where}[{i}]", out)
     elif isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool):
-        if not math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-9):
+        if not math.isclose(a, b, rel_tol=TOLERANCE, abs_tol=TOLERANCE):
             out.append(f"{where}: swift={a!r} rust={b!r}")
     elif isinstance(a, str) and isinstance(b, str):
         if unicodedata.normalize("NFC", a) != unicodedata.normalize("NFC", b):
@@ -97,6 +103,74 @@ def key_texts(phase0_file):
         tracks = json.load(open(phase0_file))["tracks"]
         texts += [t["key_second_opinion"] for t in tracks if t.get("key_second_opinion")]
     return texts
+
+
+def sample_sounds(db, count, where="1"):
+    """Sound ids and paths spread evenly over the library (every format and pack)."""
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    rows = con.execute(f"SELECT id, path FROM sound WHERE {where} ORDER BY path").fetchall()
+    con.close()
+    step = max(1, len(rows) // count)
+    return [r for r in rows[::step] if os.path.exists(r[1])][:count]
+
+
+def audio_mode(db, count):
+    """Loudness and CLAP's input from the same decoded audio, in batches (the decoded files are big)."""
+    sounds = sample_sounds(db, count)
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    stored = dict(con.execute("SELECT s.path, f.loudness FROM sound s JOIN soundFacts f ON f.soundId = s.id").fetchall())
+    con.close()
+    bad, worst_clap, worst_stored, windows, n = 0, 0.0, 0.0, 0, 0
+    for b in range(0, len(sounds), 20):
+        work = tempfile.mkdtemp(prefix="earmark-audio-parity-")
+        try:
+            paths = "\n".join(p for _, p in sounds[b:b + 20]) + "\n"
+            swift = run([SWIFT, "audio", work], paths)
+            rust = run([RUST, "audio", work], "\n".join(json.dumps(r) for r in swift) + "\n")
+            for sw, ru in zip(swift, rust):
+                n += 1
+                windows += len(sw["windows"])
+                clap = ru.pop("clapWorst")
+                if not isinstance(clap, float) or clap > 1e-4:
+                    bad += 1
+                    print(sw["path"], "CLAP features differ by", clap)
+                worst_clap = max(worst_clap, clap if isinstance(clap, float) else math.inf)
+                out = []
+                diff(sw, ru, "", out)
+                if out:
+                    bad += 1
+                    print(sw["path"])
+                    for line in out[:5]:
+                        print("   ", line)
+                if stored.get(sw["path"]) is not None and ru["loudness"]["integrated"] is not None:
+                    worst_stored = max(worst_stored, abs(stored[sw["path"]] - ru["loudness"]["integrated"]))
+        finally:
+            shutil.rmtree(work)
+    print(f"audio: {n} files, {windows} windows; CLAP features within {worst_clap:.2g} dB of Swift's; "
+          f"loudness within {worst_stored:.2g} LU of the app's stored values; {bad} with differences")
+    return bad
+
+
+def similar_mode(db, count):
+    ids = "\n".join(str(i) for i, _ in sample_sounds(db, count, "id IN (SELECT soundId FROM soundEmbedding WHERE model = 'clap-general')")) + "\n"
+    swift, rust = run([SWIFT, "similar", db], ids), run([RUST, "similar", db], ids)
+    bad, swapped = 0, 0
+    for s, r in zip(swift, rust):
+        if s["ids"] == r["ids"] and all(math.isclose(a, b, abs_tol=1e-5) for a, b in zip(s["scores"], r["scores"])):
+            continue
+        # Neighbours whose scores are equal to float precision may come in either order, and a tie
+        # for the last place may go either way: Swift adds with vDSP, Rust in a plain loop.
+        close = len(s["scores"]) == len(r["scores"]) and all(math.isclose(a, b, abs_tol=1e-5) for a, b in zip(s["scores"], r["scores"]))
+        differing = set(s["ids"]) ^ set(r["ids"])
+        scores = dict(zip(s["ids"], s["scores"])) | dict(zip(r["ids"], r["scores"]))
+        if close and all(abs(scores[i] - s["scores"][-1]) <= 1e-5 for i in differing):
+            swapped += 1
+            continue
+        bad += 1
+        if bad <= 5:
+            print(s["id"], s["ids"][:6], r["ids"][:6], s["scores"][:3], r["scores"][:3])
+    print(f"similar: {len(swift)} sounds × 20 neighbours, {swapped} with ties (within 1e-5) in another order, {bad} differing")
+    return bad
 
 
 def db_tables(path):
@@ -259,6 +333,15 @@ def main():
         bad = compare(run([SWIFT, "keys"], texts), run([RUST, "keys"], texts), "keys")
     elif mode == "phase0":
         bad = compare(run([SWIFT, "phase0", arg]), run([RUST, "phase0", arg]), "phase0")
+    elif mode == "audio":
+        bad = audio_mode(arg, int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 200)
+    elif mode == "similar":
+        bad = similar_mode(arg, int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 2000)
+    elif mode == "dupsets":
+        # Similarities are 32-bit floats, which Swift prints with fewer digits.
+        global TOLERANCE
+        TOLERANCE = 1e-6
+        bad = compare(run([SWIFT, "dupsets", arg]), run([RUST, "dupsets", arg]), "duplicate sets")
     elif mode == "db":
         bad = db_mode(arg, sys.argv[3], sys.argv[4], sys.argv[5])
     else:
