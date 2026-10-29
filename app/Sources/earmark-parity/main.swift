@@ -130,6 +130,27 @@ if args.count >= 3, ["similar", "dupsets"].contains(args[1]) {
     exit(0)
 }
 
+// Each sound's 15 nearest (the sound map's neighbour search), for the Rust engine's parity check:
+//   earmark-parity knn <library.sqlite> <out.json> [category]
+if args.count >= 4, args[1] == "knn" {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    let category = args.count > 4 ? args[4] : nil
+    let peav = Dictionary(uniqueKeysWithValues: try db.vectors(model: "pe-av-large").map { ($0.id, $0.vector) })
+    let clap = Dictionary(uniqueKeysWithValues: try db.vectors(model: "clap-general").map { ($0.id, $0.vector) })
+    let sounds = try db.sounds().filter { s in
+        guard let id = s.id, peav[id] != nil, clap[id] != nil else { return false }
+        return category == nil || s.category == category
+    }.sorted { $0.id! < $1.id! }
+    let flat = PageBuffer(count: sounds.count * 1536)
+    flat.withFloats { f in
+        for (i, s) in sounds.enumerated() { for (c, v) in SoundMap.combine([peav[s.id!]!, clap[s.id!]!]).enumerated() { f[i * 1536 + c] = v } }
+    }
+    let (indices, distances) = flat.withFloats { SoundMap.nearestNeighbours(UnsafeBufferPointer($0), n: sounds.count, d: 1536, k: 15) }
+    struct Out: Encodable { var indices: [Int]; var distances: [Float] }
+    try JSONEncoder().encode(Out(indices: indices, distances: distances)).write(to: URL(fileURLWithPath: args[3]))
+    exit(0)
+}
+
 // The database, for the Rust engine's parity check (engine/parity/compare.py db). Only ever
 // given copies of Earmark's database.
 //   earmark-parity db-new <path>         a new, empty database
@@ -398,9 +419,13 @@ if args.count >= 4, args[1] == "map" {
         guard let id = s.id, peav[id] != nil, clap[id] != nil else { return false }
         return category == nil || s.category == category
     }.sorted { $0.id! < $1.id! }
-    let vectors = sounds.map { SoundMap.combine([peav[$0.id!]!, clap[$0.id!]!]) }
+    // In a PageBuffer, as the app's: Accelerate's sums depend on where the matrix sits.
+    let flat = PageBuffer(count: sounds.count * 1536)
+    flat.withFloats { f in
+        for (i, s) in sounds.enumerated() { for (c, v) in SoundMap.combine([peav[s.id!]!, clap[s.id!]!]).enumerated() { f[i * 1536 + c] = v } }
+    }
     let t = Date()
-    let map = SoundMap.layout(vectors)!
+    let map = flat.withFloats { SoundMap.layout(flat: UnsafeBufferPointer($0), count: sounds.count, dimensions: 1536) }!
     let seconds = Date().timeIntervalSince(t)
     print(String(format: "%d sounds%@: layout in %.1f s", sounds.count, category.map { " in \($0)" } ?? "", seconds))
     struct Out: Encodable { var ids: [Int64]; var x: [Float]; var y: [Float]; var seconds: Double }

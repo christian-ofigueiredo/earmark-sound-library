@@ -3,6 +3,7 @@
 //! switches to the engine. The only place Earmark writes.
 
 pub mod dates;
+pub mod groups;
 pub mod records;
 pub mod schema;
 
@@ -257,7 +258,10 @@ impl LibraryDatabase {
         })
     }
 
-    fn with<T>(&self, f: impl FnOnce(&mut Connection) -> rusqlite::Result<T>) -> Result<T> {
+    pub(crate) fn with<T>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> rusqlite::Result<T>,
+    ) -> Result<T> {
         let mut c = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         Ok(f(&mut c)?)
     }

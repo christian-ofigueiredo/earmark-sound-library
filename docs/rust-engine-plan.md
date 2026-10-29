@@ -78,6 +78,27 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
    created here; the code that fills them comes with step 4.
 4. Analysis maths: loudness (EBU Tech 3341 cases), CLAP features, similarity, HDBSCAN,
    Ward, groups and their names, the sound map, duplicates, categories and folder rules.
+   - **4a, done 2026-10-29:** loudness, Phase 0's audio preparation, CLAP's features,
+     PE-AV's padding, similarity, duplicates. On 200 of the owner's files decoded by
+     Swift: CLAP features identical to the bit, loudness identical to the stored values;
+     2,000 sounds' neighbours and the duplicate sets identical.
+   - **4b, done 2026-10-29:** the sound map (UMAP), HDBSCAN, Ward, groups, their names,
+     when to regroup, and the group tables. Identical to the bit on the owner's library:
+     the whole map (28,827 sounds) and every subcategory's groups and names (238
+     subcategories, 605 groups). What it took:
+     - **Accelerate on the Mac.** Swift's products go through vDSP, which adds in its
+       own order, and UMAP's 200–500 rounds magnify the last bit. Rust calls the same
+       vDSP functions on macOS (`analysis::linalg`); elsewhere plain loops, as Swift's
+       code without Accelerate.
+     - **Where matrices sit.** vDSP's sums depend on the matrix's place in memory
+       (moving it by one float changed 167 of 206 products). The map and groups get
+       page-aligned buffers as the app's `PageBuffer`; the similarity index sits where a
+       Swift array's storage does (`linalg::Floats`). `earmark-parity map` now uses a
+       `PageBuffer` as the app does.
+     - **Swift's `Float.pi`** is π rounded toward zero (3.1415925), not to the nearest
+       float, so the map's random normals use it.
+     Where Swift's Ward picks between equally small groups in its dictionary's order, Rust
+     takes the lowest point (no case on the owner's library).
 5. Analysis files and timeline files.
 6. The Resolve bridge and the MCP server.
 7. Audio decoding (Symphonia) and the models (ONNX), with the same parity checks as the

@@ -3,5 +3,9 @@
 
 pub mod audio;
 pub mod duplicates;
+pub mod groups;
+pub mod hdbscan;
+pub mod linalg;
 pub mod loudness;
 pub mod similarity;
+pub mod sound_map;

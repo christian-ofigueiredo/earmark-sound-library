@@ -47,7 +47,9 @@ Rust so we can have new Mac version and the Windows version". On it so far:
   frames.
 - The Rust engine (`docs/rust-engine-plan.md`): `engine/`, a Cargo workspace. Steps 1 (UCS,
   CSV, metadata reading and normalising) 2 (scanning, fingerprints, format twins, music
-  keys, Phase 0 import) and 3 (the database, `earmark-db`) are ported. `engine/parity/compare.py`
+  keys, Phase 0 import) 3 (the database, `earmark-db`) and most of 4 (analysis
+  maths: loudness, model inputs, similarity, duplicates, the sound map, groups) are ported,
+  identical to the bit on the owner's library (see the plan for what that took). `engine/parity/compare.py`
   compares it with the Swift code on real data (read-only), one mode per piece; `.github/workflows/engine.yml`
   tests it on macOS, Windows and Linux. Cargo comes from Homebrew's rustup
   (`/opt/homebrew/opt/rustup/bin`, not on the shell's PATH).

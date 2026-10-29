@@ -1,12 +1,14 @@
 //! Nearest neighbours by cosine similarity over L2-normalised embeddings: one contiguous matrix,
 //! a dot product against every row per query. Port of `SimilarityIndex.swift`.
 
+use super::linalg::{Floats, mmul};
 use std::collections::{HashMap, HashSet};
 
 pub struct SimilarityIndex {
     pub ids: Vec<i64>,
     pub dimensions: usize,
-    matrix: Vec<f32>,
+    /// Where a Swift array keeps it, so Accelerate sums as in the app.
+    matrix: Floats,
     row: HashMap<i64, usize>,
 }
 
@@ -25,7 +27,13 @@ impl SimilarityIndex {
         SimilarityIndex {
             ids: kept.iter().map(|v| v.0).collect(),
             dimensions: dims,
-            matrix: kept.iter().flat_map(|v| v.1.iter().copied()).collect(),
+            matrix: {
+                let mut m = Floats::array(kept.len() * dims);
+                for (i, v) in kept.iter().enumerate() {
+                    m[i * dims..(i + 1) * dims].copy_from_slice(&v.1);
+                }
+                m
+            },
             row,
         }
     }
@@ -52,16 +60,22 @@ impl SimilarityIndex {
             return Vec::new();
         }
         let d = self.dimensions;
-        let query = &self.matrix[q * d..(q + 1) * d];
+        // scores (rows × 1) = matrix (rows × d) · query (d × 1).
+        let mut scores = vec![0f32; self.ids.len()];
+        mmul(
+            &self.matrix,
+            &self.matrix[q * d..(q + 1) * d],
+            &mut scores,
+            self.ids.len(),
+            1,
+            d,
+        );
         let mut best: Vec<(i64, f32)> = Vec::with_capacity(count + 1);
         for r in 0..self.ids.len() {
             if r == q {
                 continue;
             }
-            let s: f32 = self.matrix[r * d..(r + 1) * d]
-                .iter()
-                .zip(query)
-                .fold(0.0, |s, (a, b)| s + b * a);
+            let s = scores[r];
             // Most rows can't make the list; check the exclusions only for those that can.
             if best.len() == count && s <= best[count - 1].1 {
                 continue;

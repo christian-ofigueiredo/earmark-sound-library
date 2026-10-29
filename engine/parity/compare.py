@@ -8,6 +8,8 @@
     python3 engine/parity/compare.py audio <library.sqlite> [--count N]
     python3 engine/parity/compare.py similar <library.sqlite> [--count N]
     python3 engine/parity/compare.py dupsets <library.sqlite>
+    python3 engine/parity/compare.py map <library.sqlite> [category]
+    python3 engine/parity/compare.py groups <library.sqlite>
     python3 engine/parity/compare.py db <library.sqlite> <sounds folder> <music folder> <music_analysis.json>
 
 Runs the same mode of `earmark-parity` (Swift, app/.build/release) and `earmark-engine`
@@ -16,7 +18,7 @@ Runs the same mode of `earmark-parity` (Swift, app/.build/release) and `earmark-
 String does, by canonical equivalence (Foundation's file URLs decompose accents: "é" as "e"
 and a combining accent).
 """
-import datetime, json, math, os, shutil, sqlite3, subprocess, sys, tempfile, unicodedata
+import datetime, json, math, os, shutil, sqlite3, struct, subprocess, sys, tempfile, unicodedata
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SWIFT = os.path.join(ROOT, "app/.build/release/earmark-parity")
@@ -171,6 +173,53 @@ def similar_mode(db, count):
             print(s["id"], s["ids"][:6], r["ids"][:6], s["scores"][:3], r["scores"][:3])
     print(f"similar: {len(swift)} sounds × 20 neighbours, {swapped} with ties (within 1e-5) in another order, {bad} differing")
     return bad
+
+
+def f32(v):
+    return struct.unpack("f", struct.pack("f", v))[0]
+
+
+def backup(db, work):
+    """A copy to work on (Swift's map and groups modes open their database to write)."""
+    copy = os.path.join(work, "copy.sqlite")
+    subprocess.run(["sqlite3", f"file:{db}?mode=ro", f".backup {copy}"], check=True)
+    return copy
+
+
+def map_mode(db, category):
+    """The sound map, to the bit (the app's maps: matrices page-aligned, as its PageBuffer)."""
+    work = tempfile.mkdtemp(prefix="earmark-map-parity-")
+    try:
+        copy, extra = backup(db, work), [category] if category else []
+        subprocess.run([SWIFT, "map", copy, f"{work}/swift.json"] + extra, check=True, capture_output=True)
+        subprocess.run([RUST, "map", copy, f"{work}/rust.json"] + extra, check=True, capture_output=True)
+        a, b = json.load(open(f"{work}/swift.json")), json.load(open(f"{work}/rust.json"))
+        A, B = [f32(v) for v in a["x"] + a["y"]], [f32(v) for v in b["x"] + b["y"]]
+        same = sum(p == q for p, q in zip(A, B))
+        print(f"map{' of ' + category if category else ''}: {len(a['ids'])} sounds, {same} of {len(A)} coordinates identical")
+        return int(a["ids"] != b["ids"] or same != len(A))
+    finally:
+        shutil.rmtree(work)
+
+
+def groups_mode(db):
+    work = tempfile.mkdtemp(prefix="earmark-groups-parity-")
+    try:
+        copy = backup(db, work)
+        subprocess.run([SWIFT, "groups", copy, f"{work}/swift.json"], check=True, capture_output=True)
+        subprocess.run([RUST, "groups", copy, f"{work}/swift.json", f"{work}/rust.json"], check=True, capture_output=True)
+        a, b = json.load(open(f"{work}/swift.json")), json.load(open(f"{work}/rust.json"))
+        bad = 0
+        for x, y in zip(a, b):
+            if x["catID"] != y["catID"] or x["labels"] != y["labels"] or x["names"] != y["names"]:
+                bad += 1
+                if bad <= 5:
+                    print(x["catID"], "differs")
+        print(f"groups: {len(a)} subcategories, {sum(len(x['ids']) for x in a)} sounds, "
+              f"{sum(len(x['names']) for x in a)} groups; {bad} subcategories differ")
+        return bad + int(len(a) != len(b))
+    finally:
+        shutil.rmtree(work)
 
 
 def db_tables(path):
@@ -342,6 +391,10 @@ def main():
         global TOLERANCE
         TOLERANCE = 1e-6
         bad = compare(run([SWIFT, "dupsets", arg]), run([RUST, "dupsets", arg]), "duplicate sets")
+    elif mode == "map":
+        bad = map_mode(arg, sys.argv[3] if len(sys.argv) > 3 else None)
+    elif mode == "groups":
+        bad = groups_mode(arg)
     elif mode == "db":
         bad = db_mode(arg, sys.argv[3], sys.argv[4], sys.argv[5])
     else:
