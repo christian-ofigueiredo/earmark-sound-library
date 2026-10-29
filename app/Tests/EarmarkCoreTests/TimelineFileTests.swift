@@ -59,9 +59,15 @@ import Testing
         #expect(placed.first?.end == "01:00:00;16")
         #expect(xml.contains(#"tcFormat="DF""#))
         #expect(xml.contains(#"tcStart="8999991/2500s""#))
-        #expect(xml.contains(#"start="36000s" duration="4s""#))
-        // Frame 14 at 29.97: 36000 + 14 × 1001/30000.
-        #expect(xml.contains(#"start="540007007/15000s" duration="1001/1875s""#))
+        // 36000 s is frame 1078921.08 at 29.97: the asset starts at the nearest frame, the cut 14 frames later.
+        let fd = TimelineFile.Rate.named("29.97")!
+        #expect(xml.contains(#"start="\#(Rational(1001, 30000) * 1_078_921)" duration="4s""#))
+        #expect(xml.contains(#"start="\#(Rational(1001, 30000) * 1_078_935)" duration="1001/1875s""#))
+        #expect(fd.nominal == 30)
+        // A start 0.88 of a frame in rounds up, as Resolve reads it (56.096 s at 30 fps).
+        let late = clip("L", timeReference: 2_692_608)
+        #expect(TimelineFile.startFrame(late, TimelineFile.Rate.named("30")!) == 1683)
+        #expect(TimelineFile.startFrame(late, rate25) == 1402)
     }
 
     @Test func escapingAndFailures() throws {

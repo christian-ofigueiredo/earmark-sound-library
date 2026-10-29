@@ -131,7 +131,7 @@ public enum TimelineFile {
             let rateSamples = Int64(max(clip.sampleRate, 1))
             let samples = Int64((clip.length * Double(rateSamples)).rounded())
             x += """
-                    <asset id="r\(n + 1)" name="\(escape(clip.name))" start="\(Rational(clip.timeReference, rateSamples))" \
+                    <asset id="r\(n + 1)" name="\(escape(clip.name))" start="\(fd * startFrame(clip, rate))" \
                 duration="\(Rational(samples, rateSamples))" hasAudio="1" audioSources="1" audioChannels="\(max(clip.channels, 1))" \
                 audioRate="\(clip.sampleRate)">
                       <media-rep kind="original-media" src="\(escape(fileURL(clip.path)))"/>
@@ -151,7 +151,7 @@ public enum TimelineFile {
 
             """
         for cut in cuts {
-            let assetStart = Rational(cut.clip.timeReference, Int64(max(cut.clip.sampleRate, 1)))
+            let assetStart = fd * startFrame(cut.clip, rate)
             x += """
                               <asset-clip ref="r\(cut.asset)" lane="-\(cut.lane)" offset="\(tcStart + fd * cut.at)" \
                 name="\(escape(cut.clip.name))" start="\(assetStart + fd * cut.inFrame)" duration="\(fd * cut.duration)" \
@@ -173,6 +173,15 @@ public enum TimelineFile {
             Placement(lane: $0.lane, start: timecode(first + $0.at, rate), end: timecode(first + $0.at + $0.duration, rate))
         }
         return (x, placements)
+    }
+
+    /// The file's own start (its BWF time reference) in whole frames, rounded to the nearest.
+    /// Resolve 21 reads an asset's start that way: given the exact start, a file starting between
+    /// two frames had every cut up to half a frame off (checked 2026-10-29 against ⌘T's cuts of
+    /// the same files at 25, 29.97 DF and 30 fps).
+    static func startFrame(_ clip: Clip, _ rate: Rate) -> Int64 {
+        let per = rate.numerator * Int64(max(clip.sampleRate, 1))
+        return (clip.timeReference * rate.denominator + per / 2) / per
     }
 
     // MARK: timecode

@@ -58,3 +58,19 @@ can't be reached.
   23.976, 25 and 29.97 DF. Check that each cut plays the same audio as the same cut made
   with ⌘T.
 - Final Cut Pro isn't installed on the owner's Mac, so that import isn't tested.
+
+### Results (2026-10-29, Resolve Studio 21.1.2, in the LABORATORY project at 30 fps)
+
+Files from the owner's library: stereo and mono WAVs at 44.1, 48 and 96 kHz, two BWF files
+with a time reference (one starting between frames), and an MP3; whole files, ranges and
+`at` times; timelines at 25, 29.97 DF and 30 fps.
+
+- Every file imported online, on the expected tracks and at the expected timecodes, with
+  the timeline's frame rate, drop frame and start timecode.
+- Each cut starts on the same audio as the same cut made with ⌘T (`GetSourceStartTime`).
+  This needed one fix: **Resolve rounds an asset's start to the nearest frame of the
+  timeline**, so a BWF file starting between frames had its cuts up to half a frame off
+  until Earmark wrote the start already rounded (`TimelineFile.startFrame`).
+- Resolve puts mono files on a mono track of their own, since its tracks are mono or
+  stereo. Earmark's lanes still decide which stereo clips share a track.
+- The test timelines and bin were removed from LABORATORY afterwards.

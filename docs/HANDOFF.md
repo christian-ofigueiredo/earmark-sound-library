@@ -42,8 +42,9 @@ alpha is built. The owner approved, in their words: implement FCPXML and "start 
 Rust so we can have new Mac version and the Windows version". On it so far:
 - Timeline files (`docs/timeline-file-plan.md`): `EarmarkCore/TimelineFile.swift`,
   File ▸ Save as Timeline File… (⇧⌘T, `Earmark/TimelineFileExport.swift`) and the MCP tool
-  `save_timeline_file` (writes to `~/Movies/Earmark`). Unit tests pass; the import into
-  Resolve is still to be checked with the owner (it needs their open project switched).
+  `save_timeline_file` (writes to `~/Movies/Earmark`). Checked in Resolve Studio 21
+  (`docs/timeline-file-plan.md`, Results): cuts match ⌘T's after rounding BWF starts to
+  frames.
 - The Rust engine (`docs/rust-engine-plan.md`): `engine/`, a Cargo workspace. Step 1 (UCS,
   CSV, metadata reading and normalising) is ported. `engine/parity/compare_metadata.py`
   compares it with the Swift code on a real folder (read-only); `.github/workflows/engine.yml`
