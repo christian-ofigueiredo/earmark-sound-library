@@ -42,13 +42,24 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
 1. **Foundations:** the workspace, CI, UCS catalogue and CSV, read-only file access,
    XML flattening, the WAV/RF64/BW64/AIFF metadata reader, metadata normalising.
    **Done 2026-10-29:** the same results as Swift on all 29,166 files of the owner's
-   SoundFX library (`engine/parity/compare_metadata.py`: every chunk, field, source and
+   SoundFX library (`engine/parity/compare.py`: every chunk, field, source and
    category, and the BWF time reference).
 2. Scanning: listing audio files, fingerprints, format twins; music keys; Phase 0
-   import.
+   import. **Done 2026-10-29**, the same results as Swift (`engine/parity/compare.py`):
+   - scanning the SoundFX library (29,177 files) and the music folder (1,688 songs):
+     the list and its order, sizes, dates, fingerprints, technical facts, metadata;
+   - format twins of the library's 29,177 sounds (350 hidden copies);
+   - 3,276 key spellings (every note, accidental and mode, Camelot, Open Key, nonsense,
+     and Phase 0's second opinions), with names, Camelot codes and neighbours;
+   - both of the owner's Phase 0 music_analysis.json files (1,688 and 6 songs).
+   MP3/AAC lengths still come from AVFoundation in the app; in Rust they arrive with
+   audio decoding (step 7).
 3. The database: the same schema (migrations v1–v10, recorded in GRDB's
    `grdb_migrations` table, so both can open the same file), replacing sounds on
    rescan with ids kept.
+   Text that Swift compares with `==` (file names when matching Phase 0 songs, for
+   example) must be compared by canonical equivalence in Rust too: Swift's strings treat
+   "é" and "e" + a combining accent as equal, and Foundation's file URLs give the second.
 4. Analysis maths: loudness (EBU Tech 3341 cases), CLAP features, similarity, HDBSCAN,
    Ward, groups and their names, the sound map, duplicates, categories and folder rules.
 5. Analysis files and timeline files.

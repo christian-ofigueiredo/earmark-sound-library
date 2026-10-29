@@ -12,7 +12,7 @@ import Foundation
 //
 // The reference files come from models/parity_clap.py / parity_peav.py --reference.
 //
-//   earmark-parity metadata < paths.txt    (see below; for the Rust engine)
+//   earmark-parity metadata|scan|twins|keys|phase0 …   (see below; for the Rust engine)
 
 /// Embeds a batch of files (PE-AV runs part by part over the whole batch).
 protocol BatchEmbedder { func embed(batch: [[Float]]) throws -> [[Float]?] }
@@ -31,7 +31,7 @@ extension PeavEmbedder: BatchEmbedder {
 var args = CommandLine.arguments
 
 // What Swift reads from each file whose path comes on stdin, as JSON lines, for the Rust engine's
-// parity check (engine/parity/compare_metadata.py). Reads the files only.
+// parity check (engine/parity/compare.py). Reads the files only.
 //   earmark-parity metadata < paths.txt
 if args.count >= 2, args[1] == "metadata" {
     struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
@@ -43,6 +43,60 @@ if args.count >= 2, args[1] == "metadata" {
         let row = Row(path: path, raw: raw, normalized: MetadataNormalizer.normalize(raw, url: url),
                       timeReference: MetadataReader.timeReference(url: url))
         FileHandle.standardOutput.write(try encoder.encode(row) + Data("\n".utf8))
+    }
+    exit(0)
+}
+
+// The scanner, format twins, music keys and the Phase 0 import, for the Rust engine's parity
+// check (engine/parity/compare.py). Reads only.
+//   earmark-parity scan <folder>          one JSON line per audio file
+//   earmark-parity twins <library.sqlite> the sounds and their format twins (read-only)
+//   earmark-parity keys < texts.txt       each text parsed as a key
+//   earmark-parity phase0 <music_analysis.json>
+if args.count >= 2, ["scan", "twins", "keys", "phase0"].contains(args[1]) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    func emit(_ value: some Encodable) throws { FileHandle.standardOutput.write(try encoder.encode(value) + Data("\n".utf8)) }
+    struct Key: Encodable {
+        var key: MusicKey; var name: String; var shortName: String; var camelot: String; var relative: MusicKey; var mixesWith: [MusicKey]
+        init(_ k: MusicKey) {
+            key = k; name = k.name; shortName = k.shortName; camelot = k.camelot; relative = k.relative; mixesWith = k.mixesWith
+        }
+    }
+    switch args[1] {
+    case "scan":
+        struct Row: Encodable {
+            var path: String; var fileSize: Int64; var modified: Double; var fingerprint: String?
+            var technical: AudioTechnical; var metadata: NormalizedMetadata; var warnings: [String]
+        }
+        for s in await LibraryScanner().scan(root: URL(fileURLWithPath: args[2])) {
+            try emit(Row(path: s.path, fileSize: s.fileSize, modified: s.modified.timeIntervalSince1970, fingerprint: s.fingerprint,
+                         technical: s.technical, metadata: s.metadata, warnings: s.warnings))
+        }
+    case "twins":
+        struct Candidate: Encodable {
+            var id: Int64; var libraryId: Int64; var fileName: String; var folder: String; var path: String
+            var duration: Double?; var sampleRate: Double?; var bitsPerSample: Int?
+        }
+        struct Out: Encodable { var sounds: [Candidate]; var alternates: [String: [Int64]]; var hidden: [Int64] }
+        let sounds = try LibraryDatabase(path: args[2], readOnly: true).sounds()
+        let groups = FormatTwins.group(sounds)
+        try emit(Out(sounds: sounds.map { Candidate(id: $0.id!, libraryId: $0.libraryId, fileName: $0.fileName, folder: $0.folder,
+                                                    path: $0.path, duration: $0.duration, sampleRate: $0.sampleRate,
+                                                    bitsPerSample: $0.bitsPerSample) },
+                     alternates: Dictionary(uniqueKeysWithValues: groups.alternates.map { ("\($0.key)", $0.value) }),
+                     hidden: groups.hidden.sorted()))
+    case "keys":
+        struct Row: Encodable { var text: String; var parsed: Key? }
+        while let text = readLine() { try emit(Row(text: text, parsed: MusicKey(parsing: text).map(Key.init))) }
+        for k in MusicKey.all { try emit(Row(text: "all", parsed: Key(k))) }
+    default:
+        struct Row: Encodable {
+            var path: String?; var fileName: String; var size: Int64?; var title: String?; var artist: String?; var analysis: SongAnalysis
+        }
+        for e in try Phase0MusicImport.read(Data(contentsOf: URL(fileURLWithPath: args[2]))) {
+            try emit(Row(path: e.path, fileName: e.fileName, size: e.size, title: e.title, artist: e.artist, analysis: e.analysis))
+        }
     }
     exit(0)
 }

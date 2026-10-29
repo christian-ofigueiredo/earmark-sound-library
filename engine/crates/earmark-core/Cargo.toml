@@ -11,3 +11,4 @@ encoding_rs.workspace = true
 quick-xml.workspace = true
 regex.workspace = true
 serde.workspace = true
+serde_json.workspace = true
