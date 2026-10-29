@@ -12,7 +12,7 @@ import Foundation
 //
 // The reference files come from models/parity_clap.py / parity_peav.py --reference.
 //
-//   earmark-parity metadata|scan|twins|keys|phase0 …   (see below; for the Rust engine)
+//   earmark-parity metadata|scan|twins|keys|phase0|db-new|db-ops …   (see below; for the Rust engine)
 
 /// Embeds a batch of files (PE-AV runs part by part over the whole batch).
 protocol BatchEmbedder { func embed(batch: [[Float]]) throws -> [[Float]?] }
@@ -43,6 +43,62 @@ if args.count >= 2, args[1] == "metadata" {
         let row = Row(path: path, raw: raw, normalized: MetadataNormalizer.normalize(raw, url: url),
                       timeReference: MetadataReader.timeReference(url: url))
         FileHandle.standardOutput.write(try encoder.encode(row) + Data("\n".utf8))
+    }
+    exit(0)
+}
+
+// The database, for the Rust engine's parity check (engine/parity/compare.py db). Only ever
+// given copies of Earmark's database.
+//   earmark-parity db-new <path>         a new, empty database
+//   earmark-parity db-ops <path> < ops.json   applies the operations in order
+if args.count >= 3, ["db-new", "db-ops"].contains(args[1]) {
+    let db = try LibraryDatabase(path: args[2])
+    if args[1] == "db-ops" {
+        struct Op: Decodable {
+            var op: String
+            var kind: String?
+            var path: String?
+            var root: String?
+            var scanned: [ScannedSound]?
+            var files: [File]?
+            var file: String?
+            var results: [Result]?
+        }
+        struct File: Decodable {
+            var path: String; var fileSize: Int64; var modified: Double
+            var title: String?; var artist: String?; var album: String?; var duration: Double?
+        }
+        struct Result: Decodable { var songId: Int64; var analysis: SongAnalysis }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let ops = try decoder.decode([Op].self, from: FileHandle.standardInput.readDataToEndOfFile())
+        func library(_ path: String?) throws -> Int64 {
+            guard let lib = try db.libraries().first(where: { $0.path == path }), let id = lib.id else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            return id
+        }
+        for op in ops {
+            switch op.op {
+            case "addLibrary":
+                try db.addLibrary(kind: Library.Kind(rawValue: op.kind!)!, path: op.path!, bookmark: nil)
+            case "removeLibrary":
+                try db.removeLibrary(id: try library(op.path))
+            case "replaceSounds":
+                try db.replaceSounds(libraryId: try library(op.path), root: URL(fileURLWithPath: op.root!), scanned: op.scanned!)
+            case "replaceSongs":
+                try db.replaceSongs(libraryId: try library(op.path), root: URL(fileURLWithPath: op.root!), files: op.files!.map {
+                    SongFile(path: $0.path, fileSize: $0.fileSize, modified: Date(timeIntervalSince1970: $0.modified),
+                             title: $0.title, artist: $0.artist, album: $0.album, duration: $0.duration)
+                })
+            case "applySongAnalysis":
+                print(try db.applySongAnalysis(Phase0MusicImport.read(Data(contentsOf: URL(fileURLWithPath: op.file!)))))
+            case "saveSongAnalysis":
+                print(try db.saveSongAnalysis(op.results!.map { ($0.songId, $0.analysis) }).compactMap(\.id))
+            default:
+                throw CocoaError(.featureUnsupported)
+            }
+        }
     }
     exit(0)
 }

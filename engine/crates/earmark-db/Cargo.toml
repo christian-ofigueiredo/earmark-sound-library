@@ -1,0 +1,12 @@
+[package]
+name = "earmark-db"
+description = "Earmark's library database: the same schema and rules as the Swift app, so both open the same file"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+earmark-core.workspace = true
+rusqlite.workspace = true
+serde.workspace = true

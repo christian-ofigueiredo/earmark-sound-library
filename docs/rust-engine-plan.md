@@ -56,10 +56,26 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
    audio decoding (step 7).
 3. The database: the same schema (migrations v1–v10, recorded in GRDB's
    `grdb_migrations` table, so both can open the same file), replacing sounds on
-   rescan with ids kept.
-   Text that Swift compares with `==` (file names when matching Phase 0 songs, for
-   example) must be compared by canonical equivalence in Rust too: Swift's strings treat
-   "é" and "e" + a combining accent as equal, and Foundation's file URLs give the second.
+   rescan with ids kept. **Done 2026-10-29** (`engine/crates/earmark-db`, rusqlite):
+   libraries, sounds, songs, loudness facts, embeddings, Phase 0 and Earmark's song
+   analysis. `compare.py db` runs the same operations in Swift and Rust on two copies of
+   the owner's database: 297 moved files, 543 removed and restored, a copy, the library
+   removed and added again, a song rescan with accented names in both Unicode forms, the
+   Phase 0 import and saved analysis. The results are identical (16 tables, 148,247
+   rows), new databases have the same schema, and each opens the other's. What it took
+   to match Swift exactly:
+   - **Names as Foundation spells them.** `URL.lastPathComponent` and folders come out
+     decomposed as the Mac file system writes them (HFS+: "é" as "e" + accent, except
+     U+2000–U+2FFF, U+F900–U+FAFF, U+2F800–U+2FAFF), while the path stays as given
+     (`earmark_core::paths`).
+   - **Text compared as Swift compares it**, by canonical equivalence (paths when
+     matching, file names in the Phase 0 import).
+   - **Dates rounded as Foundation rounds them**: to the nearest millisecond, halves up,
+     after going through seconds since 2001 (checked on 40,000 times).
+   Where Swift's result depends on its dictionaries' order (several moved files with
+   the same content), Rust goes by path, so it's the same every time.
+   The tables for groups, categories, folder rules, corrections and duplicates are
+   created here; the code that fills them comes with step 4.
 4. Analysis maths: loudness (EBU Tech 3341 cases), CLAP features, similarity, HDBSCAN,
    Ward, groups and their names, the sound map, duplicates, categories and folder rules.
 5. Analysis files and timeline files.

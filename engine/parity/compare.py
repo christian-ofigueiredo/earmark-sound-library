@@ -5,6 +5,7 @@
     python3 engine/parity/compare.py twins <library.sqlite>
     python3 engine/parity/compare.py keys [<music_analysis.json>]
     python3 engine/parity/compare.py phase0 <music_analysis.json>
+    python3 engine/parity/compare.py db <library.sqlite> <sounds folder> <music folder> <music_analysis.json>
 
 Runs the same mode of `earmark-parity` (Swift, app/.build/release) and `earmark-engine`
 (Rust, engine/target/release) and prints every difference. Numbers must match within 1e-9
@@ -12,7 +13,7 @@ Runs the same mode of `earmark-parity` (Swift, app/.build/release) and `earmark-
 String does, by canonical equivalence (Foundation's file URLs decompose accents: "é" as "e"
 and a combining accent).
 """
-import json, math, os, subprocess, sys, unicodedata
+import datetime, json, math, os, shutil, sqlite3, subprocess, sys, tempfile, unicodedata
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SWIFT = os.path.join(ROOT, "app/.build/release/earmark-parity")
@@ -98,6 +99,146 @@ def key_texts(phase0_file):
     return texts
 
 
+def db_tables(path):
+    """Every table's rows, in primary key order."""
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    out = {}
+    for (name,) in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"):
+        cols = [r[1] for r in con.execute(f'PRAGMA table_info("{name}")')]
+        order = ", ".join(str(i + 1) for i in range(min(2, len(cols))))
+        out[name] = (cols, con.execute(f'SELECT * FROM "{name}" ORDER BY {order}').fetchall())
+    schema = con.execute("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name").fetchall()
+    con.close()
+    return out, schema
+
+
+def compare_dbs(a, b, label, skip=lambda table, col: False):
+    (ta, sa), (tb, sb) = db_tables(a), db_tables(b)
+    bad = 0
+    if sa != sb:
+        print(f"{label}: schemas differ")
+        for x in sorted(set(sa) ^ set(sb)):
+            print("    ", "swift" if x in sa else "rust", x)
+        bad += 1
+    for name in sorted(set(ta) | set(tb)):
+        (ca, ra), (cb, rb) = ta.get(name, ([], [])), tb.get(name, ([], []))
+        keep = [i for i, c in enumerate(ca) if not skip(name, c)]
+        # Rows by their key (the first two columns); doubles to within a few units in the last
+        # place: Foundation's JSONDecoder, which reads the operations on the Swift side, can be off
+        # by that much (207.67927437641723 came back as …725).
+        def same(x, y):
+            if isinstance(x, float) and isinstance(y, float):
+                return math.isclose(x, y, rel_tol=1e-14, abs_tol=0)
+            return x == y
+        ka = {tuple(r[:2]): r for r in ra}
+        kb = {tuple(r[:2]): r for r in rb}
+        problems = []
+        if ca != cb:
+            problems.append(f"columns differ: {ca} / {cb}")
+        for k in sorted(set(ka) | set(kb), key=repr):
+            x, y = ka.get(k), kb.get(k)
+            if x is None or y is None:
+                problems.append(f"{k}: only in {'rust' if x is None else 'swift'}")
+                continue
+            cols = [ca[i] for i, (u, v) in enumerate(zip(x, y)) if keep and i in keep and not same(u, v)]
+            if cols:
+                problems.append(f"{k}: " + ", ".join(f"{c} swift={x[ca.index(c)]!r} rust={y[ca.index(c)]!r}" for c in cols))
+        if problems:
+            bad += 1
+            print(f"{label}: table {name}: {len(problems)} rows differ")
+            for p in problems[:8]:
+                print("    ", p[:300])
+    rows = sum(len(t[1]) for t in ta.values())
+    print(f"{label}: {len(ta)} tables, {rows} rows, {bad} differing")
+    return bad
+
+
+def seconds(text):
+    """A GRDB date ("2025-08-01 08:51:00.098", UTC) as seconds since 1970."""
+    d = datetime.datetime.strptime(text, "%Y-%m-%d %H:%M:%S.%f").replace(tzinfo=datetime.timezone.utc)
+    return d.timestamp()
+
+
+def db_mode(source, sounds_root, music_root, phase0_file):
+    work = tempfile.mkdtemp(prefix="earmark-db-parity-")
+    try:
+        bad = 0
+        # A new database from each: the same schema and migrations.
+        run([SWIFT, "db-new", f"{work}/new-swift.sqlite"])
+        run([RUST, "db-new", f"{work}/new-rust.sqlite"])
+        bad += compare_dbs(f"{work}/new-swift.sqlite", f"{work}/new-rust.sqlite", "new database")
+        # Each opens the other's.
+        run([SWIFT, "db-ops", f"{work}/new-rust.sqlite"], "[]")
+        run([RUST, "db-ops", f"{work}/new-swift.sqlite"], "[]")
+
+        for name in ("swift", "rust"):
+            subprocess.run(["sqlite3", f"file:{source}?mode=ro", f".backup {work}/{name}.sqlite"], check=True)
+        con = sqlite3.connect(f"{work}/swift.sqlite")
+        songs = con.execute("SELECT path, fileSize, modifiedAt, title, artist, album, duration, id FROM song ORDER BY path").fetchall()
+        con.close()
+        scanned = run([RUST, "scan", sounds_root])
+
+        # Scans of the library: moved, removed, restored, then the library removed and added again.
+        by_fp = {}
+        for s in scanned:
+            by_fp.setdefault(s["fingerprint"], []).append(s)
+        unique = [s for s in scanned if len(by_fp[s["fingerprint"]]) == 1]
+        moved = {s["path"] for s in unique[::97]}
+        removed = {s["path"] for s in scanned[::53]} - moved
+        def mutated():
+            out = []
+            for s in scanned:
+                if s["path"] in removed:
+                    continue
+                if s["path"] in moved:
+                    s = dict(s, path=sounds_root.rstrip("/") + "/Moved Here/" + os.path.basename(s["path"]))
+                out.append(s)
+            return sorted(out, key=lambda s: s["path"])
+        # A copy at a new path of a file that's still there: a new sound.
+        copy = dict(unique[5], path=sounds_root.rstrip("/") + "/Copies/" + os.path.basename(unique[5]["path"]))
+        ops = [
+            {"op": "replaceSounds", "path": sounds_root, "root": sounds_root, "scanned": scanned},
+            {"op": "replaceSounds", "path": sounds_root, "root": sounds_root, "scanned": mutated()},
+            {"op": "replaceSounds", "path": sounds_root, "root": sounds_root, "scanned": sorted(scanned + [copy], key=lambda s: s["path"])},
+            {"op": "removeLibrary", "path": sounds_root},
+            {"op": "addLibrary", "kind": "sounds", "path": sounds_root},
+            {"op": "replaceSounds", "path": sounds_root, "root": sounds_root, "scanned": scanned},
+        ]
+        # The music folder: a rescan with some songs gone, new ones (accented names, in both
+        # Unicode forms), one listed under the other form of its path, then Phase 0 and Earmark's
+        # own analysis.
+        files = [{"path": p, "fileSize": size, "modified": seconds(m), "title": t, "artist": a, "album": al, "duration": d}
+                 for p, size, m, t, a, al, d, _ in songs]
+        accented = [f for f in files if not f["path"].isascii()]
+        kept = [f for i, f in enumerate(files) if i % 41 != 0]
+        if accented:
+            kept = [f for f in kept if f is not accented[0]] + [dict(accented[0], path=unicodedata.normalize("NFD", accented[0]["path"]))]
+        kept += [{"path": music_root.rstrip("/") + "/Nova/Canção é Ótima.mp3", "fileSize": 1234, "modified": 1700000000.123456,
+                  "title": "Canção", "artist": None, "album": None, "duration": 201.5},
+                 {"path": unicodedata.normalize("NFD", music_root.rstrip("/") + "/Nova/Ação.mp3"), "fileSize": 99,
+                  "modified": 1600000000.9999, "title": None, "artist": "Ü", "album": None, "duration": None}]
+        ids = [r[7] for r in songs[::50]]
+        ops += [
+            {"op": "replaceSongs", "path": music_root, "root": music_root, "files": kept},
+            {"op": "applySongAnalysis", "file": phase0_file},
+            {"op": "saveSongAnalysis", "results": [{"songId": i, "analysis": {"bpm": 120.5, "beatsPerBar": 4, "source": "Earmark",
+                                                    "key": {"pitchClass": 9, "minor": True}, "keyConfidence": 0.7}} for i in ids]},
+        ]
+        text = json.dumps(ops)
+        out_swift = subprocess.run([SWIFT, "db-ops", f"{work}/swift.sqlite"], input=text, capture_output=True, text=True, check=True).stdout
+        out_rust = subprocess.run([RUST, "db-ops", f"{work}/rust.sqlite"], input=text, capture_output=True, text=True, check=True).stdout
+        if [json.loads(l) for l in out_swift.split()] != [json.loads(l) for l in out_rust.split()]:
+            print("answers differ:", out_swift.split(), out_rust.split())
+            bad += 1
+        print(f"operations: {len(scanned)} sounds, {len(moved)} moved, {len(removed)} removed; {len(songs)} songs; answers {out_rust.split()[:1]}")
+        # The library added again gets the time it was added: the only thing allowed to differ.
+        bad += compare_dbs(f"{work}/swift.sqlite", f"{work}/rust.sqlite", "after the operations",
+                           skip=lambda t, c: t == "library" and c == "addedAt")
+        return bad
+    finally:
+        shutil.rmtree(work)
+
+
 def main():
     mode, arg = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else None)
     if mode == "metadata":
@@ -118,6 +259,8 @@ def main():
         bad = compare(run([SWIFT, "keys"], texts), run([RUST, "keys"], texts), "keys")
     elif mode == "phase0":
         bad = compare(run([SWIFT, "phase0", arg]), run([RUST, "phase0", arg]), "phase0")
+    elif mode == "db":
+        bad = db_mode(arg, sys.argv[3], sys.argv[4], sys.argv[5])
     else:
         sys.exit(__doc__)
     sys.exit(1 if bad else 0)

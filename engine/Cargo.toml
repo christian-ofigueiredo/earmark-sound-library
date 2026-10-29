@@ -2,7 +2,7 @@
 # the Swift code in app/Sources/EarmarkCore; tests and the parity tool check that.
 [workspace]
 resolver = "3"
-members = ["crates/earmark-core", "crates/earmark-cli"]
+members = ["crates/earmark-core", "crates/earmark-db", "crates/earmark-cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,8 +12,11 @@ repository = "https://github.com/christian-ofigueiredo/earmark-sound-library"
 
 [workspace.dependencies]
 earmark-core = { path = "crates/earmark-core" }
+earmark-db = { path = "crates/earmark-db" }
 encoding_rs = "0.8"
 quick-xml = "0.38"
 regex = "1"
+rusqlite = { version = "0.41", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+unicode-normalization = "0.1"

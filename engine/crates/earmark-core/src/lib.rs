@@ -6,6 +6,7 @@ pub mod csv;
 pub mod metadata;
 pub mod music_key;
 pub mod normalize;
+pub mod paths;
 pub mod phase0;
 pub mod scan;
 pub mod text;

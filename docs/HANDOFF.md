@@ -46,8 +46,8 @@ Rust so we can have new Mac version and the Windows version". On it so far:
   (`docs/timeline-file-plan.md`, Results): cuts match ⌘T's after rounding BWF starts to
   frames.
 - The Rust engine (`docs/rust-engine-plan.md`): `engine/`, a Cargo workspace. Steps 1 (UCS,
-  CSV, metadata reading and normalising) and 2 (scanning, fingerprints, format twins, music
-  keys, Phase 0 import) are ported. `engine/parity/compare.py`
+  CSV, metadata reading and normalising) 2 (scanning, fingerprints, format twins, music
+  keys, Phase 0 import) and 3 (the database, `earmark-db`) are ported. `engine/parity/compare.py`
   compares it with the Swift code on real data (read-only), one mode per piece; `.github/workflows/engine.yml`
   tests it on macOS, Windows and Linux. Cargo comes from Homebrew's rustup
   (`/opt/homebrew/opt/rustup/bin`, not on the shell's PATH).
