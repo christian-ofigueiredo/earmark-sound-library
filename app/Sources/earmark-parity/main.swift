@@ -11,6 +11,8 @@ import Foundation
 //   swift run -c release earmark-parity <clap|peav> <model> <reference> --file <path>
 //
 // The reference files come from models/parity_clap.py / parity_peav.py --reference.
+//
+//   earmark-parity metadata < paths.txt    (see below; for the Rust engine)
 
 /// Embeds a batch of files (PE-AV runs part by part over the whole batch).
 protocol BatchEmbedder { func embed(batch: [[Float]]) throws -> [[Float]?] }
@@ -27,6 +29,23 @@ extension PeavEmbedder: BatchEmbedder {
 }
 
 var args = CommandLine.arguments
+
+// What Swift reads from each file whose path comes on stdin, as JSON lines, for the Rust engine's
+// parity check (engine/parity/compare_metadata.py). Reads the files only.
+//   earmark-parity metadata < paths.txt
+if args.count >= 2, args[1] == "metadata" {
+    struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    while let path = readLine(), !path.isEmpty {
+        let url = URL(fileURLWithPath: path)
+        let raw = MetadataReader.read(url: url)
+        let row = Row(path: path, raw: raw, normalized: MetadataNormalizer.normalize(raw, url: url),
+                      timeReference: MetadataReader.timeReference(url: url))
+        FileHandle.standardOutput.write(try encoder.encode(row) + Data("\n".utf8))
+    }
+    exit(0)
+}
 
 // Folder suggestions, checked on folders that already have UCS categories:
 //   earmark-parity folders <copy of library.sqlite>

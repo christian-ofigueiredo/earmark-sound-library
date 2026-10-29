@@ -1,0 +1,19 @@
+# Earmark's engine in Rust (docs/rust-engine-plan.md). Each piece must give the same results as
+# the Swift code in app/Sources/EarmarkCore; tests and the parity tool check that.
+[workspace]
+resolver = "3"
+members = ["crates/earmark-core", "crates/earmark-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/christian-ofigueiredo/earmark-sound-library"
+
+[workspace.dependencies]
+earmark-core = { path = "crates/earmark-core" }
+encoding_rs = "0.8"
+quick-xml = "0.38"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

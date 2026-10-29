@@ -14,6 +14,7 @@ enum Shortcuts {
     static let findMatches = KeyboardShortcut("f", modifiers: [.command, .shift])
     static let showInFinder = KeyboardShortcut("r")
     static let addToResolve = KeyboardShortcut("t")
+    static let saveTimelineFile = KeyboardShortcut("t", modifiers: [.command, .shift])
     static let copyPath = KeyboardShortcut("c", modifiers: [.command, .option])
     static let doubleTempo = KeyboardShortcut(.upArrow, modifiers: [.command, .option])
     static let halveTempo = KeyboardShortcut(.downArrow, modifiers: [.command, .option])
@@ -179,6 +180,8 @@ struct SelectionCommands: View {
                 .keyboardShortcut(Shortcuts.showInFinder)
             Button("Add to DaVinci Resolve Timeline") { model.addSelectionToResolve() }
                 .keyboardShortcut(Shortcuts.addToResolve)
+            Button("Save as Timeline File…") { model.saveSelectionAsTimelineFile() }
+                .keyboardShortcut(Shortcuts.saveTimelineFile)
         case .pasteboard:
             Button("Copy Path") { model.copySelectionPaths() }
                 .keyboardShortcut(Shortcuts.copyPath)
@@ -249,6 +252,7 @@ struct KeyboardShortcutsView: View {
             (s(Shortcuts.findMatches), "Find similar sounds, or songs that mix with the selected song"),
             (s(Shortcuts.showInFinder), "Show in Finder"),
             (s(Shortcuts.addToResolve), "Add to the DaVinci Resolve timeline at its playhead (the waveform's selection, or all)"),
+            (s(Shortcuts.saveTimelineFile), "Save as a timeline file for the free DaVinci Resolve or Final Cut Pro"),
             (s(Shortcuts.copyPath), "Copy path"),
         ]),
         Group(title: "Songs", rows: [

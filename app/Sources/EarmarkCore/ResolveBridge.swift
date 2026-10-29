@@ -148,7 +148,7 @@ public enum ResolveBridge {
             case .notInstalled: "Earmark adds sounds to the timeline through DaVinci Resolve Studio 21.1 or later, which isn't in Applications."
             case .notConnected: "Open DaVinci Resolve Studio with a project and a timeline. If it's open, set Preferences ▸ System ▸ "
                 + "General ▸ “External scripting using” to Local, so Earmark can reach it. (The free DaVinci Resolve has no scripting: "
-                + "drag the file into it instead.)"
+                + "use File ▸ Save as Timeline File… (⇧⌘T) in Earmark, or drag the file into it.)"
             case .noProject: "Open a project in DaVinci Resolve first."
             case .noTimeline: "Open a timeline in DaVinci Resolve first."
             case .other(let detail): "DaVinci Resolve didn't answer as expected: \(detail)"

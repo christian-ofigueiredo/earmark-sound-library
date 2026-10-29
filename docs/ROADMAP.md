@@ -34,8 +34,9 @@ label for test versions.
    choose which to get: tempo and key only (0.4 GB), or everything (4.5 GB).
 2. **Timeline files for other editors (FCPXML).** Earmark writes a timeline file with
    the chosen sounds at their times. You import it into the free DaVinci Resolve,
-   Resolve Studio or Final Cut Pro. Studio keeps the direct ⌘T. **Owner decides**
-   whether to build it (see "Free Resolve or Studio only?" below).
+   Resolve Studio or Final Cut Pro. Studio keeps the direct ⌘T. The owner approved it
+   on 2026-10-29; built on the `alpha2` branch (File ▸ Save as Timeline File…, ⇧⌘T,
+   and the agents' `save_timeline_file`). See `docs/timeline-file-plan.md`.
 3. **Groups in the analysis files.** Exporting a library's analysis includes its
    similarity groups and your group names, and importing restores them. Moving a
    library to another Mac then keeps your naming work.
@@ -45,8 +46,10 @@ label for test versions.
    slow rise, a long tail or a sudden stop.
 6. **Finish testing what couldn't be tested yet:**
    - the right-click menus (on sidebar groups and list rows);
-   - drop-frame timecode (29.97 and 59.94 fps) in Resolve;
-   - whether a Resolve export slows down while Earmark is analysing.
+   - drop-frame timecode (29.97 and 59.94 fps) in Resolve.
+
+   The owner dropped the check of a Resolve export during analysis (2026-10-29): they
+   don't do both at once.
 7. **Release builds made by GitHub.** A workflow builds the release zip from the tagged
    source and attaches a build attestation (free). Anyone can then check, with
    `gh attestation verify`, that the download was built from this repository's code.
@@ -57,7 +60,7 @@ label for test versions.
 
 ### Free Resolve or Studio only?
 
-**Recommendation: build the timeline file.** It's a few days' work, and Earmark works
+**Decided (2026-10-29): build the timeline file.** It's a few days' work, and Earmark works
 the same way in both versions of Resolve:
 
 - With **Studio**, a sound goes straight onto the timeline (⌘T or an AI agent).
@@ -100,7 +103,9 @@ libraries for everything Earmark needs:
 | **B. Shared Rust engine** | The engine moves to Rust: scanning, metadata, database, analysis, groups, map layout, duplicates, the Resolve bridge and the MCP server. The Mac keeps its SwiftUI interface, which calls the engine. Windows gets its own interface (Tauri). | The Mac app stays as it is. Both systems share one engine and give the same results. | Two interfaces to maintain |
 | C. Separate Windows app | Windows written from scratch and kept in step by hand | The Mac app isn't touched | Everything is written twice, and the two drift apart |
 
-**Recommendation: B, in steps that each leave a working app.**
+**Recommendation: B, in steps that each leave a working app.** The owner approved it on
+2026-10-29, and the work started on the `alpha2` branch: `docs/rust-engine-plan.md` has
+the details and where it stands.
 
 1. **Rust engine, checked against Swift.** Port the engine piece by piece. Each
    piece must give the same results as the Swift version on the same files: the

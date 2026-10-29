@@ -37,6 +37,19 @@ Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped
 The repository was renamed sound-library → earmark-sound-library on 2026-10-28 (the old
 address redirects). The local folder is still `~/Documents/sound-library`.
 
+**2026-10-29: the `alpha2` branch** (from `main`/`phase1` at 07ed061) is where the second
+alpha is built. The owner approved, in their words: implement FCPXML and "start porting it to
+Rust so we can have new Mac version and the Windows version". On it so far:
+- Timeline files (`docs/timeline-file-plan.md`): `EarmarkCore/TimelineFile.swift`,
+  File ▸ Save as Timeline File… (⇧⌘T, `Earmark/TimelineFileExport.swift`) and the MCP tool
+  `save_timeline_file` (writes to `~/Movies/Earmark`). Unit tests pass; the import into
+  Resolve is still to be checked with the owner (it needs their open project switched).
+- The Rust engine (`docs/rust-engine-plan.md`): `engine/`, a Cargo workspace. Step 1 (UCS,
+  CSV, metadata reading and normalising) is ported. `engine/parity/compare_metadata.py`
+  compares it with the Swift code on a real folder (read-only); `.github/workflows/engine.yml`
+  tests it on macOS, Windows and Linux. Cargo comes from Homebrew's rustup
+  (`/opt/homebrew/opt/rustup/bin`, not on the shell's PATH).
+
 ## Where the code is
 
 - `main`: Phase 0 (Python tools in `phase0/`, CI in `.github/workflows/checks.yml` and

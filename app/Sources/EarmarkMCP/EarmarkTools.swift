@@ -12,11 +12,16 @@ public actor EarmarkTools {
         public var open: @Sendable (URL) -> Void
         public var resolveStatus: @Sendable () async throws -> ResolveBridge.Status
         public var resolveAdd: @Sendable ([ResolveBridge.Item], Bool) async throws -> ResolveBridge.Added
+        /// Where save_timeline_file writes (~/Movies/Earmark).
+        public var timelineFolder: URL
 
         public init(open: @escaping @Sendable (URL) -> Void,
                     resolveStatus: @escaping @Sendable () async throws -> ResolveBridge.Status,
-                    resolveAdd: @escaping @Sendable ([ResolveBridge.Item], Bool) async throws -> ResolveBridge.Added) {
+                    resolveAdd: @escaping @Sendable ([ResolveBridge.Item], Bool) async throws -> ResolveBridge.Added,
+                    timelineFolder: URL = FileManager.default.homeDirectoryForCurrentUser
+                        .appendingPathComponent("Movies/Earmark", isDirectory: true)) {
             self.open = open; self.resolveStatus = resolveStatus; self.resolveAdd = resolveAdd
+            self.timelineFolder = timelineFolder
         }
 
         public static let live = Outside(
@@ -98,6 +103,7 @@ public actor EarmarkTools {
             case "show_in_earmark": return try result(show(Arguments(arguments)))
             case "resolve_status": return try result(try await outside.resolveStatus())
             case "add_to_resolve": return try result(try await add(Arguments(arguments)))
+            case "save_timeline_file": return try result(try saveTimelineFile(Arguments(arguments)))
             default: throw ToolError("There's no tool “\(name)”.")
             }
         } catch {
@@ -332,6 +338,65 @@ public actor EarmarkTools {
                           .init(sound_id: id, placed: p.ok == true, track: p.track, trackName: p.trackName, start: p.start, end: p.end,
                                 newTrack: p.newTrack, problem: p.problem)
                       })
+    }
+}
+
+extension EarmarkTools {
+    struct SavedTimeline: Codable {
+        struct Item: Codable {
+            var sound_id: Int64
+            var track: Int
+            var start: String
+            var end: String
+        }
+        var path: String
+        var frameRate: String
+        var items: [Item]
+        var howToImport: String
+    }
+
+    /// The items as an FCPXML timeline file (docs/timeline-file-plan.md), for the free DaVinci
+    /// Resolve or Final Cut Pro. Writes only into `outside.timelineFolder`.
+    func saveTimelineFile(_ a: Arguments) throws -> SavedTimeline {
+        let c = try current()
+        guard let list = a.list("items"), !list.isEmpty else {
+            throw ToolError("Give “items”: a list of { sound_id, start, end, at }.")
+        }
+        let rateName = a.string("frame_rate") ?? a.double("frame_rate").map { String(format: "%g", $0) } ?? "25"
+        guard let rate = TimelineFile.Rate.named(rateName) else {
+            throw ToolError("“frame_rate” must be one of: " + TimelineFile.Rate.all.map(\.name).joined(separator: ", ") + ".")
+        }
+        var clips: [TimelineFile.Clip] = [], ids: [Int64] = []
+        for (n, entry) in list.enumerated() {
+            let e = Arguments(entry.objectValue ?? [:])
+            guard let id = e.int64("sound_id"), let s = c.sound(id) else { throw ToolError("Item \(n + 1): no such sound_id.") }
+            guard FileManager.default.fileExists(atPath: s.path) else {
+                throw ToolError("Item \(n + 1): “\(s.displayName)” is offline (its drive isn't connected).")
+            }
+            guard let length = s.duration, length > 0 else { throw ToolError("Item \(n + 1): Earmark doesn't know its length.") }
+            clips.append(.init(path: s.path, name: s.displayName, length: length, sampleRate: Int(s.sampleRate ?? 48000),
+                               channels: s.channels ?? 2, timeReference: MetadataReader.timeReference(url: URL(fileURLWithPath: s.path)),
+                               start: e.double("start"), end: e.double("end"), at: e.double("at")))
+            ids.append(id)
+        }
+        let rawName = a.string("name") ?? "Earmark sounds"
+        let name = rawName.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let file = try TimelineFile.fcpxml(clips, rate: rate, startTimecode: a.string("start_timecode") ?? "01:00:00:00",
+                                           name: name.isEmpty ? "Earmark sounds" : name)
+        let folder = outside.timelineFolder
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var url = folder.appendingPathComponent((name.isEmpty ? "Earmark sounds" : name) + ".fcpxml")
+        var n = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = folder.appendingPathComponent("\(name.isEmpty ? "Earmark sounds" : name) \(n).fcpxml")
+            n += 1
+        }
+        try Data(file.xml.utf8).write(to: url, options: .withoutOverwriting)
+        return SavedTimeline(path: url.path, frameRate: rate.name,
+                             items: zip(ids, file.placements).map { .init(sound_id: $0, track: $1.lane, start: $1.start, end: $1.end) },
+                             howToImport: "DaVinci Resolve: File ▸ Import ▸ Timeline… (a new timeline; copy its clips into yours). "
+                                + "Final Cut Pro: File ▸ Import ▸ XML…")
     }
 }
 

@@ -64,6 +64,30 @@ public enum MetadataReader {
         return raw
     }
 
+    /// A WAV's BWF time reference: where its audio starts in its own timecode, in samples since
+    /// midnight (0 without a `bext` chunk). Resolve and Final Cut Pro start the clip there.
+    public static func timeReference(url: URL) -> Int64 {
+        guard let file = try? ReadOnlyFile(url: url) else { return 0 }
+        defer { file.close() }
+        let header = file.read(at: 0, count: 12)
+        guard header.count == 12, ["RIFF", "RF64", "BW64"].contains(header.fourCC(at: 0)), header.fourCC(at: 8) == "WAVE" else {
+            return 0
+        }
+        var pos: UInt64 = 12
+        while pos + 8 <= file.size {
+            let h = file.read(at: pos, count: 8)
+            guard h.count == 8 else { break }
+            let size = UInt64(h.uint32LE(at: 4))
+            if h.fourCC(at: 0) == "bext" {
+                let body = file.read(at: pos + 8, count: 346)
+                return body.count == 346 ? Int64(clamping: body.uint64LE(at: 338)) : 0
+            }
+            if h.fourCC(at: 0) == "data" { break }
+            pos += 8 + size + (size & 1)
+        }
+        return 0
+    }
+
     // MARK: WAV
 
     private static func readWAV(_ file: ReadOnlyFile, magic: String, into raw: inout RawMetadata) {
