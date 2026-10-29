@@ -72,8 +72,22 @@ pub fn normalized_folder(folder: &str) -> String {
         .to_lowercase()
         .split('/')
         .map(|part| {
-            part.split(|c: char| !c.is_alphabetic() && !c.is_numeric())
-                .filter(|w| !w.is_empty() && !is_format_word(w))
+            // Words of letters and digits, as Swift's characters.
+            let mut words: Vec<String> = Vec::new();
+            let mut word = String::new();
+            for c in crate::text::characters(part) {
+                if crate::text::is_letter(c) || crate::text::is_number(c) {
+                    word.push_str(c);
+                } else if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            if !word.is_empty() {
+                words.push(word);
+            }
+            words
+                .into_iter()
+                .filter(|w| !is_format_word(w))
                 .collect::<Vec<_>>()
                 .join(" ")
         })

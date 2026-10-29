@@ -99,6 +99,20 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
        float, so the map's random normals use it.
      Where Swift's Ward picks between equally small groups in its dictionary's order, Rust
      takes the lowest point (no case on the owner's library).
+   - **4d, done 2026-10-29:** folder rules and Earmark's folder suggestions, category
+     votes and per-sound guesses, song corrections, and the music maths around the models
+     (Beat This!'s input and chunks, the half-rate filter, beat tracking, S-KEY's labels),
+     with their tables. On the owner's library, identical to Swift (`compare.py
+     categories`): all 29,177 sounds' categories, the suggestions for all 214 open folders,
+     the 755 per-sound guesses and 508 near-duplicate pairs from the vote. Song corrections
+     and the music maths pass the Swift tests and Python's fixtures. On 30 of the owner's
+     songs with Swift's Core ML outputs (`compare.py music`; `MusicAnalyzer.logits` and
+     `keyProbabilities` are public for it): the half-rate audio and spectrograms identical
+     to the bit (the filter's multiply-adds are fused, as Swift's SIMD `addProduct`), and
+     the beats, tempo, bars and key identical. Text is split into characters as Swift's
+     `Character` does (grapheme clusters, `unicode-segmentation`), so decomposed accents
+     and Hangul make the same words. The record types moved into earmark-core
+     (`records`, `dates`), as the analysis works on them.
 5. Analysis files and timeline files.
 6. The Resolve bridge and the MCP server.
 7. Audio decoding (Symphonia) and the models (ONNX), with the same parity checks as the

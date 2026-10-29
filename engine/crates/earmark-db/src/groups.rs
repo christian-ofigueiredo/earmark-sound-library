@@ -1,8 +1,9 @@
 //! The similarity groups' tables (`SoundGroupStore.swift`): a set per subcategory, its groups and
 //! their members, and the owner's changes.
 
-use crate::{LibraryDatabase, Result, dates};
+use crate::{LibraryDatabase, Result};
 use earmark_core::analysis::groups::{GroupSet, Name, Snapshot, VERSION};
+use earmark_core::dates;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 

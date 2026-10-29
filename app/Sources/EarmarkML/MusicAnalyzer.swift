@@ -74,7 +74,7 @@ public final class MusicAnalyzer: @unchecked Sendable {
     }
 
     /// Beat and downbeat logits for one chunk.
-    func logits(_ chunk: [Float]) throws -> ([Float], [Float]) {
+    public func logits(_ chunk: [Float]) throws -> ([Float], [Float]) {
         let input = try MLMultiArray(shape: [1, NSNumber(value: BeatThisAudio.chunk), NSNumber(value: BeatThisAudio.mels)],
                                      dataType: .float32)
         chunk.withUnsafeBufferPointer { src in
@@ -88,7 +88,7 @@ public final class MusicAnalyzer: @unchecked Sendable {
     }
 
     /// S-KEY's 24 probabilities for the whole (peak-normalised) song.
-    func keyProbabilities(_ x: [Float]) throws -> [Float] {
+    public func keyProbabilities(_ x: [Float]) throws -> [Float] {
         let input = try MLMultiArray(shape: [1, NSNumber(value: x.count)], dataType: .float32)
         x.withUnsafeBufferPointer { src in
             input.dataPointer.assumingMemoryBound(to: Float.self).update(from: src.baseAddress!, count: src.count)

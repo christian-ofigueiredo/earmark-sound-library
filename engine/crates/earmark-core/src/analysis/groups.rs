@@ -741,7 +741,6 @@ const STOP_WORDS: &[&str] = &[
 /// which isn't a-z.
 pub fn tokens(text: &str) -> Vec<String> {
     let lower = text.to_lowercase();
-    let chars: Vec<char> = lower.chars().collect();
     let (mut out, mut word) = (Vec::new(), String::new());
     let flush = |word: &mut String, out: &mut Vec<String>| {
         if word.chars().count() >= 3 && !STOP_WORDS.contains(&word.as_str()) {
@@ -749,30 +748,17 @@ pub fn tokens(text: &str) -> Vec<String> {
         }
         word.clear();
     };
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        // The rest of this character: combining marks after it.
-        let mut end = i + 1;
-        while end < chars.len() && is_combining(chars[end]) {
-            end += 1;
-        }
-        let single = end == i + 1;
+    for ch in crate::text::characters(&lower) {
+        let single = ch.chars().count() == 1;
+        let c = ch.chars().next().unwrap_or(' ');
         if single && (c.is_ascii_lowercase() || (c == '-' && !word.is_empty())) {
             word.push(c);
         } else {
             flush(&mut word, &mut out);
         }
-        i = end;
     }
     flush(&mut word, &mut out);
     out
-}
-
-/// Marks that join the character before them (the combining blocks; enough for the decomposed
-/// names Foundation gives).
-fn is_combining(c: char) -> bool {
-    matches!(c as u32, 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F | 0x3099..=0x309A)
 }
 
 /// Phase 0's keyword_names: words at least 30% of a group's files have, by how much more often

@@ -12,6 +12,8 @@
 //!   earmark-engine dupsets <library.sqlite>           identical copies and saved near pairs, as sets
 //!   earmark-engine map <library.sqlite> <out.json> [category]    the sound map, as earmark-parity map
 //!   earmark-engine groups <library.sqlite> <swift.json> <out.json> the groups of the sounds Swift grouped
+//!   earmark-engine categories <library.sqlite>   categories, folder suggestions and votes, as earmark-parity
+//!   earmark-engine musicsteps <work folder> < swift-rows   the music maths on Swift's decoded songs and model outputs
 //!   earmark-engine db-new <path>              a new, empty database
 //!   earmark-engine db-ops <path> < ops.json   applies the operations (only on copies)
 
@@ -153,6 +155,15 @@ fn main() {
         ),
         (Some("groups"), Some(db)) => {
             groups_mode(Path::new(db), Path::new(&args[3]), Path::new(&args[4]))
+        }
+        (Some("categories"), Some(db)) => categories_mode(Path::new(db), &mut emit),
+        (Some("musicsteps"), Some(work)) => {
+            for line in stdin_lines() {
+                emit(music_row(
+                    Path::new(work),
+                    &serde_json::from_str(&line).unwrap(),
+                ));
+            }
         }
         (Some("db-new"), Some(path)) => {
             LibraryDatabase::open(Some(Path::new(path)), false).unwrap();
@@ -499,4 +510,193 @@ fn knn_mode(db: &Path, out: &Path, category: Option<&str>) {
         json!({"indices": indices, "distances": distances}).to_string(),
     )
     .unwrap();
+}
+
+/// The categories as the app works them out (see `earmark-parity categories`).
+fn categories_mode(db: &Path, emit: &mut dyn FnMut(Value)) {
+    use earmark_core::analysis::{categories, folder_rules};
+    let catalog = UcsCatalog::shared();
+    let db = LibraryDatabase::open(Some(db), true).unwrap();
+    let (rules, guesses, choices) = (
+        db.folder_rules().unwrap(),
+        db.folder_guesses().unwrap(),
+        db.sound_category_choices().unwrap(),
+    );
+    let all = db.sounds(None).unwrap();
+    let applied = categories::apply(
+        &choices,
+        &folder_rules::apply(&rules, &guesses, &all, catalog),
+        catalog,
+    );
+    for s in &applied {
+        emit(json!({"id": s.id, "catID": s.cat_id, "source": s.category_source}));
+    }
+
+    let hidden: HashSet<i64> = twins::group(&applied.iter().map(twin).collect::<Vec<_>>())
+        .hidden
+        .into_iter()
+        .collect();
+    let mut open: BTreeMap<String, (String, Vec<earmark_db::SoundRecord>)> = BTreeMap::new();
+    for s in &applied {
+        let src = s.category_source.as_deref();
+        let open_source = matches!(
+            src,
+            Some(folder_rules::SOURCE)
+                | Some(folder_rules::GUESS_SOURCE)
+                | Some(categories::SOUND_GUESS_SOURCE)
+        );
+        if (s.cat_id.is_none() || open_source) && !hidden.contains(&s.id.unwrap()) {
+            open.entry(format!("{}/{}", s.library_id, s.folder))
+                .or_insert_with(|| (s.folder.clone(), vec![]))
+                .1
+                .push(s.clone());
+        }
+    }
+    let index = SimilarityIndex::new(&db.vectors("clap-general").unwrap());
+    let labels = folder_rules::labels(&applied);
+    let shared = folder_rules::shared_descriptions(&applied, 3);
+    for (key, (folder, sounds)) in &open {
+        let options = folder_rules::suggest(
+            folder,
+            sounds,
+            Some(&index),
+            &labels,
+            &shared,
+            3,
+            &folder_rules::Tuning::default(),
+        );
+        emit(
+            json!({"folder": key, "options": options.iter().map(|o| json!({"catID": o.entry.cat_id, "score": o.score,
+            "words": o.words, "fileWords": o.file_words, "soundShare": o.sound_share, "uncertain": o.is_uncertain})).collect::<Vec<_>>()}),
+        );
+    }
+
+    // SoundGuesser.run, step by step.
+    let owners: std::collections::HashMap<i64, _> =
+        choices.into_iter().filter(|c| c.1.by_owner).collect();
+    let sounds = categories::apply(
+        &owners,
+        &folder_rules::apply(&rules, &guesses, &all, catalog),
+        catalog,
+    );
+    let twins_hidden: HashSet<i64> = twins::group(&sounds.iter().map(twin).collect::<Vec<_>>())
+        .hidden
+        .into_iter()
+        .collect();
+    let by_id: BTreeMap<i64, &earmark_db::SoundRecord> =
+        sounds.iter().map(|s| (s.id.unwrap(), s)).collect();
+    let d = 1536;
+    let mut rows: Vec<&earmark_db::SoundRecord> = Vec::new();
+    // Both callbacks fill the same buffer: the first sizes it, the second writes rows.
+    let buffer = std::cell::RefCell::new(Floats::page(0));
+    db.for_each_vectors(
+        &["pe-av-large", "clap-general"],
+        None,
+        &mut |n| *buffer.borrow_mut() = Floats::page(n * d),
+        &mut |id, blocks| {
+            let Some(s) = by_id.get(&id) else { return };
+            let mut b = buffer.borrow_mut();
+            if twins_hidden.contains(&id) || (rows.len() + 1) * d > b.len() {
+                return;
+            }
+            let r = rows.len();
+            b[r * d..(r + 1) * d].copy_from_slice(&sound_map::combine(&[&blocks[0], &blocks[1]]));
+            rows.push(s);
+        },
+    )
+    .unwrap();
+    let buffer = buffer.into_inner();
+    let k = 60.min(rows.len());
+    let (indices, distances) = sound_map::neighbours(
+        &buffer[..rows.len() * d],
+        rows.len(),
+        d,
+        k,
+        &|_| {},
+        &|| false,
+    )
+    .unwrap();
+    let row_labels: Vec<Option<String>> = rows.iter().map(|s| s.cat_id.clone()).collect();
+    let row_folders: Vec<String> = rows
+        .iter()
+        .map(|s| format!("{}/{}", s.library_id, s.folder))
+        .collect();
+    let votes = categories::votes_from(&indices, &distances, k, &row_labels, &row_folders, 15);
+    let durations: Vec<Option<f64>> = rows.iter().map(|s| s.duration).collect();
+    let ids: Vec<i64> = rows.iter().map(|s| s.id.unwrap()).collect();
+    let duplicates = duplicates::near_pairs(&ids, &durations, &indices, &distances, k);
+    let mut folders: std::collections::HashMap<i64, HashSet<String>> =
+        std::collections::HashMap::new();
+    let mut by_folder: std::collections::HashMap<String, &folder_rules::FolderGuess> =
+        std::collections::HashMap::new();
+    for g in &guesses {
+        folders
+            .entry(g.library_id)
+            .or_default()
+            .insert(g.folder.clone());
+        by_folder
+            .entry(format!("{}/{}", g.library_id, g.folder))
+            .or_insert(g);
+    }
+    let alternatives = |s: &earmark_db::SoundRecord| -> HashSet<String> {
+        folders
+            .get(&s.library_id)
+            .and_then(|f| folder_rules::rule_folder(&s.folder, f))
+            .and_then(|f| by_folder.get(&format!("{}/{}", s.library_id, f)))
+            .map(|g| g.alternative_ids().into_iter().collect())
+            .unwrap_or_default()
+    };
+    let owned: Vec<earmark_db::SoundRecord> = rows.iter().map(|s| (*s).clone()).collect();
+    let made = categories::guesses(&owned, &votes, &alternatives, 0.6, 0.1, "now");
+    for g in &made {
+        emit(
+            json!({"guess": g.sound_id, "catID": g.cat_id, "share": g.share, "replaced": g.replaced}),
+        );
+    }
+    for p in &duplicates {
+        emit(json!({"pair": [p.a, p.b], "similarity": p.similarity}));
+    }
+    for (r, v) in votes.iter().enumerate().filter(|(r, _)| r % 50 == 0) {
+        emit(json!({"vote": ids[r], "votes": v}));
+    }
+}
+
+/// Rust's music maths on one of `earmark-parity musicsteps`' songs: the half-rate filter on its
+/// decoded audio, the spectrogram on its half-rate audio, and the beat summary and key from its
+/// model outputs; with how far each step is from Swift's.
+fn music_row(work: &Path, swift: &Value) -> Value {
+    use earmark_core::analysis::music;
+    let index = swift["index"].as_u64().unwrap();
+    let file = |ext: &str| floats(&work.join(format!("{index}.{ext}")));
+    let worst = |a: &[f32], b: &[f32]| {
+        if a.len() != b.len() {
+            return json!("different lengths");
+        }
+        let differ = a.iter().zip(b).filter(|(x, y)| x != y).count();
+        json!({"differ": differ, "largest": a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max)})
+    };
+    let half = file("half");
+    let ours_half = music::decimate(&file("m44"));
+    let sr = music::SAMPLE_RATE;
+    let x = &half[..half.len().min((music::MAX_SECONDS as usize) * sr)];
+    let ours_spect = music::spectrogram(x);
+    let (beat, down) = (file("beat"), file("down"));
+    let (beats, downbeats) = music::peaks(&beat, &down);
+    let prob: Vec<f32> = beat.iter().map(|&v| music::sigmoid(v)).collect();
+    let t = music::summarize(&beats, &downbeats, &prob);
+    let probs: Vec<f32> = swift["keyProbabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap() as f32)
+        .collect();
+    let k = music::estimate_key(&probs);
+    json!({
+        "index": index, "path": swift["path"], "keyProbabilities": swift["keyProbabilities"],
+        "beats": t.beats, "downbeats": t.downbeats, "bpm": t.bpm, "bpmRange": t.bpm_range.map(|r| vec![r.0, r.1]),
+        "stability": t.stability, "beatsPerBar": t.beats_per_bar, "confidence": t.confidence,
+        "key": k.as_ref().map(|k| k.key), "keyConfidence": k.as_ref().map(|k| k.confidence),
+        "runnerUp": k.as_ref().map(|k| k.runner_up),
+        "halfRate": worst(&ours_half, &half), "spectrogram": worst(&ours_spect, &file("spect")),
+    })
 }

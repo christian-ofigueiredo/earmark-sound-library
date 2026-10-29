@@ -1,10 +1,12 @@
-//! The rows, as the Swift records (`Library`, `SoundRecord`, `SongRecord`, `SoundFacts`,
-//! `SoundEmbedding`). Dates are kept as the text GRDB stores, so they round-trip exactly.
+//! The database's rows, as the Swift records (`Library`, `SoundRecord`, `SongRecord`,
+//! `SoundFacts`, `SoundEmbedding`). Dates are kept as the text GRDB stores, so they round-trip
+//! exactly. Here rather than in earmark-db because the analysis works on them too.
 
-use earmark_core::music_key::MusicKey;
-use earmark_core::phase0::SongAnalysis;
-use earmark_core::scan::ScannedSound;
-use earmark_core::{normalize::MetadataField, paths};
+use crate::music_key::MusicKey;
+use crate::phase0::SongAnalysis;
+use crate::scan::ScannedSound;
+use crate::song_corrections::{AnalysedValues, SongCorrection};
+use crate::{normalize::MetadataField, paths};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -115,6 +117,12 @@ pub struct SongRecord {
     pub key_minor: Option<bool>,
     pub key_confidence: Option<f64>,
     pub analysis_source: Option<String>,
+    /// Set (in memory only) on a song the owner corrected: what was analysed, and the
+    /// correction (song_corrections). The fields above then hold the owner's values.
+    #[serde(skip)]
+    pub analysed: Option<AnalysedValues>,
+    #[serde(skip)]
+    pub correction: Option<SongCorrection>,
 }
 
 impl SongRecord {
@@ -123,7 +131,7 @@ impl SongRecord {
             .map(|pc| MusicKey::new(pc as i32, self.key_minor.unwrap_or(false)))
     }
 
-    pub(crate) fn apply(&mut self, a: &SongAnalysis) {
+    pub fn apply(&mut self, a: &SongAnalysis) {
         self.bpm = a.bpm;
         self.bpm_low = a.bpm_low;
         self.bpm_high = a.bpm_high;

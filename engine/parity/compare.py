@@ -10,6 +10,8 @@
     python3 engine/parity/compare.py dupsets <library.sqlite>
     python3 engine/parity/compare.py map <library.sqlite> [category]
     python3 engine/parity/compare.py groups <library.sqlite>
+    python3 engine/parity/compare.py categories <library.sqlite>
+    python3 engine/parity/compare.py music <library.sqlite> <models folder> [--count N]
     python3 engine/parity/compare.py db <library.sqlite> <sounds folder> <music folder> <music_analysis.json>
 
 Runs the same mode of `earmark-parity` (Swift, app/.build/release) and `earmark-engine`
@@ -60,6 +62,9 @@ def diff(a, b, where, out):
         for i, (x, y) in enumerate(zip(a, b)):
             diff(x, y, f"{where}[{i}]", out)
     elif isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool):
+        # 32-bit similarities: Swift prints them with fewer digits than Rust.
+        if where.endswith("/similarity") and f32(a) == f32(b):
+            return
         if not math.isclose(a, b, rel_tol=TOLERANCE, abs_tol=TOLERANCE):
             out.append(f"{where}: swift={a!r} rust={b!r}")
     elif isinstance(a, str) and isinstance(b, str):
@@ -220,6 +225,38 @@ def groups_mode(db):
         return bad + int(len(a) != len(b))
     finally:
         shutil.rmtree(work)
+
+
+def music_mode(db, models, count):
+    """The music maths on songs Swift decoded and ran the models on, a few at a time."""
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    rows = con.execute("SELECT path FROM song ORDER BY path").fetchall()
+    con.close()
+    step = max(1, len(rows) // count)
+    paths = [r[0] for r in rows[::step] if os.path.exists(r[0])][:count]
+    bad, n, half_exact, spect_exact = 0, 0, 0, 0
+    for b in range(0, len(paths), 5):
+        work = tempfile.mkdtemp(prefix="earmark-music-parity-")
+        try:
+            swift = run([SWIFT, "musicsteps", models, work], "\n".join(paths[b:b + 5]) + "\n")
+            rust = run([RUST, "musicsteps", work], "\n".join(json.dumps(r) for r in swift) + "\n")
+            for sw, ru in zip(swift, rust):
+                n += 1
+                half, spect = ru.pop("halfRate"), ru.pop("spectrogram")
+                half_exact += isinstance(half, dict) and half["differ"] == 0
+                spect_exact += isinstance(spect, dict) and spect["differ"] == 0
+                out = []
+                diff(sw, ru, "", out)
+                if out or not (isinstance(half, dict) and half["differ"] == 0) or not (isinstance(spect, dict) and spect["differ"] == 0):
+                    bad += 1
+                    print(sw["path"], "half rate", half, "spectrogram", spect)
+                    for line in out[:5]:
+                        print("   ", line)
+        finally:
+            shutil.rmtree(work)
+    print(f"music: {n} songs; half-rate audio identical in {half_exact}, spectrograms identical in {spect_exact}; "
+          f"{bad} with differences")
+    return bad
 
 
 def db_tables(path):
@@ -395,6 +432,10 @@ def main():
         bad = map_mode(arg, sys.argv[3] if len(sys.argv) > 3 else None)
     elif mode == "groups":
         bad = groups_mode(arg)
+    elif mode == "categories":
+        bad = compare(run([SWIFT, "categories", arg]), run([RUST, "categories", arg]), "categories")
+    elif mode == "music":
+        bad = music_mode(arg, sys.argv[3], int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 30)
     elif mode == "db":
         bad = db_mode(arg, sys.argv[3], sys.argv[4], sys.argv[5])
     else:

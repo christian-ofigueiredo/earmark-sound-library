@@ -12,12 +12,15 @@
 pub mod analysis;
 pub mod bytes;
 pub mod csv;
+pub mod dates;
 pub mod metadata;
 pub mod music_key;
 pub mod normalize;
 pub mod paths;
 pub mod phase0;
+pub mod records;
 pub mod scan;
+pub mod song_corrections;
 pub mod text;
 pub mod twins;
 pub mod ucs;

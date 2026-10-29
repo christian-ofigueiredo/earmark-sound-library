@@ -2,15 +2,15 @@
 //! the Swift app's `LibraryDatabase`, so the Mac app keeps its library and analysis when it
 //! switches to the engine. The only place Earmark writes.
 
-pub mod dates;
+pub mod categories;
 pub mod groups;
-pub mod records;
 pub mod schema;
 
+pub use earmark_core::dates;
 use earmark_core::paths::{self, canonical};
 use earmark_core::phase0::{Entry, SongAnalysis};
+pub use earmark_core::records::*;
 use earmark_core::scan::ScannedSound;
-pub use records::*;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, params};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -123,6 +123,8 @@ fn song_row(r: &Row) -> rusqlite::Result<SongRecord> {
         key_minor: r.get(17)?,
         key_confidence: r.get(18)?,
         analysis_source: r.get(19)?,
+        analysed: None,
+        correction: None,
     })
 }
 
@@ -704,6 +706,8 @@ impl LibraryDatabase {
                         key_minor: None,
                         key_confidence: None,
                         analysis_source: None,
+                        analysed: None,
+                        correction: None,
                     };
                     write_song(&tx, &rec, false)?;
                 }
