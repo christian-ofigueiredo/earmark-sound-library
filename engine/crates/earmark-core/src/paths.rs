@@ -42,11 +42,22 @@ pub fn file_name(path: &str) -> String {
     )
 }
 
-/// `URL.standardizedFileURL.path`: "." and ".." resolved, no trailing slash, in file-system form.
+/// `URL.standardizedFileURL.path`: "." and ".." resolved, no trailing slash, in file-system
+/// form. On Windows "\\" separates folders too, and a drive ("C:") or share prefix is kept;
+/// the result always uses "/".
 pub fn standardized(path: &str) -> String {
+    standardized_for(path, cfg!(windows))
+}
+
+fn standardized_for(path: &str, windows: bool) -> String {
     let mut parts: Vec<&str> = Vec::new();
-    for part in path.split('/') {
+    let mut prefix = "";
+    for (i, part) in path
+        .split(|c| c == '/' || (windows && c == '\\'))
+        .enumerate()
+    {
         match part {
+            p if i == 0 && windows && p.ends_with(':') => prefix = p,
             "" | "." => {}
             ".." => {
                 parts.pop();
@@ -54,19 +65,24 @@ pub fn standardized(path: &str) -> String {
             p => parts.push(p),
         }
     }
-    file_system_form(&format!("/{}", parts.join("/")))
+    file_system_form(&format!("{prefix}/{}", parts.join("/")))
 }
 
 /// The folder of `file` inside `root`, e.g. "TSK-03/Footsteps/Gravel" ("" at the top, or when
-/// the file isn't under `root`). `SoundRecord.relativeFolder`.
+/// the file isn't under `root`), with "/" between folders on every system.
+/// `SoundRecord.relativeFolder`.
 pub fn relative_folder(file: &str, root: &str) -> String {
-    let parent = match file.rfind('/') {
+    relative_folder_for(file, root, cfg!(windows))
+}
+
+fn relative_folder_for(file: &str, root: &str, windows: bool) -> String {
+    let parent = match file.rfind(|c| c == '/' || (windows && c == '\\')) {
         Some(0) => "/",
         Some(i) => &file[..i],
         None => "",
     };
-    let dir = standardized(parent);
-    let base = standardized(root);
+    let dir = standardized_for(parent, windows);
+    let base = standardized_for(root, windows);
     match dir.strip_prefix(&base) {
         Some(rest) => rest.trim_matches('/').to_string(),
         None => String::new(),
@@ -97,5 +113,16 @@ mod tests {
         assert_eq!(relative_folder("/Other/x.wav", "/Lib"), "");
         assert_eq!(relative_folder("/Lib/./A/../B/x.wav", "/Lib"), "B");
         assert_eq!(relative_folder("/Café/Ré/x.wav", "/Café"), "Re\u{301}");
+        // Windows: either separator, the drive kept, "/" in the result.
+        assert_eq!(
+            relative_folder_for(r"C:\Lib\A\B\x.wav", r"C:\Lib", true),
+            "A/B"
+        );
+        assert_eq!(relative_folder_for(r"C:\Lib\x.wav", r"C:\Lib\", true), "");
+        assert_eq!(relative_folder_for(r"D:\Lib\A\x.wav", r"C:\Lib", true), "");
+        assert_eq!(
+            relative_folder_for("C:/Lib/A\\B/x.wav", "C:/Lib", true),
+            "A/B"
+        );
     }
 }
