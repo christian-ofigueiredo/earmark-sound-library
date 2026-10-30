@@ -144,8 +144,14 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
    - **The bridge's script** is the Swift one (`bridge.py`; a test holds them together), so
      what Resolve Studio 21.1.2 was checked against still holds. `resolve_status` and
      `add_to_resolve` previews give the same answers from both servers in Resolve Studio
-     (`compare.py mcp`, when Resolve is open). Nothing has been placed on a timeline through
-     the Rust bridge yet, which needs the owner's OK to use the LABORATORY project.
+     (`compare.py mcp`, when Resolve is open). Placing for real, checked 2026-10-30 in the
+     LABORATORY project at 30 fps, with the owner's OK: the same stereo and mono files through
+     both servers, each on a new timeline (whole files, a part, by seconds and by timecode,
+     new and free tracks, a busy track, a track that doesn't exist, a one-frame range). What
+     Resolve then held was identical: tracks, kinds, every clip's place, in-point and file, no
+     video, the playhead back where it was. The answers differed only in the test timelines'
+     names. Not covered: paths with accents (none of the library's online sounds has one),
+     files of more than two channels (none in the library), and other frame rates.
    - **Windows, not yet run:** `ResolvePython.exe` where Resolve's documentation says it is;
      no console window; the request read as UTF-8 (`PYTHONUTF8`), as Python would otherwise
      use the system's code page; `earmark://` opened with `rundll32`; the database in
