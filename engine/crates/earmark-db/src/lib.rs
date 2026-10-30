@@ -3,6 +3,7 @@
 //! switches to the engine. The only place Earmark writes.
 
 pub mod analysis_files;
+pub mod catalog;
 pub mod categories;
 pub mod groups;
 pub mod schema;

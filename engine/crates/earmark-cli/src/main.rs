@@ -68,6 +68,20 @@ fn main() {
                 json!({"sounds": input.sounds, "alternates": groups.alternates, "hidden": groups.hidden}),
             );
         }
+        (Some("names"), _) => {
+            let names = stdin_lines_keep_empty();
+            let mut keyed: Vec<_> = names
+                .iter()
+                .map(|n| (earmark_core::text::StandardKey::new(n), n))
+                .collect();
+            keyed.sort_by(|a, b| a.0.cmp(&b.0));
+            let sorted: Vec<_> = keyed.into_iter().map(|(_, n)| n).collect();
+            let capitalized: Vec<_> = names
+                .iter()
+                .map(|n| earmark_core::text::capitalized(n))
+                .collect();
+            emit(json!({"sorted": sorted, "capitalized": capitalized}));
+        }
         (Some("keys"), _) => {
             let key = |k: MusicKey| {
                 json!({"key": k, "name": k.name(), "shortName": k.short_name(), "camelot": k.camelot(),

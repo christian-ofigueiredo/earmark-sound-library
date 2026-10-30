@@ -125,7 +125,37 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
    - `compare.py timeline`: 600 cases over all 10 frame rates, including odd names and
      failures: the file's text identical to the byte. Rust also writes Windows paths as
      file URLs (`file:///C:/…`), which only unit tests cover so far.
-6. The Resolve bridge and the MCP server.
+6. The Resolve bridge and the MCP server. **Done 2026-10-30** (`earmark-resolve`,
+   `earmark-mcp` with `rmcp` 3.8, and the catalog in `earmark_db::catalog`), with the Swift
+   tests, through the SDK's own client.
+   - `compare.py mcp` starts the Swift and Rust servers on the owner's library, as a client
+     does, and asks both the same things, read-only: all 9 tools' definitions, then 4,938
+     calls (the whole list page by page, every category, subcategory and group, 3,000 sounds'
+     details, 600 searches for similar sounds, wrong arguments, timeline files in a stand-in
+     home folder). No differences; 4,928 answers are identical to the byte, and the ones seen
+     differing only spell a tiny number differently (`e-06` and `e-6`). Saved timeline files
+     are identical. All those calls took Swift 246 s and Rust 11.5 s, mostly in sorting.
+   - **Names sort as Foundation sorts them** (`text::StandardKey`, for
+     `localizedStandardCompare`): spaces, punctuation, symbols, digits, letters; numbers by
+     value; accents and then case only between otherwise equal names. `compare.py names`: all
+     54,356 of the library's names and 16,461 made-up ones in the same places, and the same
+     capitals as `String.capitalized`. Letters outside the Latin alphabet follow Unicode's
+     order, which may differ from Foundation's within a script; the owner's names don't show it.
+   - **The bridge's script** is the Swift one (`bridge.py`; a test holds them together), so
+     what Resolve Studio 21.1.2 was checked against still holds. `resolve_status` and
+     `add_to_resolve` previews give the same answers from both servers in Resolve Studio
+     (`compare.py mcp`, when Resolve is open). Nothing has been placed on a timeline through
+     the Rust bridge yet, which needs the owner's OK to use the LABORATORY project.
+   - **Windows, not yet run:** `ResolvePython.exe` where Resolve's documentation says it is;
+     no console window; the request read as UTF-8 (`PYTHONUTF8`), as Python would otherwise
+     use the system's code page; `earmark://` opened with `rundll32`; the database in
+     `%APPDATA%\Earmark`, timeline files in `Videos\Earmark`. CI builds and tests the code on
+     Windows, but without Resolve there.
+   - The server stays on protocol versions from 2024-11-05 to 2025-11-25 (what `rmcp` 3.8
+     answers), each tried over stdio.
+   - Licences: all the new dependencies are MIT, Apache-2.0, BSD or Zlib, or offer one of
+     them. `unicode-normalization` and `unicode-ident` also carry Unicode-3.0, which allows
+     redistribution though it isn't named in the list above.
 7. Audio decoding (Symphonia) and the models (ONNX), with the same parity checks as the
    Core ML conversion. Only Windows uses these at first.
 8. **The Mac app switches to the engine**, piece by piece, behind the same Swift types.

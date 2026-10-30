@@ -382,6 +382,18 @@ if args.count >= 3, ["db-new", "db-ops"].contains(args[1]) {
     exit(0)
 }
 
+// How names sort and capitalise, for the Rust engine's parity (compare.py names).
+//   earmark-parity names < names.txt      the lines in localizedStandardCompare's order, then capitalised
+if args.count >= 2, args[1] == "names" {
+    var names: [String] = []
+    while let line = readLine() { names.append(line) }
+    struct Answer: Encodable { var sorted: [String]; var capitalized: [String] }
+    let answer = Answer(sorted: names.sorted { $0.localizedStandardCompare($1) == .orderedAscending },
+                        capitalized: names.map(\.capitalized))
+    FileHandle.standardOutput.write(try JSONEncoder().encode(answer) + Data("\n".utf8))
+    exit(0)
+}
+
 // The scanner, format twins, music keys and the Phase 0 import, for the Rust engine's parity
 // check (engine/parity/compare.py). Reads only.
 //   earmark-parity scan <folder>          one JSON line per audio file

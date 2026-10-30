@@ -25,6 +25,11 @@ impl Library {
     pub fn name(&self) -> String {
         paths::file_name(&self.path)
     }
+
+    /// Its folder is there (its drive is connected).
+    pub fn is_online(&self) -> bool {
+        std::path::Path::new(&self.path).exists()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -56,7 +61,77 @@ pub struct SoundRecord {
     pub category_source: Option<String>,
 }
 
+/// How a sound is named and found, the same in the app and the MCP server (`SoundText.swift`).
 impl SoundRecord {
+    /// The FX name if the file has one, else the file name without its extension.
+    pub fn display_name(&self) -> String {
+        if let Some(name) = &self.fx_name
+            && !name.is_empty()
+        {
+            return name.clone();
+        }
+        let stem = std::path::Path::new(&self.path)
+            .file_stem()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        paths::file_system_form(&stem)
+    }
+
+    /// "FOOTSTEPS / HUMAN".
+    pub fn ucs_label(&self) -> Option<String> {
+        let category = self.category.as_ref()?;
+        Some(match &self.subcategory {
+            Some(sub) => format!("{category} / {sub}"),
+            None => category.clone(),
+        })
+    }
+
+    /// "96 kHz · 24-bit · Stereo".
+    pub fn format_text(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(sr) = self.sample_rate.filter(|&sr| sr > 0.0) {
+            parts.push(if sr % 1000.0 == 0.0 {
+                format!("{} kHz", (sr / 1000.0) as i64)
+            } else {
+                format!("{:.1} kHz", sr / 1000.0)
+            });
+        }
+        if let Some(bits) = self.bits_per_sample.filter(|&b| b > 0) {
+            parts.push(format!("{bits}-bit"));
+        }
+        if let Some(ch) = self.channels.filter(|&c| c > 0) {
+            parts.push(match ch {
+                1 => "Mono".to_string(),
+                2 => "Stereo".to_string(),
+                _ => format!("{ch} ch"),
+            });
+        }
+        parts.join(" · ")
+    }
+
+    /// What the search looks in, lowercased: the search matches sounds containing every word.
+    pub fn search_text(&self) -> String {
+        let fields = [
+            &self.fx_name,
+            &self.details,
+            &self.keywords,
+            &self.category,
+            &self.subcategory,
+            &self.cat_id,
+            &self.vendor_library,
+            &self.manufacturer,
+            &self.designer,
+        ];
+        let mut text = self.file_name.clone();
+        for field in fields.into_iter().flatten() {
+            text.push(' ');
+            text.push_str(field);
+        }
+        text.push(' ');
+        text.push_str(&self.folder);
+        text.to_lowercase()
+    }
+
     /// Inside its library, e.g. "TSK-03/Footsteps/Gravel/Step 01.wav".
     pub fn path_in_library(&self) -> String {
         if self.folder.is_empty() {

@@ -15,6 +15,8 @@
     python3 engine/parity/compare.py timeline <library.sqlite>
     python3 engine/parity/compare.py anafiles <library.sqlite>
     python3 engine/parity/compare.py db <library.sqlite> <sounds folder> <music folder> <music_analysis.json>
+    python3 engine/parity/compare.py names <library.sqlite> [--count N]
+    python3 engine/parity/compare.py mcp <library.sqlite> [--count N]
 
 Runs the same mode of `earmark-parity` (Swift, app/.build/release) and `earmark-engine`
 (Rust, engine/target/release) and prints every difference. Numbers must match within 1e-9
@@ -22,7 +24,7 @@ Runs the same mode of `earmark-parity` (Swift, app/.build/release) and `earmark-
 String does, by canonical equivalence (Foundation's file URLs decompose accents: "é" as "e"
 and a combining accent).
 """
-import datetime, json, math, os, shutil, sqlite3, struct, subprocess, sys, tempfile, unicodedata
+import datetime, json, math, os, random, shutil, sqlite3, struct, subprocess, sys, tempfile, time, unicodedata
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SWIFT = os.path.join(ROOT, "app/.build/release/earmark-parity")
@@ -506,6 +508,244 @@ def db_mode(source, sounds_root, music_root, phase0_file):
         shutil.rmtree(work)
 
 
+class McpServer:
+    """A server over stdin/stdout, as an MCP client starts it."""
+
+    def __init__(self, binary, database, home):
+        env = dict(os.environ, EARMARK_DATABASE=database, HOME=home, CFFIXED_USER_HOME=home)
+        self.process = subprocess.Popen([binary], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        stderr=subprocess.DEVNULL, env=env, text=True, encoding="utf-8")
+        self.next = 0
+        self.seconds = 0.0
+        self.first = None
+
+    def send(self, message):
+        self.process.stdin.write(json.dumps(message) + "\n")
+        self.process.stdin.flush()
+
+    def request(self, method, params=None):
+        self.next += 1
+        self.send({"jsonrpc": "2.0", "id": self.next, "method": method, **({"params": params} if params is not None else {})})
+        started = time.monotonic()
+        while True:
+            line = self.process.stdout.readline()
+            if not line:
+                raise RuntimeError(f"the server went away on {method}")
+            answer = json.loads(line)
+            if answer.get("id") == self.next:
+                self.seconds += time.monotonic() - started
+                if method == "tools/call" and self.first is None:
+                    self.first = time.monotonic() - started
+                return answer
+
+    def initialize(self, version):
+        answer = self.request("initialize", {"protocolVersion": version, "capabilities": {},
+                                             "clientInfo": {"name": "compare", "version": "1"}})
+        self.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        return answer["result"]
+
+    def call(self, name, arguments):
+        answer = self.request("tools/call", {"name": name, "arguments": arguments})
+        if "error" in answer:
+            return {"rpcError": answer["error"]}
+        return answer["result"]
+
+    def stop(self):
+        self.process.stdin.close()
+        self.process.wait(timeout=20)
+
+
+def mcp_calls(swift, count):
+    """The calls to make, chosen from what the library holds. None changes anything."""
+    random.seed(7)
+    overview = json.loads(swift.call("library_overview", {})["content"][0]["text"])
+    subs = [x for c in overview["categories"] for x in c["subcategories"]]
+    calls = [("library_overview", {})]
+    # The whole list, to check its order, and the first page of each filter.
+    total = json.loads(swift.call("search_sounds", {"limit": 1})["content"][0]["text"])["total"]
+    calls += [("search_sounds", {"limit": 200, "offset": o}) for o in range(0, total, 200)]
+    for c in overview["categories"]:
+        calls.append(("search_sounds", {"category": c["category"], "limit": 200}))
+    for x in subs:
+        calls.append(("search_sounds", {"category": x["catID"], "limit": 200}))
+        calls.append(("list_groups", {"subcategory": x["catID"]}))
+    for lib in overview["libraries"]:
+        calls.append(("search_sounds", {"library_id": lib["id"], "limit": 50}))
+    for source in ["file", "folder", "guess", "owner", "none", "nonsense"]:
+        calls.append(("search_sounds", {"source": source, "limit": 200}))
+    for query in ["door", "door wood slam", "DOOR", "footsteps gravel", "wind", "água", "água", "café", "whoosh 01",
+                  "#", "1", "  ", "zzzzqqq", "metal hit", "explosion", "é", "ñ", "01 02"]:
+        calls.append(("search_sounds", {"query": query, "limit": 200}))
+    calls += [("search_sounds", {"min_length": 10, "max_length": "20", "limit": 200}),
+              ("search_sounds", {"max_length": 0.2, "limit": "200"}),
+              ("search_sounds", {"query": "door", "offset": 5, "limit": 3}),
+              ("search_sounds", {"query": "door", "offset": -5, "limit": 0}),
+              ("search_sounds", {"query": "door", "limit": 100000}),
+              ("search_sounds", {"query": "door", "offset": 100000})]
+    # Every group, and sounds picked from all over the library.
+    ids, group_ids = [], set()
+    for o in range(0, total, 200):
+        rows = json.loads(swift.call("search_sounds", {"limit": 200, "offset": o})["content"][0]["text"])["sounds"]
+        ids += [r["id"] for r in rows]
+        group_ids |= {r["groupId"] for r in rows if "groupId" in r}
+    calls += [("search_sounds", {"group_id": g, "limit": 200}) for g in sorted(group_ids)]
+    sample = random.sample(ids, min(count, len(ids)))
+    calls += [("get_sound", {"sound_id": i}) for i in sample]
+    calls += [("find_similar", {"sound_id": i, "limit": 30}) for i in sample[: count // 5]]
+    calls += [("find_similar", {"sound_id": sample[0]}), ("find_similar", {"sound_id": str(sample[0]), "limit": "1000"})]
+    # What agents get wrong.
+    calls += [("get_sound", {}), ("get_sound", {"sound_id": 99999999}), ("get_sound", {"sound_id": "x"}),
+              ("get_sound", {"sound_id": 1.5}), ("find_similar", {"sound_id": 99999999}),
+              ("list_groups", {}), ("list_groups", {"subcategory": "nonsense"}), ("list_groups", {"subcategory": "footsteps / human"}),
+              ("show_in_earmark", {}), ("show_in_earmark", {"sound_id": 99999999}), ("no_such_tool", {}),
+              ("add_to_resolve", {}), ("add_to_resolve", {"items": []}), ("add_to_resolve", {"items": [{"sound_id": 99999999}]}),
+              ("add_to_resolve", {"items": [{}]}), ("add_to_resolve", {"items": ["x"]}),
+              ("save_timeline_file", {}), ("save_timeline_file", {"items": [{"sound_id": 99999999}]})]
+    # Timeline files, in the servers' stand-in home folders.
+    a, b, c = sample[:3]
+    # Resolve, if it's open: its status and previews, which place nothing. (Offline sounds are refused.)
+    online = [i for i in sample if os.path.exists(json.loads(swift.call("get_sound", {"sound_id": i})["content"][0]["text"])["sound"]["path"])][:3]
+    if len(online) == 3:
+        calls += [("resolve_status", {}),
+                  ("add_to_resolve", {"preview": True, "items": [{"sound_id": online[0]}, {"sound_id": online[1], "start": 0.1, "end": 0.5, "at": 3.5, "track": "free"},
+                                                                 {"sound_id": online[2], "at": "01:00:10:00", "track": 1}]}),
+                  ("add_to_resolve", {"preview": "yes", "items": [{"sound_id": online[0], "track": 99}, {"sound_id": online[0], "start": 5000, "end": 5000.01}]})]
+    calls += [("save_timeline_file", {"items": [{"sound_id": a}, {"sound_id": b, "start": 0.1, "end": 0.6, "at": 30}, {"sound_id": c, "at": 30}],
+                                      "frame_rate": rate, "name": f"Test: {n}", "start_timecode": tc})
+              for n, (rate, tc) in enumerate([("25", "01:00:00:00"), ("29.97 DF", "01:00:00;00"), ("23.976", "00:00:00:00"), (29.97, "01:00:00:00")])]
+    calls += [("save_timeline_file", {"items": [{"sound_id": a}], "name": "Again"}), ("save_timeline_file", {"items": [{"sound_id": a}], "name": "Again"}),
+              ("save_timeline_file", {"items": [{"sound_id": a}], "frame_rate": "12"}),
+              ("save_timeline_file", {"items": [{"sound_id": a}], "start_timecode": "nonsense"}),
+              ("save_timeline_file", {"items": [{"sound_id": a}], "name": "  /  "})]
+    return calls, sample
+
+
+def mcp_mode(database, count):
+    work = tempfile.mkdtemp(prefix="earmark-mcp-compare-")
+    homes = {"swift": f"{work}/swift", "rust": f"{work}/rust"}
+    for h in homes.values():
+        os.makedirs(h)
+    swift = McpServer(os.path.join(ROOT, "app/.build/release/earmark-mcp"), database, homes["swift"])
+    rust = McpServer(os.path.join(ROOT, "engine/target/release/earmark-mcp"), database, homes["rust"])
+    bad = 0
+    try:
+        for version in ["2025-06-18"]:
+            info_s, info_r = swift.initialize(version), rust.initialize(version)
+            for key in ["protocolVersion", "instructions", "serverInfo"]:
+                if info_s.get(key) != info_r.get(key):
+                    bad += 1
+                    print(f"initialize {key}:\n  swift {info_s.get(key)}\n  rust  {info_r.get(key)}")
+        print("capabilities:", info_s["capabilities"], "/", info_r["capabilities"])
+        tools_s, tools_r = swift.request("tools/list")["result"]["tools"], rust.request("tools/list")["result"]["tools"]
+        if [t["name"] for t in tools_s] != [t["name"] for t in tools_r]:
+            bad += 1
+            print("tool lists differ")
+        for a, b in zip(tools_s, tools_r):
+            for key in ["title", "description", "inputSchema", "annotations"]:
+                if a.get(key) != b.get(key):
+                    bad += 1
+                    print(f"{a['name']} {key}:\n  swift {a.get(key)}\n  rust  {b.get(key)}")
+        print(f"tools: {len(tools_r)}")
+
+        calls, sample = mcp_calls(swift, count)
+        swift.seconds = 0.0
+        kinds, same_text = {}, 0
+        for name, arguments in calls:
+            a, b = swift.call(name, arguments), rust.call(name, arguments)
+            kinds[name] = kinds.get(name, 0) + 1
+            if name == "library_overview":
+                # Swift's order among subcategories with as many sounds comes from its dictionary.
+                for x in (a, b):
+                    text = json.loads(x["content"][0]["text"])
+                    for c in text["categories"]:
+                        c["subcategories"].sort(key=lambda s: (-s["sounds"], s["catID"]))
+                    x["content"][0]["text"] = json.dumps(text, sort_keys=True)
+            text_a = a.get("content", [{}])[0].get("text", "").replace(homes["swift"], "HOME")
+            text_b = b.get("content", [{}])[0].get("text", "").replace(homes["rust"], "HOME")
+            same_text += text_a == text_b
+            if text_a != text_b and same_text + 8 > kinds_total(kinds):
+                print(f"not the same bytes: {name} {arguments}: {first_difference(text_a, text_b)}")
+            problem = None
+            if bool(a.get("isError")) != bool(b.get("isError")):
+                problem = f"isError {a.get('isError')} / {b.get('isError')}"
+            elif a.get("isError"):
+                problem = None if text_a == text_b else "error text"
+            else:
+                parsed_a, parsed_b = json.loads(text_a), json.loads(text_b)
+                if parsed_a != parsed_b:
+                    problem = "answer"
+                elif name != "library_overview" and json.loads(text_b) != json.loads(
+                        json.dumps(b.get("structuredContent")).replace(homes["rust"], "HOME")):
+                    problem = "structured content isn't the text"
+            if problem:
+                bad += 1
+                if bad < 12:
+                    print(f"{name} {arguments}: {problem}\n  swift {first_difference(text_a, text_b)}")
+        print("calls:", kinds, f"{same_text} of {len(calls)} identical to the byte")
+
+        # The files they saved.
+        files = {k: sorted(os.path.relpath(os.path.join(d, f), h) for d, _, fs in os.walk(h) for f in fs) for k, h in homes.items()}
+        print("saved:", files["rust"])
+        if files["swift"] != files["rust"]:
+            bad += 1
+            print("saved files differ:", files)
+        for f in files["rust"]:
+            if f in files["swift"]:
+                text_a = open(os.path.join(homes["swift"], f), encoding="utf-8").read()
+                text_b = open(os.path.join(homes["rust"], f), encoding="utf-8").read()
+                if text_a != text_b:
+                    bad += 1
+                    print(f"{f}: {first_difference(text_a, text_b)}")
+        print(f"differences: {bad}")
+        print(f"first answer: Swift {swift.first:.2f} s, Rust {rust.first:.2f} s; "
+              f"all calls: Swift {swift.seconds:.1f} s, Rust {rust.seconds:.1f} s")
+        return bad
+    finally:
+        swift.stop()
+        rust.stop()
+        shutil.rmtree(work)
+
+
+def kinds_total(kinds):
+    return sum(kinds.values())
+
+
+def first_difference(a, b):
+    n = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+    return f"at {n}:\n    {a[max(0, n - 60):n + 120]!r}\n    {b[max(0, n - 60):n + 120]!r}"
+
+
+def names_mode(database, count):
+    """Names sorted and capitalised, from the library, the UCS list and made up."""
+    db = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    real = [r[0] for r in db.execute("SELECT DISTINCT fileName FROM sound")]
+    real += [r[0] for r in db.execute("SELECT DISTINCT fxName FROM sound WHERE fxName IS NOT NULL")]
+    labels = [r[0] for r in db.execute("SELECT DISTINCT category || ' / ' || subcategory FROM sound WHERE category IS NOT NULL")]
+    with open(os.path.join(ROOT, "app/Sources/EarmarkCore/Resources/ucs_v8.2.1.csv"), encoding="utf-8") as f:
+        labels += [" / ".join(line.split(",")[:2]) for line in f]
+    random.seed(11)
+    alphabet = list("aabbeeooAABBEOzZ   --__..,'()&#+019") + ["é", "É", "è", "ê", "ñ", "ü", "ç", "00", "10", "2", "007"]
+    made = ["".join(random.choice(alphabet) for _ in range(random.randint(1, 9))) for _ in range(count)]
+    bad = 0
+    for label, names in [("library names", real), ("categories", labels), ("made-up names", made)]:
+        names = sorted({n for n in names if n and "\n" not in n and "\r" not in n})
+        text = "\n".join(names) + "\n"
+        a, b = run([SWIFT, "names"], text)[0], run([RUST, "names"], text)[0]
+        wrong_caps = sum(x != y for x, y in zip(a["capitalized"], b["capitalized"]))
+        wrong_order = sum(canonical(x) != canonical(y) for x, y in zip(a["sorted"], b["sorted"]))
+        print(f"{label}: {len(names)}, {wrong_order} out of place, {wrong_caps} capitalised differently")
+        for x, y in [p for p in zip(a["capitalized"], b["capitalized"]) if p[0] != p[1]][:8]:
+            print(f"  capitalised {x!r} / {y!r}")
+        for x, y in [p for p in zip(a["sorted"], b["sorted"]) if canonical(p[0]) != canonical(p[1])][:8]:
+            print(f"  at this place {x!r} / {y!r}")
+        bad += wrong_caps + wrong_order
+    return bad
+
+
+def canonical(s):
+    return unicodedata.normalize("NFC", s)
+
+
 def main():
     mode, arg = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else None)
     if mode == "metadata":
@@ -549,6 +789,10 @@ def main():
         bad = anafiles_mode(arg)
     elif mode == "db":
         bad = db_mode(arg, sys.argv[3], sys.argv[4], sys.argv[5])
+    elif mode == "names":
+        bad = names_mode(arg, int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 20000)
+    elif mode == "mcp":
+        bad = mcp_mode(arg, int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 3000)
     else:
         sys.exit(__doc__)
     sys.exit(1 if bad else 0)

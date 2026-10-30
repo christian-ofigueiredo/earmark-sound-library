@@ -2,9 +2,9 @@ name: Engine
 
 on:
   push:
-    paths: ["engine/**", "app/Sources/EarmarkCore/Resources/**", ".github/workflows/engine.yml"]
+    paths: ["engine/**", "app/Sources/EarmarkCore/Resources/**", "app/Sources/EarmarkCore/ResolveBridge.swift", ".github/workflows/engine.yml"]
   pull_request:
-    paths: ["engine/**", "app/Sources/EarmarkCore/Resources/**", ".github/workflows/engine.yml"]
+    paths: ["engine/**", "app/Sources/EarmarkCore/Resources/**", "app/Sources/EarmarkCore/ResolveBridge.swift", ".github/workflows/engine.yml"]
   workflow_dispatch:
 
 permissions:

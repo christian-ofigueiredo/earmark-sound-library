@@ -49,9 +49,10 @@ Rust so we can have new Mac version and the Windows version". On it so far:
   CSV, metadata reading and normalising) 2 (scanning, fingerprints, format twins, music
   keys, Phase 0 import) 3 (the database, `earmark-db`) 4 (analysis maths:
   loudness, model inputs, similarity, duplicates, the sound map, groups, folder rules and
-  suggestions, category votes, song corrections, the music maths) and 5 (analysis files and
-  timeline files) are ported,
-  identical to the bit on the owner's library (see the plan for what that took). `engine/parity/compare.py`
+  suggestions, category votes, song corrections, the music maths), 5 (analysis files and
+  timeline files) and 6 (the Resolve bridge, `earmark-resolve`, and the MCP server,
+  `earmark-mcp`, with the catalog in `earmark_db::catalog`) are ported,
+  matching Swift on the owner's library (see the plan for what that took). `engine/parity/compare.py`
   compares it with the Swift code on real data (read-only), one mode per piece; `.github/workflows/engine.yml`
   tests it on macOS, Windows and Linux. Cargo comes from Homebrew's rustup
   (`/opt/homebrew/opt/rustup/bin`, not on the shell's PATH).
