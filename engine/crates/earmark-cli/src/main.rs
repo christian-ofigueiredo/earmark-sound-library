@@ -14,6 +14,9 @@
 //!   earmark-engine groups <library.sqlite> <swift.json> <out.json> the groups of the sounds Swift grouped
 //!   earmark-engine categories <library.sqlite>   categories, folder suggestions and votes, as earmark-parity
 //!   earmark-engine musicsteps <work folder> < swift-rows   the music maths on Swift's decoded songs and model outputs
+//!   earmark-engine anafile-export <library.sqlite> <out folder>     one analysis file per library
+//!   earmark-engine anafile-import <copy of library.sqlite> <file…>  imports them, says what it added
+//!   earmark-engine timeline < cases.json     each case's timeline file text or failure
 //!   earmark-engine db-new <path>              a new, empty database
 //!   earmark-engine db-ops <path> < ops.json   applies the operations (only on copies)
 
@@ -165,6 +168,33 @@ fn main() {
                 ));
             }
         }
+        (Some("anafile-export"), Some(db)) => {
+            let db = LibraryDatabase::open(Some(Path::new(db)), true).unwrap();
+            for lib in db.libraries(None).unwrap() {
+                let path = Path::new(&args[3]).join(earmark_core::analysis_file::file_name(&lib));
+                db.write_analysis_file(
+                    &lib,
+                    true,
+                    &path,
+                    "2027-01-15T08:00:00Z",
+                    &scan::fingerprint,
+                )
+                .unwrap();
+            }
+        }
+        (Some("anafile-import"), Some(db)) => {
+            let db = LibraryDatabase::open(Some(Path::new(db)), false).unwrap();
+            for path in &args[3..] {
+                let file =
+                    earmark_core::analysis_file::AnalysisFile::read(&std::fs::read(path).unwrap())
+                        .unwrap();
+                emit(
+                    serde_json::to_value(db.import_analysis(&file, &scan::fingerprint).unwrap())
+                        .unwrap(),
+                );
+            }
+        }
+        (Some("timeline"), _) => timeline_mode(&mut emit),
         (Some("db-new"), Some(path)) => {
             LibraryDatabase::open(Some(Path::new(path)), false).unwrap();
         }
@@ -699,4 +729,53 @@ fn music_row(work: &Path, swift: &Value) -> Value {
         "runnerUp": k.as_ref().map(|k| k.runner_up),
         "halfRate": worst(&ours_half, &half), "spectrogram": worst(&ours_spect, &file("spect")),
     })
+}
+
+/// Each case's timeline file (see `earmark-parity timeline`). Numbers come as text.
+fn timeline_mode(emit: &mut dyn FnMut(Value)) {
+    use earmark_core::timeline_file::{Clip, Rate, fcpxml};
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RawClip {
+        path: String,
+        name: String,
+        length: String,
+        sample_rate: i64,
+        channels: i64,
+        time_reference: i64,
+        start: Option<String>,
+        end: Option<String>,
+        at: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct Case {
+        clips: Vec<RawClip>,
+        rate: String,
+        start: String,
+        name: String,
+    }
+    let mut text = String::new();
+    std::io::stdin().read_to_string(&mut text).unwrap();
+    let number = |t: &Option<String>| t.as_ref().map(|v| v.parse::<f64>().unwrap());
+    for c in serde_json::from_str::<Vec<Case>>(&text).unwrap() {
+        let clips: Vec<Clip> = c
+            .clips
+            .iter()
+            .map(|x| Clip {
+                path: x.path.clone(),
+                name: x.name.clone(),
+                length: x.length.parse().unwrap(),
+                sample_rate: x.sample_rate,
+                channels: x.channels,
+                time_reference: x.time_reference,
+                start: number(&x.start),
+                end: number(&x.end),
+                at: number(&x.at),
+            })
+            .collect();
+        match fcpxml(&clips, &Rate::named(&c.rate).unwrap(), &c.start, &c.name) {
+            Ok((xml, placements)) => emit(json!({"xml": xml, "placements": placements})),
+            Err(e) => emit(json!({"failure": e.to_string()})),
+        }
+    }
 }

@@ -20,6 +20,13 @@ pub struct Library {
     pub added_at: String,
 }
 
+impl Library {
+    /// The folder's name: "SoundFX".
+    pub fn name(&self) -> String {
+        paths::file_name(&self.path)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SoundRecord {
@@ -50,6 +57,15 @@ pub struct SoundRecord {
 }
 
 impl SoundRecord {
+    /// Inside its library, e.g. "TSK-03/Footsteps/Gravel/Step 01.wav".
+    pub fn path_in_library(&self) -> String {
+        if self.folder.is_empty() {
+            self.file_name.clone()
+        } else {
+            format!("{}/{}", self.folder, self.file_name)
+        }
+    }
+
     pub fn from_scan(library_id: i64, root: &str, s: &ScannedSound) -> SoundRecord {
         let m = &s.metadata;
         let field = |f: MetadataField| m.get(f).map(str::to_string);
@@ -126,6 +142,15 @@ pub struct SongRecord {
 }
 
 impl SongRecord {
+    /// Inside its music folder.
+    pub fn path_in_library(&self) -> String {
+        if self.folder.is_empty() {
+            self.file_name.clone()
+        } else {
+            format!("{}/{}", self.folder, self.file_name)
+        }
+    }
+
     pub fn key(&self) -> Option<MusicKey> {
         self.key_pitch_class
             .map(|pc| MusicKey::new(pc as i32, self.key_minor.unwrap_or(false)))
@@ -162,6 +187,11 @@ pub struct SoundFacts {
 impl SoundFacts {
     /// Bump when the measurement changes, so every sound is measured again.
     pub const CURRENT_VERSION: i64 = 1;
+
+    /// Whether these facts still describe `sound` (the same content, the current version).
+    pub fn is_current(&self, sound: &SoundRecord) -> bool {
+        self.version >= Self::CURRENT_VERSION && self.fingerprint == sound.fingerprint
+    }
 }
 
 /// Analysis stage 2 for one sound: its embedding from one model (float32, little-endian).
@@ -200,9 +230,21 @@ impl SoundEmbedding {
     }
 }
 
+/// The models analysis files carry.
+pub const EMBEDDING_MODELS: [&str; 2] = ["clap-general", "pe-av-large"];
+
 /// What's stored for a sound and model, without the vector.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmbeddingStatus {
     pub fingerprint: Option<String>,
     pub version: i64,
+}
+
+impl EmbeddingStatus {
+    /// Whether a stored row still describes `sound` (the same content, the current pipeline).
+    pub fn is_current(status: Option<&EmbeddingStatus>, model: &str, sound: &SoundRecord) -> bool {
+        status.is_some_and(|s| {
+            s.version >= SoundEmbedding::version_of(model) && s.fingerprint == sound.fingerprint
+        })
+    }
 }

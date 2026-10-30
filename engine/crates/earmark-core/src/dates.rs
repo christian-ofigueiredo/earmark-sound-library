@@ -33,6 +33,28 @@ pub fn now() -> String {
     format(t)
 }
 
+/// A time as Foundation's `.iso8601` JSON dates write it: "2026-10-26T23:40:00Z", whole seconds.
+pub fn iso8601(seconds_since_1970: f64) -> String {
+    let t = seconds_since_1970.floor() as i64;
+    let (y, m, d) = civil_from_days(t.div_euclid(86_400));
+    let s = t.rem_euclid(86_400);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        s / 3600,
+        s / 60 % 60,
+        s % 60
+    )
+}
+
+/// Now, in that form.
+pub fn iso8601_now() -> String {
+    iso8601(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0.0, |d| d.as_secs_f64()),
+    )
+}
+
 /// Days since 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's algorithm).
 fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let z = z + 719_468;
@@ -48,7 +70,13 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 
 #[cfg(test)]
 mod tests {
-    use super::format;
+    use super::{format, iso8601};
+
+    #[test]
+    fn iso8601_dates() {
+        assert_eq!(iso8601(1_800_000_000.0), "2027-01-15T08:00:00Z");
+        assert_eq!(iso8601(0.5), "1970-01-01T00:00:00Z");
+    }
 
     // The values are written as Foundation was given them, more digits than a double keeps.
     #[test]

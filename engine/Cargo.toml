@@ -13,6 +13,7 @@ repository = "https://github.com/christian-ofigueiredo/earmark-sound-library"
 [workspace.dependencies]
 earmark-core = { path = "crates/earmark-core" }
 earmark-db = { path = "crates/earmark-db" }
+base64 = "0.22"
 encoding_rs = "0.8"
 quick-xml = "0.38"
 regex = "1"

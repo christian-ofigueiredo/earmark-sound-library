@@ -12,6 +12,8 @@
     python3 engine/parity/compare.py groups <library.sqlite>
     python3 engine/parity/compare.py categories <library.sqlite>
     python3 engine/parity/compare.py music <library.sqlite> <models folder> [--count N]
+    python3 engine/parity/compare.py timeline <library.sqlite>
+    python3 engine/parity/compare.py anafiles <library.sqlite>
     python3 engine/parity/compare.py db <library.sqlite> <sounds folder> <music folder> <music_analysis.json>
 
 Runs the same mode of `earmark-parity` (Swift, app/.build/release) and `earmark-engine`
@@ -259,6 +261,111 @@ def music_mode(db, models, count):
     return bad
 
 
+def timeline_mode(db):
+    """The same clips, every frame rate: the file's text must match to the byte."""
+    import random
+    random.seed(29)
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    rows = con.execute("SELECT path, fileName, duration, sampleRate, channels FROM sound WHERE duration > 0 ORDER BY path").fetchall()
+    con.close()
+    rates = ["23.976", "24", "25", "29.97", "29.97 DF", "30", "50", "59.94", "59.94 DF", "60"]
+    odd = ["/tmp/Ação & Co/x (1) [a];b?c#d%e+f=g~h!i'j,k.wav", '/Vol/한글 ﬁ/é́ "q" <r>.wav', "/Vol/name with\ttab.wav"]
+    cases = []
+    for n in range(600):
+        clips = []
+        for _ in range(random.randint(1, 8)):
+            path, name, length, rate, channels = random.choice(rows)
+            start = random.uniform(0, length) if random.random() < 0.4 else None
+            end = (start or 0) + random.uniform(0, length) if random.random() < 0.4 else None
+            at = random.uniform(0, 600) if random.random() < 0.4 else None
+            if random.random() < 0.1:
+                path = random.choice(odd)
+                name = os.path.basename(path)
+            reference = random.choice([0, 0, random.randint(0, int(86400 * rate))])
+            text = lambda v: None if v is None else repr(v)
+            clips.append({"path": path, "name": name, "length": repr(length), "sampleRate": int(rate), "channels": channels or 2,
+                          "timeReference": reference, "start": text(start), "end": text(end), "at": text(at)})
+        rate = rates[n % len(rates)]
+        stamp = random.choice(["01:00:00:00", "00:00:00:00", "10:59:59:10", "01:00:00;00", "00:01:00;02", "bad", "1:00:00"])
+        cases.append({"clips": clips if n % 97 else [], "rate": rate, "start": stamp, "name": random.choice(["Test", "A & B", "Som é <bom>"])})
+    text = json.dumps(cases)
+    swift, rust = run([SWIFT, "timeline"], text), run([RUST, "timeline"], text)
+    bad = sum(s != r for s, r in zip(swift, rust)) + abs(len(swift) - len(rust))
+    for s, r in zip(swift, rust):
+        if s != r and bad <= 3:
+            print("swift:", (s.get("xml") or s.get("failure"))[:1500], "\nrust: ", (r.get("xml") or r.get("failure"))[:1500])
+    made = sum("xml" in s for s in swift)
+    print(f"timeline: {len(swift)} cases, {made} files, {len(swift) - made} failures; {bad} differ (text compared to the byte)")
+    return bad
+
+
+def anafiles_mode(db):
+    """Each language exports; each imports each's files into a copy with no analysis."""
+    work = tempfile.mkdtemp(prefix="earmark-anafile-parity-")
+    try:
+        source = backup(db, work)
+        # The owner's choices, on the copy, so those paths run even on a library that has none.
+        con = sqlite3.connect(source)
+        when = "2026-10-30 12:00:00.000"
+        for lib, folder in con.execute("SELECT libraryId, folder FROM sound WHERE folder != '' GROUP BY libraryId, folder ORDER BY folder LIMIT 5").fetchall():
+            con.execute("INSERT OR REPLACE INTO folderRule VALUES (?, ?, 'AMBForst', ?)", (lib, folder, when))
+        for sid, fp in con.execute("SELECT id, fingerprint FROM sound ORDER BY path LIMIT 40").fetchall():
+            con.execute("INSERT OR REPLACE INTO soundCategory VALUES (?, ?, 'DOORWood', 1, NULL, NULL, 1, ?)", (sid, fp, when))
+        for i, (path,) in enumerate(con.execute("SELECT path FROM song ORDER BY path LIMIT 40").fetchall()):
+            con.execute("INSERT OR REPLACE INTO songCorrection VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (path, 120.5 + i, 120.0 + i, 121.0 + i, i % 12, i % 2, 4, when))
+        con.commit()
+        con.close()
+        files = {}
+        for name, tool in (("swift", SWIFT), ("rust", RUST)):
+            os.makedirs(f"{work}/{name}")
+            subprocess.run([tool, "anafile-export", source, f"{work}/{name}"], check=True, capture_output=True)
+            files[name] = sorted(os.listdir(f"{work}/{name}"))
+        bad = 0
+        if files["swift"] != files["rust"]:
+            print("different files:", files)
+            bad += 1
+        for f in files["swift"]:
+            a, b = (json.load(open(f"{work}/{n}/{f}")) for n in ("swift", "rust"))
+            out = []
+            if a != b:
+                diff(a, b, "", out)
+                print(f, "differs:", out[:5])
+                bad += 1
+            print(f"{f}: {len(a.get('sounds') or a.get('songs') or [])} entries, parsed files {'identical' if not out else 'differ'}")
+            del a, b
+        # A copy with no analysis, as Swift's clearAnalysisForTesting.
+        cleared = f"{work}/cleared.sqlite"
+        shutil.copy(source, cleared)
+        con = sqlite3.connect(cleared)
+        for table in ("soundFacts", "soundEmbedding", "folderRule", "songCorrection", "soundCategory"):
+            con.execute(f"DELETE FROM {table}")
+        con.execute("UPDATE song SET bpm = NULL, bpmLow = NULL, bpmHigh = NULL, tempoStability = NULL, beatsPerBar = NULL, "
+                    "keyPitchClass = NULL, keyMinor = NULL, keyConfidence = NULL, analysisSource = NULL")
+        con.commit()
+        con.close()
+        results, reports = {}, {}
+        for origin in ("swift", "rust"):
+            for name, tool in (("swift", SWIFT), ("rust", RUST)):
+                target = f"{work}/{origin}-to-{name}.sqlite"
+                shutil.copy(cleared, target)
+                paths = [f"{work}/{origin}/{f}" for f in files[origin]]
+                reports[(origin, name)] = run([tool, "anafile-import", target] + paths)
+                results[(origin, name)] = target
+        reference = results[("swift", "swift")]
+        print("swift's file into swift:", reports[("swift", "swift")])
+        now = {"analyzedAt", "createdAt", "correctedAt"}
+        for key, target in results.items():
+            if reports[key] != reports[("swift", "swift")]:
+                print(key, "report differs:", reports[key])
+                bad += 1
+            if key != ("swift", "swift"):
+                bad += compare_dbs(reference, target, f"{key[0]}'s files into {key[1]}", skip=lambda t, c: c in now)
+        return bad
+    finally:
+        shutil.rmtree(work)
+
+
 def db_tables(path):
     """Every table's rows, in primary key order."""
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
@@ -436,6 +543,10 @@ def main():
         bad = compare(run([SWIFT, "categories", arg]), run([RUST, "categories", arg]), "categories")
     elif mode == "music":
         bad = music_mode(arg, sys.argv[3], int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 30)
+    elif mode == "timeline":
+        bad = timeline_mode(arg)
+    elif mode == "anafiles":
+        bad = anafiles_mode(arg)
     elif mode == "db":
         bad = db_mode(arg, sys.argv[3], sys.argv[4], sys.argv[5])
     else:

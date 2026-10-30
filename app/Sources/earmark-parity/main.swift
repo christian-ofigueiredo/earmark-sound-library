@@ -13,7 +13,7 @@ import Foundation
 //
 // The reference files come from models/parity_clap.py / parity_peav.py --reference.
 //
-//   earmark-parity metadata|scan|twins|keys|phase0|db-new|db-ops|audio|similar|categories|musicsteps …   (see below; for the Rust engine)
+//   earmark-parity metadata|scan|twins|keys|phase0|db-new|db-ops|audio|similar|categories|musicsteps|anafile-export|anafile-import|timeline …   (see below; for the Rust engine)
 
 /// Embeds a batch of files (PE-AV runs part by part over the whole batch).
 protocol BatchEmbedder { func embed(batch: [[Float]]) throws -> [[Float]?] }
@@ -271,6 +271,57 @@ if args.count >= 4, args[1] == "musicsteps" {
                       bpmRange: t.bpmRange.map { [$0.lowerBound, $0.upperBound] }, stability: t.stability, beatsPerBar: t.beatsPerBar,
                       confidence: t.confidence, key: k?.key, keyConfidence: k?.confidence, runnerUp: k?.runnerUp)
         FileHandle.standardOutput.write(try encoder.encode(row) + Data("\n".utf8))
+    }
+    exit(0)
+}
+
+// Analysis files and timeline files, for the Rust engine's parity check (engine/parity/compare.py).
+//   earmark-parity anafile-export <copy of library.sqlite> <out folder>     one file per library
+//   earmark-parity anafile-import <copy of library.sqlite> <file…>  imports them, says what it added
+//   earmark-parity timeline < cases.json                            each case's file text or failure
+// Numbers in cases.json are text: Foundation's JSONDecoder can be off in the last digit.
+if args.count >= 2, ["anafile-export", "anafile-import", "timeline"].contains(args[1]) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    func emit(_ value: some Encodable) throws { FileHandle.standardOutput.write(try encoder.encode(value) + Data("\n".utf8)) }
+    switch args[1] {
+    case "anafile-export":
+        let db = try LibraryDatabase(path: args[2])
+        for lib in try db.libraries() {
+            try db.writeAnalysisFile(for: lib, includeEmbeddings: true, to: URL(fileURLWithPath: args[3]).appendingPathComponent(AnalysisFile.fileName(for: lib)),
+                                     exportedAt: Date(timeIntervalSince1970: 1_800_000_000))
+        }
+    case "anafile-import":
+        struct Report: Encodable {
+            var sounds, soundsMatched, facts, embeddings, folderCategories, soundCategories, songs, songsMatched, songAnalyses, corrections: Int
+        }
+        let db = try LibraryDatabase(path: args[2])
+        for path in args[3...] {
+            let r = try db.importAnalysis(try AnalysisFile.read(try Data(contentsOf: URL(fileURLWithPath: path))))
+            try emit(Report(sounds: r.sounds, soundsMatched: r.soundsMatched, facts: r.facts, embeddings: r.embeddings,
+                            folderCategories: r.folderCategories, soundCategories: r.soundCategories, songs: r.songs,
+                            songsMatched: r.songsMatched, songAnalyses: r.songAnalyses, corrections: r.corrections))
+        }
+    default:
+        struct RawClip: Decodable {
+            var path: String; var name: String; var length: String; var sampleRate: Int; var channels: Int; var timeReference: Int64
+            var start: String?; var end: String?; var at: String?
+        }
+        struct Case: Decodable { var clips: [RawClip]; var rate: String; var start: String; var name: String }
+        struct Row: Encodable { var xml: String?; var placements: [TimelineFile.Placement]?; var failure: String? }
+        for c in try JSONDecoder().decode([Case].self, from: FileHandle.standardInput.readDataToEndOfFile()) {
+            let clips = c.clips.map {
+                TimelineFile.Clip(path: $0.path, name: $0.name, length: Double($0.length)!, sampleRate: $0.sampleRate, channels: $0.channels,
+                                  timeReference: $0.timeReference, start: $0.start.flatMap(Double.init), end: $0.end.flatMap(Double.init),
+                                  at: $0.at.flatMap(Double.init))
+            }
+            do {
+                let file = try TimelineFile.fcpxml(clips, rate: TimelineFile.Rate.named(c.rate)!, startTimecode: c.start, name: c.name)
+                try emit(Row(xml: file.xml, placements: file.placements, failure: nil))
+            } catch {
+                try emit(Row(xml: nil, placements: nil, failure: error.localizedDescription))
+            }
+        }
     }
     exit(0)
 }

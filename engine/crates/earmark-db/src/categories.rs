@@ -30,7 +30,7 @@ fn choice_row(r: &Row) -> rusqlite::Result<SoundCategoryChoice> {
     })
 }
 
-fn save_choice(c: &Connection, x: &SoundCategoryChoice) -> rusqlite::Result<()> {
+pub(crate) fn save_choice(c: &Connection, x: &SoundCategoryChoice) -> rusqlite::Result<()> {
     c.execute(
         "INSERT INTO soundCategory (soundId, fingerprint, catID, byOwner, share, replaced, version, createdAt) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(soundId) DO UPDATE SET fingerprint = ?2, catID = ?3, \
@@ -42,6 +42,15 @@ fn save_choice(c: &Connection, x: &SoundCategoryChoice) -> rusqlite::Result<()> 
 
 const CHOICE_COLUMNS: &str =
     "soundId, fingerprint, catID, byOwner, share, replaced, version, createdAt";
+
+pub(crate) fn save_rule(c: &Connection, r: &FolderRule) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT INTO folderRule (libraryId, folder, catID, createdAt) VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT(libraryId, folder) DO UPDATE SET catID = ?3, createdAt = ?4",
+        params![r.library_id, r.folder, r.cat_id, r.created_at],
+    )?;
+    Ok(())
+}
 
 impl LibraryDatabase {
     // MARK: per-sound categories
@@ -145,11 +154,7 @@ impl LibraryDatabase {
         self.with(|c| {
             let tx = c.transaction()?;
             for r in rules {
-                tx.execute(
-                    "INSERT INTO folderRule (libraryId, folder, catID, createdAt) VALUES (?1, ?2, ?3, ?4) \
-                     ON CONFLICT(libraryId, folder) DO UPDATE SET catID = ?3, createdAt = ?4",
-                    params![r.library_id, r.folder, r.cat_id, r.created_at],
-                )?;
+                save_rule(&tx, r)?;
             }
             tx.commit()
         })

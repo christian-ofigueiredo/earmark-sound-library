@@ -113,7 +113,18 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      `Character` does (grapheme clusters, `unicode-segmentation`), so decomposed accents
      and Hangul make the same words. The record types moved into earmark-core
      (`records`, `dates`), as the analysis works on them.
-5. Analysis files and timeline files.
+5. Analysis files and timeline files. **Done 2026-10-30**
+   (`earmark_core::analysis_file`, `earmark_core::timeline_file`,
+   `earmark_db::analysis_files`), with the Swift tests. On the owner's library:
+   - `compare.py anafiles`: both languages' exports are identical once parsed (28,827
+     sounds, 1,688 songs). Each language imported each's files into a copy with no
+     analysis, and all four results are identical (16 tables, 147,858 rows, the 57,654
+     embeddings bit-exact). The owner has no folder rules, per-sound choices or corrections
+     yet, so the check adds some to its copy first. Files aren't byte-identical: Swift
+     writes "/" as "\\/" and orders keys its own way; both read both.
+   - `compare.py timeline`: 600 cases over all 10 frame rates, including odd names and
+     failures: the file's text identical to the byte. Rust also writes Windows paths as
+     file URLs (`file:///C:/…`), which only unit tests cover so far.
 6. The Resolve bridge and the MCP server.
 7. Audio decoding (Symphonia) and the models (ONNX), with the same parity checks as the
    Core ML conversion. Only Windows uses these at first.

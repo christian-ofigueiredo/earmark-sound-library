@@ -2,6 +2,7 @@
 //! the Swift app's `LibraryDatabase`, so the Mac app keeps its library and analysis when it
 //! switches to the engine. The only place Earmark writes.
 
+pub mod analysis_files;
 pub mod categories;
 pub mod groups;
 pub mod schema;
@@ -24,6 +25,8 @@ pub enum DbError {
     Missing(String),
     /// Made by a newer Earmark: these migrations aren't known here.
     Newer(Vec<String>),
+    /// Writing a file, such as an analysis file.
+    File(String),
 }
 
 impl std::fmt::Display for DbError {
@@ -41,6 +44,7 @@ impl std::fmt::Display for DbError {
                 "This database was made by a newer Earmark ({}).",
                 m.join(", ")
             ),
+            DbError::File(e) => write!(f, "{e}"),
         }
     }
 }
@@ -222,6 +226,34 @@ fn write_song(conn: &Connection, s: &SongRecord, update: bool) -> rusqlite::Resu
         )?;
         Ok(conn.last_insert_rowid())
     }
+}
+
+pub(crate) fn save_fact(c: &Connection, f: &SoundFacts) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT INTO soundFacts (soundId, fingerprint, version, loudness, peak, error, analyzedAt) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(soundId) DO UPDATE SET fingerprint = ?2, \
+         version = ?3, loudness = ?4, peak = ?5, error = ?6, analyzedAt = ?7",
+        params![
+            f.sound_id,
+            f.fingerprint,
+            f.version,
+            f.loudness,
+            f.peak,
+            f.error,
+            f.analyzed_at
+        ],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn save_embedding(c: &Connection, e: &SoundEmbedding) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT INTO soundEmbedding (soundId, model, fingerprint, version, vector, error, analyzedAt) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(soundId, model) DO UPDATE SET fingerprint = ?3, \
+         version = ?4, vector = ?5, error = ?6, analyzedAt = ?7",
+        params![e.sound_id, e.model, e.fingerprint, e.version, e.vector, e.error, e.analyzed_at],
+    )?;
+    Ok(())
 }
 
 impl LibraryDatabase {
@@ -469,12 +501,7 @@ impl LibraryDatabase {
         self.with(|c| {
             let tx = c.transaction()?;
             for f in facts {
-                tx.execute(
-                    "INSERT INTO soundFacts (soundId, fingerprint, version, loudness, peak, error, analyzedAt) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(soundId) DO UPDATE SET fingerprint = ?2, \
-                     version = ?3, loudness = ?4, peak = ?5, error = ?6, analyzedAt = ?7",
-                    params![f.sound_id, f.fingerprint, f.version, f.loudness, f.peak, f.error, f.analyzed_at],
-                )?;
+                save_fact(&tx, f)?;
             }
             tx.commit()
         })
@@ -606,12 +633,7 @@ impl LibraryDatabase {
         self.with(|c| {
             let tx = c.transaction()?;
             for e in embeddings {
-                tx.execute(
-                    "INSERT INTO soundEmbedding (soundId, model, fingerprint, version, vector, error, analyzedAt) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(soundId, model) DO UPDATE SET fingerprint = ?3, \
-                     version = ?4, vector = ?5, error = ?6, analyzedAt = ?7",
-                    params![e.sound_id, e.model, e.fingerprint, e.version, e.vector, e.error, e.analyzed_at],
-                )?;
+                save_embedding(&tx, e)?;
             }
             tx.commit()
         })

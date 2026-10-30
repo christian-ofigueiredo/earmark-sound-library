@@ -10,6 +10,7 @@
 )]
 
 pub mod analysis;
+pub mod analysis_file;
 pub mod bytes;
 pub mod csv;
 pub mod dates;
@@ -22,6 +23,7 @@ pub mod records;
 pub mod scan;
 pub mod song_corrections;
 pub mod text;
+pub mod timeline_file;
 pub mod twins;
 pub mod ucs;
 pub mod xml;
