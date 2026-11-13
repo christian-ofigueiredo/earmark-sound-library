@@ -32,12 +32,12 @@ struct GroupNameSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             switch naming {
             case .rename(let g):
-                Text("Rename Group").font(.title3.weight(.semibold))
+                Text("Rename Group").font(.dsTitle3)
                 Text(g.userName == nil ? "Earmark called it “\(g.name)”." : "Earmark called it “\(g.name)”. Leave it empty to go back to that.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             case .new(let sounds, _):
-                Text("New Group").font(.title3.weight(.semibold))
+                Text("New Group").font(.dsTitle3)
                 Text(sounds.count == 1 ? "A group of the selected sound, moved out of the group it's in."
                      : "A group of the \(sounds.count) selected sounds, moved out of the groups they're in.")
                     .foregroundStyle(.secondary)
@@ -50,8 +50,10 @@ struct GroupNameSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .buttonStyle(.dsGhost)
                 Button(isNew ? "Make Group" : "Rename", action: save)
                     .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.dsPrimary)
                     .disabled(isNew && name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -120,16 +122,16 @@ struct GroupLine: View {
     var body: some View {
         if let group = model.group(of: sound), model.groups(catID: sound.catID).count > 1 {
             HStack(spacing: 6) {
-                Image(systemName: "circle.grid.2x2").foregroundStyle(.secondary).font(.caption)
+                Image(systemName: "circle.grid.2x2").foregroundStyle(.secondary).font(.dsCaption)
                 Button(group.title) { model.soundBrowser.scope = .group(group.id!) }
-                    .buttonStyle(.link)
-                    .font(.caption)
+                    .buttonStyle(.dsLink)
+                    .font(.dsCaption)
                     .lineLimit(1)
                     .layoutPriority(1)
                     .help("Show this group: sounds in “\(sound.subcategory?.capitalized ?? "")” that sound alike")
                 if !group.keywordList.isEmpty {
                     Text(group.keywordList.map { "#\($0)" }.joined(separator: " "))
-                        .font(.caption)
+                        .font(.dsCaption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -149,7 +151,7 @@ struct GroupLine: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .font(.caption)
+                .font(.dsCaption)
             }
         }
     }

@@ -61,6 +61,7 @@ struct Preferences: View {
         .formStyle(.grouped)
         .frame(width: 500)
         .fixedSize(horizontal: false, vertical: true)
+        .scrollContentBackground(.hidden)
         .onChange(of: appearance) { appearance.apply() }
         .onChange(of: normalize) { model.player.refreshGain() }
         .onChange(of: loudness) { model.player.refreshGain() }

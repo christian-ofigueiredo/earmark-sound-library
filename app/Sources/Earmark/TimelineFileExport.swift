@@ -99,7 +99,7 @@ struct TimelineFileSettings: View {
             }
             TextField("Starts at:", text: $start)
                 .frame(width: 110)
-            Text("Use your timeline's frame rate.").font(.caption).foregroundStyle(.secondary)
+            Text("Use your timeline's frame rate.").font(.dsCaption).foregroundStyle(.secondary)
         }
         .padding(12)
         .fixedSize()

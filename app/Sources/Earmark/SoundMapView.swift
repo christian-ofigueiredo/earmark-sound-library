@@ -233,14 +233,14 @@ enum MapPalette {
         return SIMD3(Float(hex >> 16 & 0xFF), Float(hex >> 8 & 0xFF), Float(hex & 0xFF)) / 255
     }
 
-    /// Behind the map: near black in dark mode (the glow and the fine lines show on it), white
-    /// in light mode.
+    /// Behind the map: the design system's Ebony in dark mode (the glow and the fine lines show
+    /// on it), white in light mode.
     static let background = NSColor(name: "soundMapBackground") { appearance in
         background(dark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
     }
 
     static func background(dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0.043, green: 0.051, blue: 0.063, alpha: 1) : NSColor(white: 1, alpha: 1)
+        dark ? NSColor(srgbRed: 0x02 / 255, green: 0x03 / 255, blue: 0x06 / 255, alpha: 1) : NSColor(white: 1, alpha: 1)
     }
 }
 
@@ -411,12 +411,12 @@ private struct MapLegend: View {
                 }
             }
             if highlight != nil {
-                Button("Show All") { highlight = nil }.buttonStyle(.link).font(.caption)
+                Button("Show All") { highlight = nil }.buttonStyle(.dsLink).font(.dsCaption)
             }
         }
         .padding(10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .font(.callout)
+        .font(.dsBodySm)
     }
 
     private func row(_ entry: MapStyle.Entry, lit: Bool) -> some View {
@@ -450,13 +450,12 @@ struct SoundViewBar: View {
     var body: some View {
         @Bindable var state = model.soundMap
         HStack(spacing: 12) {
-            Picker("View", selection: $state.showing) {
-                Text("List").tag(false)
-                Text("Map").tag(true)
+            HStack(spacing: 8) {
+                DSChip(title: "List", chosen: !state.showing) { state.showing = false }
+                DSChip(title: "Map", chosen: state.showing) { state.showing = true }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("View")
             .help("Show the sounds as a list or as a map, sounds that sound alike close together (⇧⌘M)")
             if state.showing {
                 Toggle("Play on hover", isOn: $state.playOnHover).toggleStyle(.checkbox)
@@ -466,7 +465,7 @@ struct SoundViewBar: View {
                 let ready = state.newlyAnalysed(model.analysis)
                 let waiting = state.missing - ready
                 if waiting > 0 {
-                    Text("\(waiting.formatted()) not analysed yet").foregroundStyle(.secondary).font(.callout)
+                    Text("\(waiting.formatted()) not analysed yet").foregroundStyle(.secondary).font(.dsBodySm)
                         .help("Sounds here that aren't on the map: they join once analysed")
                 }
                 if ready > 0 {
@@ -906,13 +905,13 @@ final class SoundMapCanvas: NSView {
             ctx.fillPath()
             if chosen.count <= 40 { for i in chosen { ring(i, .labelColor, 1, 2.5) } }
         }
-        if let p = playing, p < points.count { ring(p, .earmarkBlue, 1.5, 3.5) }
+        if let p = playing, p < points.count { ring(p, .dsAccent, 1.5, 3.5) }
         if let m = marquee {
             let rect = CGRect(x: min(m.start.x, m.end.x), y: min(m.start.y, m.end.y),
                               width: abs(m.end.x - m.start.x), height: abs(m.end.y - m.start.y))
-            ctx.setFillColor(NSColor.earmarkSelectionBlue.withAlphaComponent(0.1).cgColor)
+            ctx.setFillColor(NSColor.dsSelection.cgColor)
             ctx.fill(rect)
-            ctx.setStrokeColor(NSColor.earmarkBlue.cgColor)
+            ctx.setStrokeColor(NSColor.dsInk.withAlphaComponent(0.7).cgColor)
             ctx.setLineWidth(0.75)
             ctx.stroke(rect)
         }

@@ -267,7 +267,7 @@ struct FolderMapView: View {
                     Text("Suggesting categories: \(mapper.pending) folders to go").foregroundStyle(.secondary)
                 } else {
                     Text("Sounds without a category take their folder's: yours, or else Earmark's guess. A category from the file itself always wins. Earmark keeps this in its own database; your files aren't changed.")
-                        .font(.caption)
+                        .font(.dsCaption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -280,6 +280,7 @@ struct FolderMapView: View {
                     }
                     Button("Save Categories") { mapper.save(model) }
                         .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.dsPrimary)
                         .disabled(mapper.ticked.isEmpty)
                 }
             }
@@ -449,13 +450,13 @@ struct MappedFoldersTable: View {
                     Text(FolderMapper.title(row.rule.catID))
                     Spacer()
                     Button("Change…") { mapper.choosing = row.id }
-                        .buttonStyle(.link)
+                        .buttonStyle(.dsLink)
                 }
             }
             .width(min: 200, ideal: 280)
             TableColumn("") { row in
                 Button("Remove") { model.removeFolderRule(row.rule) }
-                    .buttonStyle(.link)
+                    .buttonStyle(.dsLink)
                     .help("Its sounds go back to Earmark's guess")
             }
             .width(60)
@@ -625,7 +626,7 @@ struct UCSChooser: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.headline)
+                .font(.dsHeading)
             TextField("Search, e.g. door, rain, whoosh", text: $search)
                 .textFieldStyle(.roundedBorder)
                 .focused($searchFocused)
@@ -635,10 +636,10 @@ struct UCSChooser: View {
                         HStack {
                             Text(e.label.capitalized)
                             Spacer()
-                            Text(e.catID).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(e.catID).font(.dsCaption).foregroundStyle(.secondary)
                         }
                         if !e.explanation.isEmpty {
-                            Text(e.explanation).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text(e.explanation).font(.dsCaption).foregroundStyle(.secondary).lineLimit(2)
                         }
                     }
                 }
@@ -655,8 +656,10 @@ struct UCSChooser: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .buttonStyle(.dsGhost)
                 Button("Choose") { if let chosen { choose(chosen) } }
                     .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.dsPrimary)
                     .disabled(chosen == nil)
             }
         }

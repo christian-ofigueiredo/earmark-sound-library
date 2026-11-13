@@ -26,6 +26,8 @@ struct ContentView: View {
                 ToolbarItem(placement: .principal) { HStack(spacing: 8) { SectionSwitch(); AutoPlayToggle() } }
             }
         }
+        .dsWindowBackground()
+        .toolbarBackground(Color.dsBackground, for: .windowToolbar)
         .onChange(of: model.section) { _, section in
             model.player.stop()
             UserDefaults.standard.set(section.rawValue, forKey: "section")
@@ -84,6 +86,8 @@ struct LibraryView: View {
                 SoundSidebar()
                 MusicSidebar()
             }
+            // Behind both lists (each list's own would cover the other's, hidden in AppKit).
+            .background(Color.dsSurface)
             .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 380)
         } detail: {
             ZStack {
@@ -166,6 +170,7 @@ struct DetailColumn: View {
             }
             .offset(y: slide)
         }
+        .background(Color.dsSurface)
         .animation(Self.motion, value: playing != nil)
         .onChange(of: playing != nil) { _, shown in
             // The details usually change too (another row selected), so there's no old
@@ -266,10 +271,9 @@ extension LibraryView {
 }
 
 /// Play sounds (or songs) as you select them, each section with its own setting: a round
-/// button after the section switch, blue glass while on.
+/// button after the section switch, ink while on (as a chosen chip).
 struct AutoPlayToggle: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.controlActiveState) private var activeState
     @AppStorage("autoplaySounds") private var autoplaySounds = false
     @AppStorage("autoplayMusic") private var autoplayMusic = false
 
@@ -280,12 +284,13 @@ struct AutoPlayToggle: View {
             if music { autoplayMusic.toggle() } else { autoplaySounds.toggle() }
         } label: {
             if #available(macOS 26, *) {
-                // Drawn like the switch: its glass, tinted blue while on.
+                // Drawn like the switch: its glass, ink while on.
                 Image(systemName: on ? "play.circle.fill" : "play.circle")
                     .font(.title3)
-                    .foregroundStyle(on && activeState != .inactive ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                    .foregroundStyle(on ? Color.dsOnInk : Color.dsInk)
                     .frame(width: 34, height: 34)
-                    .glassEffect(on ? .regular.tint(.earmarkSelectionBlue).interactive() : .regular.interactive(), in: .circle)
+                    .background { if on { Circle().fill(Color.dsInk) } }
+                    .glassEffect(.regular.interactive(), in: .circle)
                     .contentShape(Circle())
             } else {
                 Label("Auto-play", systemImage: on ? "play.circle.fill" : "play.circle")
@@ -301,14 +306,12 @@ struct AutoPlayToggle: View {
     }
 }
 
-/// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose blue-tinted glass
-/// pill slides to the chosen section (`AppModel.show`).
+/// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose ink pill slides
+/// to the chosen section (`AppModel.show`), as the design system's chosen chip.
 struct SectionSwitch: View {
     /// How long the pill slides, seconds; the section changes after it (`AppModel.show`).
     static let slide = 0.28
     @Environment(AppModel.self) private var model
-    /// In an inactive window the system greys the glass's tint: dark text then, not white.
-    @Environment(\.controlActiveState) private var activeState
     /// Where each segment is, for the pill to move to.
     @State private var segments: [AppSection: CGRect] = [:]
 
@@ -325,8 +328,7 @@ struct SectionSwitch: View {
                     // stuttered in that direction only.)
                     .background(alignment: .topLeading) {
                         if let frame = segments[model.switchSection] {
-                            Color.clear
-                                .glassEffect(.regular.tint(.earmarkSelectionBlue).interactive(), in: .capsule)
+                            Capsule().fill(Color.dsInk)
                                 .frame(width: frame.width, height: frame.height)
                                 .offset(x: frame.minX, y: frame.minY)
                         }
@@ -355,10 +357,10 @@ struct SectionSwitch: View {
         return Button {
             model.show(section)
         } label: {
-            // The same weight either way (bold made the label jump); the chosen one sits on
-            // blue-tinted glass, the system's way to colour glass (no painted gradient).
+            // The same weight either way (bold made the label jump); the chosen one sits on ink.
             Text(section.title)
-                .foregroundStyle(chosen && activeState != .inactive ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                .font(.dsLabel)
+                .foregroundStyle(chosen ? Color.dsOnInk : Color.dsInk)
                 .padding(.horizontal, 16)
                 .frame(height: 28)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { segments[section] = $0 }
@@ -416,7 +418,7 @@ struct StatusBar: View {
             .help("Analysis is much faster when you're not using the Mac. Leave Earmark open overnight: "
                 + "it analyses sounds in the background and slows down while you work.")
         }
-        .font(.callout)
+        .font(.dsBodySm)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }
@@ -441,7 +443,7 @@ struct WelcomeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Welcome to Earmark").font(.largeTitle.weight(.bold))
+            Text("Welcome to Earmark").font(.dsTitle2)
             WelcomePoint(icon: "lock.shield", title: "Your files are never changed",
                          text: "Earmark only reads your sound effects and music. It never writes to, renames or moves "
                              + "them. Everything it learns is kept in its own database in "
@@ -457,13 +459,16 @@ struct WelcomeView: View {
                     model.finishWelcome()
                     model.chooseLibrary(.sounds)
                 }
+                .buttonStyle(.dsGhost)
                 Button("Add Music Folder…") {
                     model.finishWelcome()
                     model.chooseLibrary(.music)
                 }
+                .buttonStyle(.dsGhost)
                 Spacer()
                 Button("Get Started") { model.finishWelcome() }
                     .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.dsPrimary)
             }
         }
         .padding(28)
@@ -481,10 +486,10 @@ private struct WelcomePoint: View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: icon)
                 .font(.title2)
-                .foregroundStyle(Color.earmarkBlue)
+                .foregroundStyle(Color.dsInk)
                 .frame(width: 30)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline)
+                Text(title).font(.dsHeading)
                 Text(text).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }

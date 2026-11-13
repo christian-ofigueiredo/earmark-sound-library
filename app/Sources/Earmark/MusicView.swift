@@ -125,7 +125,7 @@ struct MusicSidebar: View {
             Label("All Music", systemImage: "music.note.list")
                 .badge(model.songs.count)
                 .tag(MusicScope.all)
-            Section("Folders") {
+            Section {
                 ForEach(model.musicLibraries) { lib in
                     LibraryRow(library: lib, count: model.songIndex.libraryCounts[lib.id ?? -1] ?? 0,
                                scanning: model.isScanning(lib))
@@ -139,14 +139,16 @@ struct MusicSidebar: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
+            } header: {
+                Text("Folders").overlineStyle()
             }
-            Section("Tempo and Key") {
+            Section {
                 // The songs whose tempo, key or beats per bar you set by hand, to review them.
                 Label("Corrected by You", systemImage: "pencil.line")
                     .badge(model.songIndex.corrected)
                     .tag(MusicScope.corrected)
                 Text("\(model.songIndex.analysed.formatted()) of \(model.songs.count.formatted()) songs analysed")
-                    .font(.callout)
+                    .font(.dsBodySm)
                     .foregroundStyle(.secondary)
                 Button {
                     model.chooseImport()
@@ -155,9 +157,13 @@ struct MusicSidebar: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
+            } header: {
+                Text("Tempo and Key").overlineStyle()
             }
         }
         .listStyle(.sidebar)
+        .font(.dsBodySm)
+        .scrollContentBackground(.hidden)
     }
 }
 
@@ -319,7 +325,7 @@ struct SongDetail: View {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(song.displayTitle)
-                        .font(.title2.weight(.semibold))
+                        .font(.dsTitle3)
                         .textSelection(.enabled)
                     if let artist = song.artist, !artist.isEmpty {
                         Text(artist).foregroundStyle(.secondary)
@@ -334,7 +340,7 @@ struct SongDetail: View {
                 let unreadable = song.id.flatMap { model.analysis.unreadableSongs[$0] }
                 if let why = unreadable {
                     Text("Earmark couldn't read this file to work out its tempo and key. It tries again next time it opens.")
-                        .font(.callout)
+                        .font(.dsBodySm)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .help(why)
@@ -343,7 +349,7 @@ struct SongDetail: View {
                          ? "Not analysed yet. Earmark's tempo and key models aren't installed; you can import "
                            + "Phase 0's results instead (File ▸ Import Analysis…)."
                          : "Not analysed yet. Earmark works out its tempo and key in the background.")
-                        .font(.callout)
+                        .font(.dsBodySm)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -354,6 +360,7 @@ struct SongDetail: View {
                         key
                     }
                     Button("Find Songs That Mix With This") { model.musicBrowser.findMixes(for: song) }
+                        .buttonStyle(.dsGhost)
                         .disabled(song.bpm == nil && song.key == nil)
                 }
                 InfoGrid([
@@ -405,23 +412,23 @@ struct SongDetail: View {
     private var tempo: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text("Tempo").font(.caption).foregroundStyle(.secondary)
+                Text("Tempo").font(.dsCaption).foregroundStyle(.secondary)
                 ChangeMenu { tempoMenu }
             }
             Text(song.bpm.map { "\(formatBPM($0)) BPM" } ?? "No steady beat")
-                .font(.title3.weight(.semibold))
+                .font(.dsTitle3)
                 .monospacedDigit()
             if song.correction?.correctsTempo == true {
                 Text(setByYou(found: song.analysed?.bpm.map { "\(formatBPM($0)) BPM" } ?? "no steady beat"))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.dsBodySm).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if song.tempoStability == "variable", let lo = song.bpmLow, let hi = song.bpmHigh {
-                Text("Changes: \(formatBPM(lo))–\(formatBPM(hi))").font(.callout).foregroundStyle(.secondary)
+                Text("Changes: \(formatBPM(lo))–\(formatBPM(hi))").font(.dsBodySm).foregroundStyle(.secondary)
             }
             if let beats = song.beatsPerBar {
                 Text("\(beats) beats per bar" + (song.correction?.correctsBeatsPerBar == true ? " · set by you" : ""))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.dsBodySm).foregroundStyle(.secondary)
             }
         }
     }
@@ -457,22 +464,22 @@ struct SongDetail: View {
     private var key: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text("Key").font(.caption).foregroundStyle(.secondary)
+                Text("Key").font(.dsCaption).foregroundStyle(.secondary)
                 ChangeMenu { keyMenu }
             }
             if let k = song.key {
-                Text("\(k.name) · \(k.camelot)").font(.title3.weight(.semibold))
+                Text("\(k.name) · \(k.camelot)").font(.dsTitle3)
                 if song.correction?.correctsKey == true {
                     Text(setByYou(found: song.analysed?.key.map { "\($0.name) (\($0.camelot))" } ?? "no key"))
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.dsBodySm).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Text("Or \(k.relative.name) (\(k.relative.camelot)), its relative key: same notes, and the most common mix-up.")
-                    .font(.callout)
+                    .font(.dsBodySm)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("Unknown").font(.title3.weight(.semibold))
+                Text("Unknown").font(.dsTitle3)
             }
         }
     }
@@ -502,7 +509,7 @@ private struct ChangeMenu<Content: View>: View {
         Menu {
             content
         } label: {
-            Text("Change").font(.caption)
+            Text("Change").font(.dsCaption)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)

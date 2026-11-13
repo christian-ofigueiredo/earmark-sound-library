@@ -11,28 +11,40 @@ struct EarmarkApp: App {
         Window("Earmark", id: "main") {
             ContentView()
                 .environment(model)
-                .tint(.earmarkBlue)
+                .tint(.dsInk)
+                .font(.dsBodySm)
+                .dsWindowBackground()
                 .fixedMinimumSize(CGSize(width: 980, height: 600))
                 .onOpenURL { model.open($0) }
         }
         Settings {
             Preferences()
                 .environment(model)
-                .tint(.earmarkBlue)
+                .tint(.dsInk)
+                .font(.dsBodySm)
+                .dsWindowBackground()
         }
         Window("Folder Categories", id: FolderMapView.windowID) {
             FolderMapView()
                 .environment(model)
-                .tint(.earmarkBlue)
+                .tint(.dsInk)
+                .font(.dsBodySm)
+                .dsWindowBackground()
                 .frame(minWidth: 900, minHeight: 480)
         }
         .defaultSize(width: 1100, height: 680)
         Window("Keyboard Shortcuts", id: KeyboardShortcutsView.windowID) {
             KeyboardShortcutsView()
+                .font(.dsBodySm)
+                .tint(.dsInk)
+                .dsWindowBackground()
         }
         .windowResizability(.contentSize)
         Window("Connect an AI Agent", id: ConnectAgentView.windowID) {
             ConnectAgentView()
+                .font(.dsBodySm)
+                .tint(.dsInk)
+                .dsWindowBackground()
         }
         .windowResizability(.contentSize)
         .commands {

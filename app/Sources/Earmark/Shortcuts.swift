@@ -275,7 +275,7 @@ struct KeyboardShortcutsView: View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 18, verticalSpacing: 6) {
             ForEach(groups) { group in
                 GridRow {
-                    Text(group.title).font(.headline).gridCellColumns(2)
+                    Text(group.title).font(.dsHeading).gridCellColumns(2)
                 }
                 .padding(.top, group.id == groups.first?.id ? 0 : 10)
                 ForEach(group.rows, id: \.what) { row in

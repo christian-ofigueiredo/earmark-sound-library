@@ -41,7 +41,7 @@ struct ConnectAgentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Connect an AI Agent").font(.title2.weight(.semibold))
+            Text("Connect an AI Agent").font(.dsTitle3)
             Text("Earmark includes an MCP server, so an AI agent can search your sound libraries, look at a sound's details, "
                  + "find similar sounds, and put sounds on the timeline open in DaVinci Resolve. It only reads your libraries "
                  + "and Earmark's data, and works with Earmark closed. Your agent asks you before it places sounds.")
@@ -55,14 +55,14 @@ struct ConnectAgentView: View {
             block("Claude Code: run this in Terminal", claudeCode)
             block("Claude desktop app: add this under \"mcpServers\" in Settings ▸ Developer ▸ Edit Config", desktopConfig)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Tools").font(.headline)
+                Text("Tools").font(.dsHeading)
                 Text("library_overview · search_sounds · get_sound · find_similar · list_groups · show_in_earmark · "
                      + "resolve_status · add_to_resolve")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("Sounds an agent places go on audio tracks named “Earmark”, so they're easy to find. "
                      + "If Earmark moves (e.g. to Applications), set it up again.")
-                    .font(.callout)
+                    .font(.dsBodySm)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -74,7 +74,7 @@ struct ConnectAgentView: View {
 
     private func block(_ title: String, _ text: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.headline)
+            Text(title).font(.dsHeading)
             HStack(alignment: .top) {
                 Text(text)
                     .font(.system(.callout, design: .monospaced))
