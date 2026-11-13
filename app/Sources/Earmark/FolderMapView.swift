@@ -288,14 +288,11 @@ struct FolderMapView: View {
             .padding(.vertical, 10)
         }
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Show", selection: $mapper.tab) {
-                    Text("Guessed by Earmark (\(mapper.guessed.count))").tag(FolderMapper.Tab.guessed)
-                    Text("Your Choices (\(mapper.mapped.count))").tag(FolderMapper.Tab.mapped)
-                    Text("Not Categorised (\(mapper.rows.count))").tag(FolderMapper.Tab.toMap)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+            // Chips, as List | Map in the main window; on their own, not on the toolbar's shared glass.
+            if #available(macOS 26, *) {
+                ToolbarItem(placement: .principal) { tabs }.sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .principal) { tabs }
             }
         }
         .searchable(text: $mapper.search, placement: .toolbar, prompt: "Folder")
@@ -333,17 +330,17 @@ struct FoldersToMapTable: View {
                 .disabled(mapper.catID(for: row.id) == nil)
             }
             .width(22)
-            TableColumn("Folder") { row in
+            TableColumn(dsColumnTitle("Folder")) { row in
                 FolderPath(folder: row.id.folder)
             }
             .width(min: 200, ideal: 340)
-            TableColumn("Sounds") { row in
+            TableColumn(dsColumnTitle("Sounds")) { row in
                 Text(row.soundIds.count.formatted()).monospacedDigit()
             }
             .width(min: 50, ideal: 56, max: 80)
-            TableColumn("Category") { row in FolderCategoryMenu(model: model, key: row.id) }
+            TableColumn(dsColumnTitle("Category")) { row in FolderCategoryMenu(model: model, key: row.id) }
                 .width(min: 180, ideal: 230)
-            TableColumn("Why") { row in FolderReason(model: model, key: row.id) }
+            TableColumn(dsColumnTitle("Why")) { row in FolderReason(model: model, key: row.id) }
                 .width(min: 160, ideal: 260)
             TableColumn("") { row in SampleButton(model: model, key: row.id) }
                 .width(24)
@@ -387,17 +384,17 @@ struct GuessedFoldersTable: View {
     var body: some View {
         @Bindable var mapper = model.folderMapper
         Table(of: FolderMapper.GuessRow.self, selection: $mapper.guessedSelection) {
-            TableColumn("Folder") { row in
+            TableColumn(dsColumnTitle("Folder")) { row in
                 FolderPath(folder: row.guess.folder)
             }
             .width(min: 200, ideal: 340)
-            TableColumn("Sounds") { row in
+            TableColumn(dsColumnTitle("Sounds")) { row in
                 Text(row.soundIds.count.formatted()).monospacedDigit()
             }
             .width(min: 50, ideal: 56, max: 80)
-            TableColumn("Category") { row in GuessCategoryMenu(model: model, guess: row.guess) }
+            TableColumn(dsColumnTitle("Category")) { row in GuessCategoryMenu(model: model, guess: row.guess) }
                 .width(min: 180, ideal: 230)
-            TableColumn("Why") { row in
+            TableColumn(dsColumnTitle("Why")) { row in
                 Text(row.guess.reason + (row.guess.isUnsure ? " — listen first" : ""))
                     .foregroundStyle(row.guess.isUnsure ? AnyShapeStyle(Color.dsInk) : AnyShapeStyle(Color.dsInkMuted))
                     .help(row.guess.reason)
@@ -441,15 +438,15 @@ struct MappedFoldersTable: View {
     var body: some View {
         @Bindable var mapper = model.folderMapper
         Table(of: FolderMapper.MappedRow.self, selection: $mapper.mappedSelection) {
-            TableColumn("Folder") { row in
+            TableColumn(dsColumnTitle("Folder")) { row in
                 FolderPath(folder: row.rule.folder)
             }
             .width(min: 200, ideal: 360)
-            TableColumn("Sounds") { row in
+            TableColumn(dsColumnTitle("Sounds")) { row in
                 Text(row.soundIds.count.formatted()).monospacedDigit()
             }
             .width(min: 50, ideal: 56, max: 80)
-            TableColumn("Category") { row in
+            TableColumn(dsColumnTitle("Category")) { row in
                 HStack {
                     Text(FolderMapper.title(row.rule.catID))
                     Spacer()
@@ -704,4 +701,18 @@ struct MapFoldersButton: View {
 
 extension FolderMapView {
     static let windowID = "folder-map"
+}
+
+extension FolderMapView {
+    /// Which folders to show, as chips.
+    @ViewBuilder fileprivate var tabs: some View {
+        let mapper = model.folderMapper
+        HStack(spacing: 8) {
+            DSChip(title: "Guessed by Earmark (\(mapper.guessed.count))", chosen: mapper.tab == .guessed) { mapper.tab = .guessed }
+            DSChip(title: "Your Choices (\(mapper.mapped.count))", chosen: mapper.tab == .mapped) { mapper.tab = .mapped }
+            DSChip(title: "Not Categorised (\(mapper.rows.count))", chosen: mapper.tab == .toMap) { mapper.tab = .toMap }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Show")
+    }
 }

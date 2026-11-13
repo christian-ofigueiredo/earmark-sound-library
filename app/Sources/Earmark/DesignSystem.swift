@@ -281,6 +281,12 @@ struct DSChip: View {
     }
 }
 
+/// A SwiftUI table's column title in the main lists' look (a printed label: uppercase, tracked,
+/// muted).
+func dsColumnTitle(_ title: String) -> Text {
+    Text(title.uppercased()).font(Font(DSFont.text(11, 600))).kerning(1.2).foregroundStyle(Color.dsInkMuted)
+}
+
 /// Sets its window's background to the design system's ground.
 private struct WindowGround: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { GroundView() }
