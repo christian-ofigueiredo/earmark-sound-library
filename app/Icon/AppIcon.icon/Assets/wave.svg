@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- The waveform in the design system's Ebony: neutrals do the work. -->
-  <g fill="#020306">
+  <g fill="#040404">
     <rect x="322" y="540" width="44" height="110" rx="22"/>
     <rect x="390" y="470" width="44" height="250" rx="22"/>
     <rect x="458" y="410" width="44" height="370" rx="22"/>

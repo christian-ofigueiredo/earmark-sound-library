@@ -272,7 +272,7 @@ extension LibraryView {
 }
 
 /// Play sounds (or songs) as you select them, each section with its own setting: a round
-/// button after the section switch, ink while on (as a chosen chip).
+/// button after the section switch, sunk in and bright while on (as a pressed chip).
 struct AutoPlayToggle: View {
     @Environment(AppModel.self) private var model
     @AppStorage("autoplaySounds") private var autoplaySounds = false
@@ -285,12 +285,12 @@ struct AutoPlayToggle: View {
             if music { autoplayMusic.toggle() } else { autoplaySounds.toggle() }
         } label: {
             if #available(macOS 26, *) {
-                // Drawn like the switch: its glass, ink while on.
+                // Drawn like the switch: its glass, sunk in while on.
                 Image(systemName: on ? "play.circle.fill" : "play.circle")
                     .font(.title3)
-                    .foregroundStyle(on ? Color.dsOnInk : Color.dsInk)
+                    .foregroundStyle(on ? Color.dsInk : Color.dsInkMuted)
                     .frame(width: 34, height: 34)
-                    .background { if on { Circle().fill(Color.dsInk) } }
+                    .background { if on { Circle().fill(Color.dsSunken) } }
                     .glassEffect(.regular.interactive(), in: .circle)
                     .contentShape(Circle())
             } else {
@@ -307,8 +307,8 @@ struct AutoPlayToggle: View {
     }
 }
 
-/// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose ink pill slides
-/// to the chosen section (`AppModel.show`), as the design system's chosen chip.
+/// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose sunken pill slides
+/// to the chosen section (`AppModel.show`), as the design system's pressed chip.
 struct SectionSwitch: View {
     /// How long the pill slides, seconds; the section changes after it (`AppModel.show`).
     static let slide = 0.28
@@ -329,7 +329,9 @@ struct SectionSwitch: View {
                     // stuttered in that direction only.)
                     .background(alignment: .topLeading) {
                         if let frame = segments[model.switchSection] {
-                            Capsule().fill(Color.dsInk)
+                            // The pressed key: sunk into the body.
+                            Capsule().fill(Color.dsSunken)
+                                .overlay(Capsule().strokeBorder(Color.dsLine, lineWidth: 1))
                                 .frame(width: frame.width, height: frame.height)
                                 .offset(x: frame.minX, y: frame.minY)
                         }
@@ -361,7 +363,7 @@ struct SectionSwitch: View {
             // The same weight either way (bold made the label jump); the chosen one sits on ink.
             Text(section.title)
                 .font(.dsLabel)
-                .foregroundStyle(chosen ? Color.dsOnInk : Color.dsInk)
+                .foregroundStyle(chosen ? Color.dsInk : Color.dsInkMuted)
                 .padding(.horizontal, 16)
                 .frame(height: 28)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { segments[section] = $0 }

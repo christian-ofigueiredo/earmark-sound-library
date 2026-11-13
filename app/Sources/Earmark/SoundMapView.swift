@@ -240,7 +240,7 @@ enum MapPalette {
     }
 
     static func background(dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0x18 / 255, green: 0x1A / 255, blue: 0x20 / 255, alpha: 1) : NSColor(white: 1, alpha: 1)
+        dark ? NSColor(srgbRed: 0x13 / 255, green: 0x13 / 255, blue: 0x14 / 255, alpha: 1) : NSColor(white: 1, alpha: 1)
     }
 }
 

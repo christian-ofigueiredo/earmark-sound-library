@@ -1,47 +1,50 @@
 import AppKit
 import SwiftUI
 
-// The owner's design system (~/Documents/Design System/design-system: tokens.css, README), the
-// parts Earmark uses. Neutrals do the work; red is one signal per screen: what's playing and the
-// key that plays it. The system's type is Babcock (titles and numbers, 24 pt and up) and N27
-// (everything else). Their licences don't allow putting them in an app, so Earmark uses them only
-// where they're installed, and the system's condensed font elsewhere.
+// The owner's design system (~/Documents/Design System/workspace/ds/project: tokens.css, README;
+// Offload is its reference in an app), the parts Earmark uses. Six colours exist, everything else
+// is one of them at an opacity. The ground and the panels are the same colour: depth comes from
+// light and shadow. Red is one signal per view: what's playing and the key that plays it. The
+// type is Babcock (titles and numbers, 24 pt and up) and N27 (everything else). Their licences
+// don't allow putting them in an app, so Earmark uses them only where they're installed, and the
+// system's condensed font elsewhere.
 
 // MARK: colour
 
 extension NSColor {
+    private static func rgb(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
+        NSColor(srgbRed: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255,
+                blue: CGFloat(hex & 0xff) / 255, alpha: alpha)
+    }
+
     /// A token with its light and dark values (tokens.css).
-    private static func token(_ name: String, light: UInt32, dark: UInt32, darkAlpha: CGFloat = 1) -> NSColor {
+    private static func token(_ name: String, light: NSColor, dark: NSColor) -> NSColor {
         NSColor(name: NSColor.Name(name)) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            let hex = isDark ? dark : light
-            return NSColor(srgbRed: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255,
-                           blue: CGFloat(hex & 0xff) / 255, alpha: isDark ? darkAlpha : 1)
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
         }
     }
 
-    /// The window's ground: Seashell; in dark mode Shark (the owner, 2026-11-13: Ebony's near
-    /// black made no sense for a window, as in Offload).
-    static let dsBackground = token("dsBackground", light: 0xF1F1F1, dark: 0x181A20)
-    /// Panels on the ground: the sidebar, the inspector. In dark mode Shark too, the panels
-    /// parted by the split view's lines.
-    static let dsSurface = token("dsSurface", light: 0xFFFFFF, dark: 0x181A20)
-    /// Sunken tracks and wells.
-    static let dsSunken = token("dsSunken", light: 0xDEDEDE, dark: 0x0C0D11)
-    /// Decoration only: rules and outlines.
-    static let dsLine = token("dsLine", light: 0xDEDEDE, dark: 0x2A2D35)
-    static let dsInk = token("dsInk", light: 0x020306, dark: 0xF1F1F1)
-    static let dsInkMuted = token("dsInkMuted", light: 0x5D6068, dark: 0x9A9DA6)
-    /// Text on an `dsInk` fill.
-    static let dsOnInk = token("dsOnInk", light: 0xF1F1F1, dark: 0x020306)
-    /// The one red: Ruby Red on light grounds, Milano Red on dark.
-    static let dsAccent = token("dsAccent", light: 0xA00A00, dark: 0xD41101)
+    static let dsEbony = rgb(0x040404)
+    static let dsShark = rgb(0x131314)
+    static let dsSeashell = rgb(0xF1F1F1)
+
+    /// The window's ground and its panels, one colour: Seashell, Shark.
+    static let dsBackground = token("dsBackground", light: dsSeashell, dark: dsShark)
+    static let dsSurface = dsBackground
+    /// Sunken wells and pressed keys.
+    static let dsSunken = token("dsSunken", light: rgb(0x040404, 0.06), dark: rgb(0x040404, 0.42))
+    /// Decoration only: rules.
+    static let dsLine = token("dsLine", light: rgb(0x040404, 0.14), dark: rgb(0xF1F1F1, 0.12))
+    /// Printed outlines.
+    static let dsLinePrint = token("dsLinePrint", light: rgb(0x040404, 0.32), dark: rgb(0xF1F1F1, 0.3))
+    static let dsInk = token("dsInk", light: dsEbony, dark: dsSeashell)
+    /// Labels printed on the body.
+    static let dsInkPrint = token("dsInkPrint", light: rgb(0x040404, 0.78), dark: rgb(0xF1F1F1, 0.78))
+    static let dsInkMuted = token("dsInkMuted", light: rgb(0x040404, 0.62), dark: rgb(0xF1F1F1, 0.62))
+    /// The one red: Ruby Red on light grounds, Milano Red on dark. What's on it is always light.
+    static let dsAccent = token("dsAccent", light: rgb(0xA00A00), dark: rgb(0xD41101))
     /// What's selected in a list: ink, faint. (Red stays for what's playing.)
-    static let dsSelection = NSColor(name: "dsSelection") { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(srgbRed: 0xF1 / 255, green: 0xF1 / 255, blue: 0xF1 / 255, alpha: 0.13)
-            : NSColor(srgbRed: 0x02 / 255, green: 0x03 / 255, blue: 0x06 / 255, alpha: 0.09)
-    }
+    static let dsSelection = token("dsSelection", light: rgb(0x040404, 0.09), dark: rgb(0xF1F1F1, 0.12))
 }
 
 extension Color {
@@ -49,11 +52,13 @@ extension Color {
     static let dsSurface = Color(nsColor: .dsSurface)
     static let dsSunken = Color(nsColor: .dsSunken)
     static let dsLine = Color(nsColor: .dsLine)
+    static let dsLinePrint = Color(nsColor: .dsLinePrint)
     static let dsInk = Color(nsColor: .dsInk)
+    static let dsInkPrint = Color(nsColor: .dsInkPrint)
     static let dsInkMuted = Color(nsColor: .dsInkMuted)
-    static let dsOnInk = Color(nsColor: .dsOnInk)
     static let dsAccent = Color(nsColor: .dsAccent)
     static let dsSelection = Color(nsColor: .dsSelection)
+    static let dsSeashell = Color(nsColor: .dsSeashell)
 }
 
 extension ShapeStyle where Self == Color {
@@ -133,7 +138,7 @@ extension Font {
     /// `caption`: metadata.
     static let dsCaption = Font(DSFont.text(12, 400))
     /// `overline`: eyebrows, uppercase with wide tracking (`overlineStyle`).
-    static let dsOverline = Font(DSFont.text(12, 600))
+    static let dsOverline = Font(DSFont.text(12, 500))
 }
 
 extension View {
@@ -142,52 +147,82 @@ extension View {
         background(WindowGround())
     }
 
-    /// An eyebrow: uppercase, the system's wide tracking (0.12 em), muted.
+    /// A printed label: uppercase, tracked wide (0.16 em).
     func overlineStyle() -> some View {
-        font(.dsOverline).tracking(1.44).textCase(.uppercase).foregroundStyle(.dsInkMuted)
+        font(.dsOverline).tracking(1.9).textCase(.uppercase).foregroundStyle(Color.dsInkPrint)
+    }
+
+    /// Raised like a real key on a flat surface: a soft light from the top left, a shadow below.
+    func keyShadow(_ scale: CGFloat = 1) -> some View {
+        modifier(KeyShadow(scale: scale))
     }
 }
 
 // MARK: controls
 
-/// The system's pill buttons. One `primary` per screen (red); `secondary` is ink; `ghost` an outline.
+private struct KeyShadow: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    let scale: CGFloat
+
+    func body(content: Content) -> some View {
+        let dark = scheme == .dark
+        content
+            .shadow(color: .white.opacity(dark ? 0.06 : 0.9), radius: 6 * scale, x: -2 * scale, y: -2 * scale)
+            .shadow(color: .black.opacity(dark ? 0.55 : 0.14), radius: 8 * scale, x: 3 * scale, y: 4 * scale)
+    }
+}
+
+/// Rim light: strongest on the top edge, faint all the way round.
+struct RimLight: View {
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let top: Double = scheme == .dark ? 0.2 : 0.9
+        Capsule().strokeBorder(
+            LinearGradient(colors: [.white.opacity(top), .white.opacity(0.055), .white.opacity(0.03)],
+                           startPoint: .top, endPoint: .bottom), lineWidth: 1)
+    }
+}
+
+/// The system's keys. One `primary` per view: a soft, almost flat red, what's on it always light.
+/// `key` is strong but not red: the body's own material, raised. `ghost` (quiet) is a printed outline.
 struct DSButtonStyle: ButtonStyle {
-    enum Kind { case primary, secondary, ghost }
+    enum Kind { case primary, key, ghost }
     var kind: Kind
     @Environment(\.isEnabled) private var enabled
 
     func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
         configuration.label
             .font(.dsLabel)
             .lineLimit(1)
-            .foregroundStyle(foreground)
+            .foregroundStyle(kind == .primary ? Color.dsSeashell : kind == .key ? Color.dsInk : Color.dsInkPrint)
             .padding(.horizontal, kind == .ghost ? 14 : 18)
             .frame(minHeight: 30)
             .background {
                 switch kind {
-                case .primary: Capsule().fill(Color.dsAccent).shadow(color: .black.opacity(0.25), radius: 8, y: 4)
-                case .secondary: Capsule().fill(Color.dsInk)
-                case .ghost: Capsule().strokeBorder(Color.dsInk.opacity(0.45), lineWidth: 1)
+                case .primary:
+                    Capsule().fill(Color.dsAccent)
+                        .overlay(Capsule().strokeBorder(LinearGradient(colors: [.white.opacity(0.22), .clear, .black.opacity(0.1)],
+                                                                       startPoint: .top, endPoint: .bottom), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.3), radius: 8, x: 3, y: 4)
+                case .key:
+                    Capsule().fill(pressed ? Color.dsSunken : Color.dsBackground).keyShadow(pressed ? 0.2 : 0.7)
+                        .overlay(RimLight())
+                case .ghost:
+                    Capsule().strokeBorder(Color.dsLinePrint, lineWidth: 1)
                 }
             }
             .contentShape(Capsule())
-            .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.4)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.easeOut(duration: 0.2), value: configuration.isPressed)
-    }
-
-    private var foreground: Color {
-        switch kind {
-        case .primary: .white
-        case .secondary: .dsOnInk
-        case .ghost: .dsInk
-        }
+            .opacity(enabled ? (pressed && kind != .key ? 0.7 : 1) : 0.4)
+            .scaleEffect(pressed && kind == .primary ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.2), value: pressed)
     }
 }
 
 extension ButtonStyle where Self == DSButtonStyle {
     static var dsPrimary: DSButtonStyle { DSButtonStyle(kind: .primary) }
-    static var dsSecondary: DSButtonStyle { DSButtonStyle(kind: .secondary) }
+    static var dsKey: DSButtonStyle { DSButtonStyle(kind: .key) }
     static var dsGhost: DSButtonStyle { DSButtonStyle(kind: .ghost) }
 }
 
@@ -208,7 +243,8 @@ extension ButtonStyle where Self == DSLinkStyle {
     static var dsLink: DSLinkStyle { DSLinkStyle() }
 }
 
-/// A chip: a pill that filters or picks; the chosen one fills with ink, the others are outlines.
+/// A chip: a small key for filters and one-of-many choices; the pressed one sinks in and lights
+/// its LED.
 struct DSChip: View {
     let title: String
     let chosen: Bool
@@ -217,19 +253,23 @@ struct DSChip: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.dsLabel)
-                .foregroundStyle(chosen ? Color.dsOnInk : Color.dsInk)
-                .padding(.horizontal, 14)
-                .frame(height: height)
-                .background {
-                    if chosen {
-                        Capsule().fill(Color.dsInk)
-                    } else {
-                        Capsule().strokeBorder(Color.dsLine, lineWidth: 1)
-                    }
+            HStack(spacing: 7) {
+                Circle().fill(chosen ? Color.dsInk : Color.dsInk.opacity(0.16)).frame(width: 5, height: 5)
+                    .shadow(color: chosen ? Color.dsInk.opacity(0.7) : .clear, radius: 3)
+                Text(title).font(.dsLabel).foregroundStyle(chosen ? Color.dsInk : Color.dsInkMuted).lineLimit(1).fixedSize()
+            }
+            .padding(.horizontal, 13)
+            .frame(height: height)
+            .background {
+                if chosen {
+                    Capsule().fill(Color.dsSunken)
+                        .overlay(Capsule().strokeBorder(.black.opacity(0.4), lineWidth: 1).blur(radius: 1.5).offset(y: 1).clipShape(Capsule()))
+                } else {
+                    Capsule().fill(Color.dsBackground).keyShadow(0.5)
                 }
-                .contentShape(Capsule())
+            }
+            .overlay(RimLight().opacity(chosen ? 0.35 : 1))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(chosen ? .isSelected : [])

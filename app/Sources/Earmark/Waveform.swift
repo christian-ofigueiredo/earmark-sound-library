@@ -238,6 +238,8 @@ final class WaveformCanvas: NSView {
         // Ink on a sunken well (the design system: neutrals do the work; the red is the playhead).
         NSColor.dsSunken.setFill()
         NSBezierPath(roundedRect: r, xRadius: 12, yRadius: 12).fill()
+        NSColor.dsLine.setStroke()
+        NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12).stroke()
         if let sel = selection {
             NSColor.dsInk.withAlphaComponent(0.16).setFill()
             NSRect(x: sel.lowerBound * r.width, y: 0, width: max((sel.upperBound - sel.lowerBound) * r.width, 1), height: r.height).fill()
