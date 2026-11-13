@@ -73,7 +73,7 @@ struct PlayerPanel: View {
                       : "Add the selection to the DaVinci Resolve timeline at its playhead, cut from the original file (⌘T)")
             }
             if player.url == url, let error = player.error {
-                Text(error).font(.dsCaption).foregroundStyle(.red)
+                Text(error).font(.dsCaption).foregroundStyle(Color.dsInk)
             }
         }
         .onChange(of: selection) { model.playerSelection = secondsSelected.map { (url, $0) } }

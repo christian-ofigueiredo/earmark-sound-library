@@ -50,7 +50,7 @@ struct ConnectAgentView: View {
             if !FileManager.default.isExecutableFile(atPath: server) {
                 Label("This copy of Earmark doesn't have its MCP server (earmark-mcp). Build it with scripts/build-app.sh.",
                       systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.dsInk)
             }
             block("Claude Code: run this in Terminal", claudeCode)
             block("Claude desktop app: add this under \"mcpServers\" in Settings ▸ Developer ▸ Edit Config", desktopConfig)

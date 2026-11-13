@@ -142,6 +142,11 @@ extension Font {
 }
 
 extension View {
+    /// A sheet on the window's ground, in the app's type.
+    func dsSheet() -> some View {
+        font(.dsBodySm).tint(.dsInk).presentationBackground(Color.dsBackground)
+    }
+
     /// The window's ground, the toolbar's strip too: the AppKit window's own colour.
     func dsWindowBackground() -> some View {
         background(WindowGround())

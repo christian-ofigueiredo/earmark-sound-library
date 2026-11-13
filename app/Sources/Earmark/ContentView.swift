@@ -32,9 +32,9 @@ struct ContentView: View {
             model.player.stop()
             UserDefaults.standard.set(section.rawValue, forKey: "section")
         }
-        .sheet(isPresented: $model.showWelcome) { WelcomeView().environment(model) }
-        .sheet(item: $model.exportRequest) { ExportAnalysisSheet(request: $0).environment(model) }
-        .sheet(item: $model.groupNaming) { GroupNameSheet(naming: $0).environment(model) }
+        .sheet(isPresented: $model.showWelcome) { WelcomeView().environment(model).dsSheet() }
+        .sheet(item: $model.exportRequest) { ExportAnalysisSheet(request: $0).environment(model).dsSheet() }
+        .sheet(item: $model.groupNaming) { GroupNameSheet(naming: $0).environment(model).dsSheet() }
         .sheet(item: $model.categoryChoosing) { choosing in
             let first = model.sound(id: choosing.sounds.first)
             UCSChooser(title: choosing.sounds.count == 1 ? "Category for “\(first?.displayName ?? "")”"

@@ -350,6 +350,8 @@ struct FoldersToMapTable: View {
         } rows: {
             ForEach(mapper.visibleRows) { TableRow($0) }
         }
+        .alternatingRowBackgrounds(.disabled)
+        .scrollContentBackground(.hidden)
         .contextMenu(forSelectionType: FolderMapper.Key.self) { keys in
             if !keys.isEmpty {
                 Button(keys.isSubset(of: mapper.ticked) ? "Untick" : "Tick") { mapper.toggleTicks(keys) }
@@ -397,7 +399,7 @@ struct GuessedFoldersTable: View {
                 .width(min: 180, ideal: 230)
             TableColumn("Why") { row in
                 Text(row.guess.reason + (row.guess.isUnsure ? " — listen first" : ""))
-                    .foregroundStyle(row.guess.isUnsure ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(row.guess.isUnsure ? AnyShapeStyle(Color.dsInk) : AnyShapeStyle(Color.dsInkMuted))
                     .help(row.guess.reason)
             }
             .width(min: 160, ideal: 260)
@@ -406,6 +408,8 @@ struct GuessedFoldersTable: View {
         } rows: {
             ForEach(mapper.visibleGuessed) { TableRow($0) }
         }
+        .alternatingRowBackgrounds(.disabled)
+        .scrollContentBackground(.hidden)
         .contextMenu(forSelectionType: FolderMapper.Key.self) { keys in
             if keys.count == 1, let key = keys.first {
                 Button("Change Category…") { mapper.choosing = key }
@@ -465,6 +469,8 @@ struct MappedFoldersTable: View {
         } rows: {
             ForEach(mapper.visibleMapped) { TableRow($0) }
         }
+        .alternatingRowBackgrounds(.disabled)
+        .scrollContentBackground(.hidden)
         .contextMenu(forSelectionType: FolderMapper.Key.self) { keys in
             if keys.count == 1, let key = keys.first, let row = mapper.mapped.first(where: { $0.id == key }) {
                 Button("Change Category…") { mapper.choosing = key }
@@ -548,7 +554,7 @@ struct FolderReason: View {
             let current = mapper.catID(for: key)
             if let option = options.first(where: { $0.entry.catID == current }) {
                 Text(FolderMapper.reason(option) + (option.isWeak ? " — listen first" : ""))
-                    .foregroundStyle(option.isWeak ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(option.isWeak ? AnyShapeStyle(Color.dsInk) : AnyShapeStyle(Color.dsInkMuted))
                     .help("Words of the folder name, and words most of its files share (names, descriptions), that match "
                         + "this category, and the share of the most similar sounds (from other folders, with a category from "
                         + "their files) that are in it.")
@@ -665,6 +671,7 @@ struct UCSChooser: View {
         }
         .padding(20)
         .frame(width: 540, height: 560)
+        .dsSheet()
         .onAppear { searchFocused = true }
         // One left: selected, so Return chooses it.
         .onChange(of: search) { if entries.count == 1 { selection = entries[0].catID } }
