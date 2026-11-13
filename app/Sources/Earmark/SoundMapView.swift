@@ -233,14 +233,14 @@ enum MapPalette {
         return SIMD3(Float(hex >> 16 & 0xFF), Float(hex >> 8 & 0xFF), Float(hex & 0xFF)) / 255
     }
 
-    /// Behind the map: the design system's Ebony in dark mode (the glow and the fine lines show
+    /// Behind the map: the window's ground, Shark, in dark mode (the glow and the fine lines show
     /// on it), white in light mode.
     static let background = NSColor(name: "soundMapBackground") { appearance in
         background(dark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
     }
 
     static func background(dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0x02 / 255, green: 0x03 / 255, blue: 0x06 / 255, alpha: 1) : NSColor(white: 1, alpha: 1)
+        dark ? NSColor(srgbRed: 0x18 / 255, green: 0x1A / 255, blue: 0x20 / 255, alpha: 1) : NSColor(white: 1, alpha: 1)
     }
 }
 

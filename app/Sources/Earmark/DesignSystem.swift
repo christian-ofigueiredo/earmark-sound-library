@@ -20,9 +20,11 @@ extension NSColor {
         }
     }
 
-    /// The window's ground: Seashell, Ebony.
-    static let dsBackground = token("dsBackground", light: 0xF1F1F1, dark: 0x020306)
-    /// Panels on the ground: the sidebar, the inspector, bars.
+    /// The window's ground: Seashell; in dark mode Shark (the owner, 2026-11-13: Ebony's near
+    /// black made no sense for a window, as in Offload).
+    static let dsBackground = token("dsBackground", light: 0xF1F1F1, dark: 0x181A20)
+    /// Panels on the ground: the sidebar, the inspector. In dark mode Shark too, the panels
+    /// parted by the split view's lines.
     static let dsSurface = token("dsSurface", light: 0xFFFFFF, dark: 0x181A20)
     /// Sunken tracks and wells.
     static let dsSunken = token("dsSunken", light: 0xDEDEDE, dark: 0x0C0D11)

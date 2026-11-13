@@ -45,8 +45,10 @@ for b in "$BIN"/*.bundle; do
 done
 # The icon: an Icon Composer file (app/Icon/AppIcon.icon, Liquid Glass layers), compiled into
 # Assets.car with an AppIcon.icns for older systems.
-xcrun actool "$PKG/Icon/AppIcon.icon" --compile "$APP/Contents/Resources" --platform macosx \
-    --minimum-deployment-target "$MIN_MACOS" --app-icon AppIcon \
+# The accent colour (app/Icon/Accent.xcassets): the design system's muted ink, so the system's
+# controls (selection, checkboxes, focus) aren't the system's blue.
+xcrun actool "$PKG/Icon/AppIcon.icon" "$PKG/Icon/Accent.xcassets" --compile "$APP/Contents/Resources" --platform macosx \
+    --minimum-deployment-target "$MIN_MACOS" --app-icon AppIcon --accent-color AccentColor \
     --output-partial-info-plist "$(mktemp -t earmark-icon)" > /dev/null
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -57,6 +59,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleExecutable</key><string>Earmark</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>NSAccentColorName</key><string>AccentColor</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

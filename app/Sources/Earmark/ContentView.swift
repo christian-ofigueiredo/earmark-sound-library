@@ -170,6 +170,7 @@ struct DetailColumn: View {
             }
             .offset(y: slide)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.dsSurface)
         .animation(Self.motion, value: playing != nil)
         .onChange(of: playing != nil) { _, shown in

@@ -162,6 +162,8 @@ struct MusicSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        // Icons in ink, as the design system's: never a colour of their own.
+        .listItemTint(.fixed(.dsInk))
         .font(.dsBodySm)
         .scrollContentBackground(.hidden)
     }
