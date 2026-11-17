@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- The waveform in the design system's Ebony: neutrals do the work. -->
-  <g fill="#040404">
-    <rect x="322" y="540" width="44" height="110" rx="22"/>
-    <rect x="390" y="470" width="44" height="250" rx="22"/>
-    <rect x="458" y="410" width="44" height="370" rx="22"/>
-    <rect x="526" y="495" width="44" height="200" rx="22"/>
-    <rect x="594" y="435" width="44" height="320" rx="22"/>
-    <rect x="662" y="525" width="44" height="140" rx="22"/>
+  <!-- The waveform alone, in the design system's Milano Red. -->
+  <g fill="#D41101">
+    <rect x="241" y="437" width="62" height="150" rx="31"/>
+    <rect x="337" y="342" width="62" height="340" rx="31"/>
+    <rect x="433" y="262" width="62" height="500" rx="31"/>
+    <rect x="529" y="377" width="62" height="270" rx="31"/>
+    <rect x="625" y="297" width="62" height="430" rx="31"/>
+    <rect x="721" y="417" width="62" height="190" rx="31"/>
   </g>
 </svg>

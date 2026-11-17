@@ -10,31 +10,7 @@
           "image-name": "wave.svg",
           "name": "wave",
           "position": {
-            "scale": 1.2,
-            "translation-in-points": [
-              0,
-              0
-            ]
-          }
-        },
-        {
-          "glass": false,
-          "image-name": "fold.svg",
-          "name": "fold",
-          "position": {
-            "scale": 1.2,
-            "translation-in-points": [
-              0,
-              0
-            ]
-          }
-        },
-        {
-          "glass": false,
-          "image-name": "page.svg",
-          "name": "page",
-          "position": {
-            "scale": 1.2,
+            "scale": 1.0,
             "translation-in-points": [
               0,
               0
