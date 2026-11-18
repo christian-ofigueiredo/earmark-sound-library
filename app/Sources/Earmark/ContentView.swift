@@ -291,7 +291,7 @@ struct AutoPlayToggle: View {
                     .font(on ? .body : .title3)
                     .foregroundStyle(on ? Color.dsSeashell : Color.dsInkMuted)
                     .frame(width: 34, height: 34)
-                    .glassEffect(on ? .regular.tint(Color.dsAccent).interactive() : .regular.interactive(), in: .circle)
+                    .glassEffect(on ? .regular.tint(Color.dsRuby).interactive() : .regular.interactive(), in: .circle)
                     .contentShape(Circle())
             } else {
                 Label("Auto-play", systemImage: on ? "play.circle.fill" : "play.circle")
@@ -329,15 +329,15 @@ struct SectionSwitch: View {
                     // stuttered in that direction only.)
                     .background(alignment: .topLeading) {
                         if let frame = segments[model.switchSection] {
-                            // The chosen section's key: red glass, as the switch's own.
+                            // The chosen section's key: red glass to the switch's own edge (no pill
+                            // inside a pill), Ruby Red in both modes (Milano was too bright as glass).
                             Color.clear
-                                .glassEffect(.regular.tint(Color.dsAccent), in: .capsule)
+                                .glassEffect(.regular.tint(Color.dsRuby), in: .capsule)
                                 .frame(width: frame.width, height: frame.height)
                                 .offset(x: frame.minX, y: frame.minY)
                         }
                     }
                     .coordinateSpace(.named(Self.space))
-                    .padding(3)
                     .glassEffect(.regular.interactive(), in: .capsule)
                     .animation(.snappy(duration: Self.slide), value: model.switchSection)
                 }
@@ -364,8 +364,8 @@ struct SectionSwitch: View {
             Text(section.title)
                 .font(.dsLabel)
                 .foregroundStyle(chosen ? Color.dsSeashell : Color.dsInkMuted)
-                .padding(.horizontal, 16)
-                .frame(height: 28)
+                .padding(.horizontal, 18)
+                .frame(height: 34)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { segments[section] = $0 }
                 .contentShape(Capsule())
         }
