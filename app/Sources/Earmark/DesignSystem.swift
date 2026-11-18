@@ -46,6 +46,8 @@ extension NSColor {
     /// Ruby Red, the palette's dark red, the same in both modes: what's selected in a list
     /// (owner, 2026-11-18: red, but never a bright one).
     static let dsRuby = rgb(0xA00A00)
+    /// A selected row: Ruby Red as a tint on the ground, the text staying ink.
+    static let dsSelectionRed = token("dsSelectionRed", light: rgb(0xA00A00, 0.16), dark: rgb(0xA00A00, 0.5))
     /// A selection that doesn't have the keyboard, and quiet panels: ink, faint.
     static let dsSelection = token("dsSelection", light: rgb(0x040404, 0.09), dark: rgb(0xF1F1F1, 0.12))
 }
@@ -305,9 +307,9 @@ private struct WindowGround: NSViewRepresentable {
     }
 }
 
-/// A list row's selection, rounded: Ruby Red with light text in the window you're working in
-/// (wherever the keyboard is: the selection is what the detail pane shows), faint ink with ink
-/// text in a window behind.
+/// A list row's selection, rounded: a Ruby Red tint in the window you're working in
+/// (wherever the keyboard is: the selection is what the detail pane shows), faint ink in a
+/// window behind. The text stays ink.
 final class DSRowView: NSTableRowView {
     static let identifier = NSUserInterfaceItemIdentifier("dsRow")
 
@@ -343,9 +345,9 @@ final class DSRowView: NSTableRowView {
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard selectionHighlightStyle != .none else { return }
-        (inKeyWindow ? NSColor.dsRuby : NSColor.dsSelection).setFill()
+        (inKeyWindow ? NSColor.dsSelectionRed : NSColor.dsSelection).setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 1), xRadius: 8, yRadius: 8).fill()
     }
 
-    override var interiorBackgroundStyle: NSView.BackgroundStyle { isSelected && inKeyWindow ? .emphasized : .normal }
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
 }
