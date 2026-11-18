@@ -43,6 +43,9 @@ mv "$APP/Contents/MacOS/Earmark.sdk" "$APP/Contents/MacOS/Earmark"
 for b in "$BIN"/*.bundle; do
     cp -R "$b" "$APP/Contents/Resources/"
 done
+# The type: Tessel and Brakwell (app/Fonts), registered for the app alone by ATSApplicationFontsPath.
+mkdir -p "$APP/Contents/Resources/Fonts"
+cp "$PKG"/Fonts/*.ttf "$APP/Contents/Resources/Fonts/"
 # The icon: an Icon Composer file (app/Icon/AppIcon.icon, Liquid Glass layers), compiled into
 # Assets.car with an AppIcon.icns for older systems.
 # The accent colour (app/Icon/Accent.xcassets): the design system's muted ink, so the system's
@@ -60,6 +63,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key><string>Earmark</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>NSAccentColorName</key><string>AccentColor</string>
+    <key>ATSApplicationFontsPath</key><string>Fonts</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

@@ -5,9 +5,8 @@ import SwiftUI
 // Offload is its reference in an app), the parts Earmark uses. Six colours exist, everything else
 // is one of them at an opacity. The ground and the panels are the same colour: depth comes from
 // light and shadow. Red is one signal per view: what's playing and the key that plays it. The
-// type is Babcock (titles and numbers, 24 pt and up) and N27 (everything else). Their licences
-// don't allow putting them in an app, so Earmark uses them only where they're installed, and the
-// system's condensed font elsewhere.
+// type is Brakwell (titles and numbers, 24 pt and up) and Tessel (everything else): the owner's
+// own releases, in the app's bundle (the system's condensed font when run outside it).
 
 // MARK: colour
 
@@ -80,8 +79,9 @@ enum DSFont {
     private static let families: [String: String] = {
         let installed = Set(NSFontManager.shared.availableFontFamilies)
         var found: [String: String] = [:]
-        for (key, names) in [("display", ["BABCOCK Variable", "Babcock Variable", "Babcock"]),
-                             ("text", ["N27 Variable", "N27"])] {
+        // Brakwell and Tessel come with the app (app/Fonts; `scripts/build-app.sh`).
+        for (key, names) in [("display", ["Brakwell", "BABCOCK Variable", "Babcock Variable", "Babcock"]),
+                             ("text", ["Tessel", "N27 Variable", "N27"])] {
             if let name = names.first(where: installed.contains) { found[key] = name }
         }
         return found
@@ -122,9 +122,9 @@ enum DSFont {
         return NSFont.systemFont(ofSize: size, weight: system, width: .condensed)
     }
 
-    /// N27: everything you read or press.
+    /// Tessel: everything you read or press.
     static func text(_ size: CGFloat, _ weight: CGFloat = 400) -> NSFont { ns("text", size, weight) }
-    /// Babcock: titles and numbers, 24 pt and up, at 600–700.
+    /// Brakwell: titles and numbers, 24 pt and up, at 600–700.
     static func display(_ size: CGFloat, _ weight: CGFloat = 700) -> NSFont { ns("display", size, weight) }
 }
 
