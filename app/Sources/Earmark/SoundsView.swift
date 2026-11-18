@@ -273,6 +273,7 @@ struct SoundSidebar: View {
         .listStyle(.sidebar)
         // Icons in ink, as the design system's: never a colour of their own.
         .listItemTint(.fixed(.dsInk))
+        .tint(Color.dsRuby)   // the selection
         .font(.dsBodySm)
         .scrollContentBackground(.hidden)
     }
@@ -430,14 +431,15 @@ struct SoundDetail: View {
     var body: some View {
         let online = model.isOnline(libraryId: sound.libraryId)
         DetailScroll {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(sound.displayName)
                         .font(.dsTitle3)
                         .textSelection(.enabled)
+                        .padding(.bottom, 2)
                     if let label = sound.ucsLabel {
-                        HStack(spacing: 6) {
-                            Text(label.capitalized).font(.dsLabel)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(label.capitalized).font(.dsHeading)
                             if let catID = sound.catID {
                                 Text(catID).font(.dsCaption).foregroundStyle(.secondary)
                             }
@@ -475,31 +477,36 @@ struct SoundDetail: View {
                 } else {
                     OfflineNotice(library: model.library(id: sound.libraryId))
                 }
-                InfoGrid([
-                    ("Description", sound.details),
-                    ("Keywords", sound.keywords),
-                    ("Library", sound.vendorLibrary),
-                    ("Manufacturer", sound.manufacturer),
-                    ("Designer", sound.designer),
-                    ("Loudness", model.analysis.facts[sound.id ?? -1].flatMap { loudnessText($0, for: sound) }),
-                    ("Embedding", embeddingText(for: sound)),
-                    ("Format", sound.formatText),
-                    ("Length", formatLength(sound.duration)),
-                    ("Folder", sound.folder),
-                    ("File", sound.fileName),
-                ])
                 Button {
                     model.findSimilar(to: sound)
                 } label: {
                     Label("Find Similar Sounds", systemImage: "waveform.path.ecg")
                 }
-                .buttonStyle(.dsGhost)
+                .buttonStyle(.dsKey)
                 .disabled(!model.canFindSimilar(sound))
                 .help(model.canFindSimilar(sound) ? "Sounds that sound most like this one (CLAP)"
                                                   : "Available once this sound has been analysed")
-                FileActions(url: sound.url, online: online)
+                InfoGrid("About", [
+                    ("Description", sound.details),
+                    ("Keywords", sound.keywords),
+                    ("Library", sound.vendorLibrary),
+                    ("Manufacturer", sound.manufacturer),
+                    ("Designer", sound.designer),
+                ])
+                InfoGrid("Sound", [
+                    ("Length", formatLength(sound.duration)),
+                    ("Format", sound.formatText),
+                    ("Loudness", model.analysis.facts[sound.id ?? -1].flatMap { loudnessText($0, for: sound) }),
+                    ("Embedding", embeddingText(for: sound)),
+                ])
+                VStack(alignment: .leading, spacing: 14) {
+                    InfoGrid("File", [("Name", sound.fileName)],
+                             then: [.folder(sound.folder, full: sound.url.deletingLastPathComponent().path)])
+                    FileActions(url: sound.url, online: online)
+                }
             }
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

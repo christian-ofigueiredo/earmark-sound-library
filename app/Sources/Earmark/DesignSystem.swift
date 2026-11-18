@@ -43,7 +43,10 @@ extension NSColor {
     static let dsInkMuted = token("dsInkMuted", light: rgb(0x040404, 0.62), dark: rgb(0xF1F1F1, 0.62))
     /// The one red: Ruby Red on light grounds, Milano Red on dark. What's on it is always light.
     static let dsAccent = token("dsAccent", light: rgb(0xA00A00), dark: rgb(0xD41101))
-    /// What's selected in a list: ink, faint. (Red stays for what's playing.)
+    /// Ruby Red, the palette's dark red, the same in both modes: what's selected in a list
+    /// (owner, 2026-11-18: red, but never a bright one).
+    static let dsRuby = rgb(0xA00A00)
+    /// A selection that doesn't have the keyboard, and quiet panels: ink, faint.
     static let dsSelection = token("dsSelection", light: rgb(0x040404, 0.09), dark: rgb(0xF1F1F1, 0.12))
 }
 
@@ -58,6 +61,7 @@ extension Color {
     static let dsInkMuted = Color(nsColor: .dsInkMuted)
     static let dsAccent = Color(nsColor: .dsAccent)
     static let dsSelection = Color(nsColor: .dsSelection)
+    static let dsRuby = Color(nsColor: .dsRuby)
     static let dsSeashell = Color(nsColor: .dsSeashell)
 }
 
@@ -259,8 +263,9 @@ struct DSChip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 7) {
-                Circle().fill(chosen ? Color.dsInk : Color.dsInk.opacity(0.16)).frame(width: 5, height: 5)
-                    .shadow(color: chosen ? Color.dsInk.opacity(0.7) : .clear, radius: 3)
+                // The LED: red when lit.
+                Circle().fill(chosen ? Color.dsAccent : Color.dsInk.opacity(0.16)).frame(width: 6, height: 6)
+                    .shadow(color: chosen ? Color.dsAccent.opacity(0.7) : .clear, radius: 3)
                 Text(title).font(.dsLabel).foregroundStyle(chosen ? Color.dsInk : Color.dsInkMuted).lineLimit(1).fixedSize()
             }
             .padding(.horizontal, 13)
@@ -300,20 +305,47 @@ private struct WindowGround: NSViewRepresentable {
     }
 }
 
-/// A list row's selection: faint ink, rounded, the text staying ink (no white-on-colour).
+/// A list row's selection, rounded: Ruby Red with light text in the window you're working in
+/// (wherever the keyboard is: the selection is what the detail pane shows), faint ink with ink
+/// text in a window behind.
 final class DSRowView: NSTableRowView {
     static let identifier = NSUserInterfaceItemIdentifier("dsRow")
 
+    private var inKeyWindow: Bool { window?.isKeyWindow == true }
+
     override var isEmphasized: Bool {
-        get { false }
-        set {}
+        get { inKeyWindow }
+        set { refresh() }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        let center = NotificationCenter.default
+        center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
+        center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        guard let newWindow else { return }
+        center.addObserver(self, selector: #selector(keyChanged), name: NSWindow.didBecomeKeyNotification, object: newWindow)
+        center.addObserver(self, selector: #selector(keyChanged), name: NSWindow.didResignKeyNotification, object: newWindow)
+    }
+
+    @objc private func keyChanged() { refresh() }
+
+    /// Redraws the selection and tells the cells what they're on (AppKit only does when the
+    /// table gets or loses the keyboard).
+    private func refresh() {
+        needsDisplay = true
+        guard isSelected else { return }
+        let style = interiorBackgroundStyle
+        for column in 0 ..< numberOfColumns {
+            (view(atColumn: column) as? NSTableCellView)?.backgroundStyle = style
+        }
     }
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard selectionHighlightStyle != .none else { return }
-        NSColor.dsSelection.setFill()
+        (inKeyWindow ? NSColor.dsRuby : NSColor.dsSelection).setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 1), xRadius: 8, yRadius: 8).fill()
     }
 
-    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { isSelected && inKeyWindow ? .emphasized : .normal }
 }

@@ -233,14 +233,13 @@ enum MapPalette {
         return SIMD3(Float(hex >> 16 & 0xFF), Float(hex >> 8 & 0xFF), Float(hex & 0xFF)) / 255
     }
 
-    /// Behind the map: the window's ground, Shark, in dark mode (the glow and the fine lines show
-    /// on it), white in light mode.
+    /// Behind the map: the window's ground, Shark or Seashell (the glow and the fine lines show on it).
     static let background = NSColor(name: "soundMapBackground") { appearance in
         background(dark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
     }
 
     static func background(dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0x13 / 255, green: 0x13 / 255, blue: 0x14 / 255, alpha: 1) : NSColor(white: 1, alpha: 1)
+        dark ? .dsShark : .dsSeashell
     }
 }
 
@@ -343,8 +342,8 @@ struct SoundMapPane: View {
                     }
             }
             if let p = state.progress {
-                VStack(spacing: 8) {
-                    ProgressView(value: p).frame(width: 220)
+                VStack(spacing: 10) {
+                    ProgressView(value: p).frame(width: 220).tint(.dsAccent)
                     Text("Drawing the map of \(state.inScope.formatted()) sounds…").foregroundStyle(.secondary)
                 }
             } else if state.layout == nil || state.layout?.ids.isEmpty == true {
@@ -353,6 +352,8 @@ struct SoundMapPane: View {
                                                          : "These sounds haven't been analysed yet. The map shows sounds once they have their embeddings."))
             }
         }
+        // The whole pane, over the list: alone, the progress got a square of ground its own size.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: MapPalette.background))
         .shown(!model.sectionFaded)
         .task(id: MapKey(scope: browser.scope, version: model.version, groups: showsGroup ? model.groupsVersion : 0)) {
@@ -415,7 +416,8 @@ private struct MapLegend: View {
             }
         }
         .padding(10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.dsBackground).keyShadow(0.6))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.dsLine, lineWidth: 1))
         .font(.dsBodySm)
     }
 
@@ -460,6 +462,7 @@ struct SoundViewBar: View {
             if state.showing {
                 Toggle("Play on hover", isOn: $state.playOnHover).toggleStyle(.checkbox)
                 Button("Fit") { state.fit() }
+                    .buttonStyle(.dsGhost)
                     .help("Show the whole map")
                 Spacer()
                 let ready = state.newlyAnalysed(model.analysis)
@@ -470,6 +473,7 @@ struct SoundViewBar: View {
                 }
                 if ready > 0 {
                     Button("Add \(ready.formatted()) New \(ready == 1 ? "Sound" : "Sounds")") { state.addNewSounds(database: model.database) }
+                        .buttonStyle(.dsGhost)
                         .help("Make the map again with the sounds analysed since it was made. The others stay about where they are.")
                 }
             } else {
@@ -477,7 +481,7 @@ struct SoundViewBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
     }
 }
 

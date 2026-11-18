@@ -21,7 +21,7 @@ struct PlayerPanel: View {
     private var isActive: Bool { player.isActive(url) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             WaveformView(peaks: waveform?.peaks,
                          active: activeState != .inactive,
                          playhead: { [player, url, length] in
@@ -237,11 +237,12 @@ struct NowPlayingBar: View {
                 }
                 .help("Stop and go back to the start")
                 Button("Show") { item.reveal(in: model) }
+                    .buttonStyle(.dsLink)
                     .help("Select it in the list")
             }
             .controlSize(.small)
         }
-        .padding(10)
+        .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.dsSelection))
         .padding([.horizontal, .top], 12)
     }
@@ -273,9 +274,10 @@ struct FileChip: View {
             Spacer(minLength: 4)
             Text("Drag to Resolve").font(.dsCaption).foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.06)))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.dsSunken))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.dsLine, lineWidth: 1))
         // An AppKit drag area rather than .onDrag: inside the detail pane's scroll view,
         // .onDrag's hit area sat a toolbar's height too high, over the player's buttons.
         .overlay(FileDragArea(url: url, tooltip: "Drag into DaVinci Resolve. Resolve uses this original file; nothing is copied."))
@@ -329,30 +331,87 @@ final class FileDragView: NSView, NSDraggingSource {
 struct InfoRow: Identifiable {
     let label: String
     let value: String
+    /// A path: shown on one line, cut at the start, with a button that copies `copy`.
+    var copy: String?
     var id: String { label }
+
+    /// A folder, shortened to its last two levels; the whole of it in the tooltip, and a button
+    /// that copies `full`.
+    static func folder(_ folder: String, full: String, label: String = "Folder") -> InfoRow? {
+        guard !folder.isEmpty else { return nil }
+        let parts = folder.split(separator: "/")
+        let short = parts.count > 2 ? "… / " + parts.suffix(2).joined(separator: " / ") : parts.joined(separator: " / ")
+        return InfoRow(label: label, value: short, copy: full)
+    }
 }
 
+/// A titled block of facts in the detail pane: a printed title, then one fact a line with
+/// hairlines between, labels in one column.
 struct InfoGrid: View {
+    let title: String?
     let rows: [InfoRow]
 
-    init(_ pairs: [(String, String?)]) {
+    init(_ title: String? = nil, _ pairs: [(String, String?)], then extra: [InfoRow?] = []) {
+        self.title = title
         rows = pairs.compactMap { label, value in
             guard let value, !value.isEmpty else { return nil }
             return InfoRow(label: label, value: value)
-        }
+        } + extra.compactMap { $0 }
     }
 
     var body: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
-            ForEach(rows) { row in
-                GridRow {
-                    Text(row.label).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
-                    Text(row.value).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)   // wrap long paths instead of truncating
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                if let title {
+                    Text(title).overlineStyle().padding(.bottom, 8)
+                    Rectangle().fill(Color.dsLinePrint).frame(height: 1)
+                }
+                ForEach(rows) { row in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(row.label).font(.dsCaption).foregroundStyle(Color.dsInkMuted)
+                            .frame(width: 92, alignment: .leading)
+                        if let copy = row.copy {
+                            Text(row.value).lineLimit(1).truncationMode(.head).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .help(copy)
+                            CopyButton(text: copy)
+                        } else {
+                            Text(row.value).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    if row.id != rows.last?.id { Rectangle().fill(Color.dsLine).frame(height: 1) }
                 }
             }
+            .font(.dsBodySm)
         }
-        .font(.dsBodySm)
+    }
+}
+
+/// Copies a text; a tick for a moment once it has.
+struct CopyButton: View {
+    let text: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            copyToPasteboard(text)
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.2))
+                copied = false
+            }
+        } label: {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(copied ? Color.dsAccent : Color.dsInkMuted)
+                .frame(width: 22, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Copy the path")
+        .accessibilityLabel("Copy the path")
     }
 }
 
@@ -365,6 +424,7 @@ struct FileActions: View {
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                 .disabled(!online)
             Button("Copy Path") { copyToPasteboard(url.path) }
+                .help("Copy the file's whole path")
         }
         .buttonStyle(.dsGhost)
     }
@@ -379,7 +439,7 @@ struct OfflineNotice: View {
             .foregroundStyle(.secondary)
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.05)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.dsSunken))
     }
 }
 

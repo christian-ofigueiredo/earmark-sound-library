@@ -164,6 +164,7 @@ struct MusicSidebar: View {
         .listStyle(.sidebar)
         // Icons in ink, as the design system's: never a colour of their own.
         .listItemTint(.fixed(.dsInk))
+        .tint(Color.dsRuby)   // the selection
         .font(.dsBodySm)
         .scrollContentBackground(.hidden)
     }
@@ -176,9 +177,9 @@ struct MusicFilterBar: View {
         @Bindable var b = model.musicBrowser
         HStack(spacing: 8) {
             Text("BPM").foregroundStyle(.secondary)
-            TextField("from", value: $b.bpmMin, format: .number).frame(width: 52)
+            TextField("from", value: $b.bpmMin, format: .number).bpmField()
             Text("to").foregroundStyle(.secondary)
-            TextField("to", value: $b.bpmMax, format: .number).frame(width: 52)
+            TextField("to", value: $b.bpmMax, format: .number).bpmField()
             Toggle("Half/double time", isOn: $b.halfDouble)
                 .help("Also match songs at half or double the tempo")
             Divider().frame(height: 16)
@@ -198,10 +199,10 @@ struct MusicFilterBar: View {
                 Button("Clear Filters") { b.clearFilters() }
             }
         }
-        .textFieldStyle(.roundedBorder)
+        .textFieldStyle(.plain)
         .controlSize(.small)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 }
 
@@ -324,8 +325,8 @@ struct SongDetail: View {
     var body: some View {
         let online = model.isOnline(libraryId: song.libraryId)
         DetailScroll {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(song.displayTitle)
                         .font(.dsTitle3)
                         .textSelection(.enabled)
@@ -365,16 +366,19 @@ struct SongDetail: View {
                         .buttonStyle(.dsGhost)
                         .disabled(song.bpm == nil && song.key == nil)
                 }
-                InfoGrid([
+                InfoGrid("Song", [
                     ("Album", song.album),
                     ("Length", formatLength(song.duration, precise: false)),
                     ("Analysis", analysisText),
-                    ("Folder", song.folder),
-                    ("File", song.fileName),
                 ])
-                FileActions(url: song.url, online: online)
+                VStack(alignment: .leading, spacing: 14) {
+                    InfoGrid("File", [("Name", song.fileName)],
+                             then: [.folder(song.folder, full: song.url.deletingLastPathComponent().path)])
+                    FileActions(url: song.url, online: online)
+                }
             }
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .alert("Set Tempo", isPresented: $settingTempo) {
@@ -517,5 +521,17 @@ private struct ChangeMenu<Content: View>: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Correct it by hand (Edit ▸ Undo takes it back)")
+    }
+}
+
+private extension View {
+    /// A BPM field: a sunken well with a hairline, so it shows on the window's ground.
+    func bpmField() -> some View {
+        multilineTextAlignment(.center)
+            .monospacedDigit()
+            .padding(.horizontal, 6)
+            .frame(width: 52, height: 22)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.dsSunken))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.dsLine, lineWidth: 1))
     }
 }

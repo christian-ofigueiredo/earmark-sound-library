@@ -286,11 +286,12 @@ struct AutoPlayToggle: View {
         } label: {
             if #available(macOS 26, *) {
                 // Drawn like the switch: its glass, sunk in while on.
-                Image(systemName: on ? "play.circle.fill" : "play.circle")
-                    .font(.title3)
-                    .foregroundStyle(on ? Color.dsInk : Color.dsInkMuted)
+                // Drawn like the switch: its glass, a red key while on.
+                Image(systemName: on ? "play.fill" : "play.circle")
+                    .font(on ? .body : .title3)
+                    .foregroundStyle(on ? Color.dsSeashell : Color.dsInkMuted)
                     .frame(width: 34, height: 34)
-                    .background { if on { Circle().fill(Color.dsSunken) } }
+                    .background { if on { Circle().fill(Color.dsAccent).padding(3) } }
                     .glassEffect(.regular.interactive(), in: .circle)
                     .contentShape(Circle())
             } else {
@@ -329,9 +330,10 @@ struct SectionSwitch: View {
                     // stuttered in that direction only.)
                     .background(alignment: .topLeading) {
                         if let frame = segments[model.switchSection] {
-                            // The pressed key: sunk into the body.
-                            Capsule().fill(Color.dsSunken)
-                                .overlay(Capsule().strokeBorder(Color.dsLine, lineWidth: 1))
+                            // The chosen section's key: red, lit from above.
+                            Capsule().fill(Color.dsAccent)
+                                .overlay(Capsule().strokeBorder(LinearGradient(colors: [.white.opacity(0.22), .clear, .black.opacity(0.1)],
+                                                                               startPoint: .top, endPoint: .bottom), lineWidth: 1))
                                 .frame(width: frame.width, height: frame.height)
                                 .offset(x: frame.minX, y: frame.minY)
                         }
@@ -360,10 +362,10 @@ struct SectionSwitch: View {
         return Button {
             model.show(section)
         } label: {
-            // The same weight either way (bold made the label jump); the chosen one sits on ink.
+            // The same weight either way (bold made the label jump); the chosen one is light, on red.
             Text(section.title)
                 .font(.dsLabel)
-                .foregroundStyle(chosen ? Color.dsInk : Color.dsInkMuted)
+                .foregroundStyle(chosen ? Color.dsSeashell : Color.dsInkMuted)
                 .padding(.horizontal, 16)
                 .frame(height: 28)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { segments[section] = $0 }

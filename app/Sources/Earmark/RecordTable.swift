@@ -78,15 +78,20 @@ struct RecordTable<Record: Identifiable>: NSViewRepresentable {
         table.allowsTypeSelect = true
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.usesAutomaticRowHeights = false
-        table.rowHeight = 26
+        table.rowHeight = 28
         table.setAccessibilityLabel(accessibilityLabel)
         for spec in columns {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(spec.id))
             column.title = spec.title
             // Column titles as the system's overlines: uppercase, wide tracking, muted.
+            // Over its rows' text, which starts after the speaker's room in the column that has it.
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.firstLineHeadIndent = spec.marksPlaying ? TextCell.markRoom : 0
+            paragraph.lineBreakMode = .byTruncatingTail
             column.headerCell.attributedStringValue = NSAttributedString(
                 string: spec.title.uppercased(),
-                attributes: [.font: DSFont.text(11, 600), .kern: 1.2, .foregroundColor: NSColor.dsInkMuted])
+                attributes: [.font: DSFont.text(11, 600), .kern: 1.2, .foregroundColor: NSColor.dsInkMuted,
+                             .paragraphStyle: paragraph])
             column.minWidth = spec.minWidth
             column.maxWidth = spec.maxWidth
             column.width = spec.width
@@ -443,8 +448,11 @@ final class TextCell: NSTableCellView {
         ]]])
         return NSFont(descriptor: tabular, size: 14) ?? base
     }()
+    /// How far the speaker's room pushes the text in.
+    static let markRoom: CGFloat = 21
     private var markView: NSImageView?
     private var mark: Mark?
+    private var secondary = false
 
     /// `marks`: room for the speaker before the text, on every row so the names line up.
     init(identifier: NSUserInterfaceItemIdentifier, marks: Bool = false) {
@@ -486,7 +494,14 @@ final class TextCell: NSTableCellView {
         guard let label = textField else { return }
         label.stringValue = text
         label.font = digits ? Self.digitsFont : Self.font
-        label.textColor = secondary ? .dsInkMuted : .dsInk
+        self.secondary = secondary
+        tintText()
+    }
+
+    /// Light on the red of a selected row, ink otherwise.
+    private func tintText() {
+        let onRed = backgroundStyle == .emphasized
+        textField?.textColor = onRed ? .dsSeashell.withAlphaComponent(secondary ? 0.78 : 1) : secondary ? .dsInkMuted : .dsInk
     }
 
     func showMark(_ mark: Mark?) {
@@ -497,13 +512,14 @@ final class TextCell: NSTableCellView {
     }
 
     override var backgroundStyle: NSView.BackgroundStyle {
-        didSet { tintMark() }
+        didSet { tintMark(); tintText() }
     }
 
-    /// Red while playing (the screen's one red signal), muted while paused.
+    /// Red while playing, muted while paused; light on a selected row's red.
     private func tintMark() {
         guard let markView, let mark else { return }
-        markView.contentTintColor = mark == .playing ? .dsAccent : .dsInkMuted
+        markView.contentTintColor = backgroundStyle == .emphasized ? .dsSeashell.withAlphaComponent(mark == .playing ? 1 : 0.6)
+            : mark == .playing ? .dsAccent : .dsInkMuted
     }
 }
 
