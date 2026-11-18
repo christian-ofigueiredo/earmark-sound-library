@@ -286,13 +286,12 @@ struct AutoPlayToggle: View {
         } label: {
             if #available(macOS 26, *) {
                 // Drawn like the switch: its glass, sunk in while on.
-                // Drawn like the switch: its glass, a red key while on.
+                // Drawn like the switch: its glass, red glass while on.
                 Image(systemName: on ? "play.fill" : "play.circle")
                     .font(on ? .body : .title3)
                     .foregroundStyle(on ? Color.dsSeashell : Color.dsInkMuted)
                     .frame(width: 34, height: 34)
-                    .background { if on { Circle().fill(Color.dsAccent).padding(3) } }
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .glassEffect(on ? .regular.tint(Color.dsAccent).interactive() : .regular.interactive(), in: .circle)
                     .contentShape(Circle())
             } else {
                 Label("Auto-play", systemImage: on ? "play.circle.fill" : "play.circle")
@@ -330,10 +329,9 @@ struct SectionSwitch: View {
                     // stuttered in that direction only.)
                     .background(alignment: .topLeading) {
                         if let frame = segments[model.switchSection] {
-                            // The chosen section's key: red, lit from above.
-                            Capsule().fill(Color.dsAccent)
-                                .overlay(Capsule().strokeBorder(LinearGradient(colors: [.white.opacity(0.22), .clear, .black.opacity(0.1)],
-                                                                               startPoint: .top, endPoint: .bottom), lineWidth: 1))
+                            // The chosen section's key: red glass, as the switch's own.
+                            Color.clear
+                                .glassEffect(.regular.tint(Color.dsAccent), in: .capsule)
                                 .frame(width: frame.width, height: frame.height)
                                 .offset(x: frame.minX, y: frame.minY)
                         }
