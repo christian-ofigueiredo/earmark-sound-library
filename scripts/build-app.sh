@@ -1,7 +1,8 @@
 #!/bin/bash
 # Builds a release Earmark.app from the SwiftPM package in app/.
 #
-#   scripts/build-app.sh            -> app/build/Earmark.app
+#   scripts/build-app.sh            -> app/build/Earmark.app, then installed in /Applications
+#   scripts/build-app.sh --no-install  -> app/build/Earmark.app only
 #
 # SwiftPM only produces a bare executable plus resource bundles, so this wraps
 # them into an .app: Info.plist (bundle id, usage strings for removable volumes
@@ -102,3 +103,21 @@ PLIST
 codesign --force --deep --sign - "$APP"
 codesign --verify --strict "$APP"
 echo "Built $APP ($VERSION, build $BUILD_NUMBER)"
+
+# Install a copy in /Applications. The build in app/build stays: the MCP server agents
+# start is registered at that path. A copy running from /Applications is asked to quit,
+# then replaced and opened again.
+if [ "${1:-}" != "--no-install" ]; then
+    DEST="/Applications/Earmark.app"
+    RUNNING=0
+    if pgrep -f "$DEST/Contents/MacOS/Earmark\$" >/dev/null; then
+        RUNNING=1
+        osascript -e 'tell application id "'"$BUNDLE_ID"'" to quit' >/dev/null 2>&1 || true
+        while pgrep -f "$DEST/Contents/MacOS/Earmark\$" >/dev/null; do sleep 0.2; done
+    fi
+    rm -rf "$DEST"
+    ditto "$APP" "$DEST"
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DEST"
+    echo "Installed $DEST"
+    if [ "$RUNNING" = 1 ]; then open "$DEST"; fi
+fi
