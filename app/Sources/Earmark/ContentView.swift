@@ -83,7 +83,8 @@ struct Wordmark: View {
             .font(Font(DSFont.display(32, 700)))
             .foregroundStyle(Color.dsInk)
             .fixedSize()
-            .offset(y: 1.4)
+            // Its capitals centred on the sidebar button and the window's buttons (measured on screen).
+            .offset(y: -0.4)
             .padding(.leading, 4)
             .accessibilityAddTraits(.isHeader)
             .accessibilityLabel("Earmark")
