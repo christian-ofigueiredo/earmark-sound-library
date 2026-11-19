@@ -20,12 +20,17 @@ struct ContentView: View {
             // The switch is its own Liquid Glass control, not on the toolbar's shared glass, with
             // auto-play right after it (alone, the toolbar's flexible spaces left it floating).
             if #available(macOS 26, *) {
+                // The app's name as the owner's other apps show it (Offload, Aspect): Brakwell,
+                // large, by the window's buttons, in place of the system's title.
+                ToolbarItem(placement: .navigation) { Wordmark() }
+                    .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .principal) { HStack(spacing: 8) { SectionSwitch(); AutoPlayToggle() } }
                     .sharedBackgroundVisibility(.hidden)
             } else {
                 ToolbarItem(placement: .principal) { HStack(spacing: 8) { SectionSwitch(); AutoPlayToggle() } }
             }
         }
+        .wordmarkInsteadOfTitle()
         .dsWindowBackground()
         .toolbarBackground(Color.dsBackground, for: .windowToolbar)
         .onChange(of: model.section) { _, section in
@@ -61,6 +66,27 @@ struct ContentView: View {
             get: { model.alert != nil },
             set: { if !$0, model.alert?.id == shownID { model.alert = nil } }
         )
+    }
+}
+
+extension View {
+    /// Without the system's title where `Wordmark` stands in for it.
+    @ViewBuilder func wordmarkInsteadOfTitle() -> some View {
+        if #available(macOS 26, *) { toolbar(removing: .title) } else { self }
+    }
+}
+
+/// "EARMARK" in the display face, the size Offload's has.
+struct Wordmark: View {
+    var body: some View {
+        Text("EARMARK")
+            .font(Font(DSFont.display(32, 700)))
+            .foregroundStyle(Color.dsInk)
+            .fixedSize()
+            .offset(y: 1.4)
+            .padding(.leading, 4)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityLabel("Earmark")
     }
 }
 
