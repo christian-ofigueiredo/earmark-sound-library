@@ -2,40 +2,6 @@ import AppKit
 import EarmarkCore
 import SwiftUI
 
-// MARK: colour
-
-/// The app's blue, one hue throughout (owner, 2026-10-26: in dark mode the waveform, the
-/// selected row and the buttons were blues of different hues). It's the selected row's hue,
-/// which follows the system's accent.
-extension NSColor {
-    /// Behind white text or symbols: the list selection itself, the section pill, the play button.
-    static var earmarkSelectionBlue: NSColor { .selectedContentBackgroundColor }
-
-    /// Blue text, symbols, buttons and the waveform: the selection's colour in light mode; in
-    /// dark mode the same hue, lighter, as the deep selection blue was hard to read on dark grey.
-    static let earmarkBlue = NSColor(name: "earmarkBlue") { appearance in
-        var base = NSColor.systemBlue
-        appearance.performAsCurrentDrawingAppearance {
-            base = NSColor.selectedContentBackgroundColor.usingColorSpace(.sRGB) ?? .systemBlue
-        }
-        guard appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua else { return base }
-        let saturation = base.saturationComponent
-        // A grey accent (Graphite) stays grey, just lighter.
-        return NSColor(colorSpace: .sRGB, hue: base.hueComponent, saturation: min(saturation, 0.78),
-                       brightness: saturation < 0.2 ? max(base.brightnessComponent, 0.75) : 1, alpha: 1)
-    }
-}
-
-extension Color {
-    static let earmarkBlue = Color(nsColor: .earmarkBlue)
-    static let earmarkSelectionBlue = Color(nsColor: .earmarkSelectionBlue)
-}
-
-extension ShapeStyle where Self == Color {
-    static var earmarkBlue: Color { .earmarkBlue }
-    static var earmarkSelectionBlue: Color { .earmarkSelectionBlue }
-}
-
 /// Waveform, play button and range selection for one file.
 struct PlayerPanel: View {
     @Environment(AppModel.self) private var model
@@ -55,7 +21,7 @@ struct PlayerPanel: View {
     private var isActive: Bool { player.isActive(url) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             WaveformView(peaks: waveform?.peaks,
                          active: activeState != .inactive,
                          playhead: { [player, url, length] in
@@ -70,7 +36,7 @@ struct PlayerPanel: View {
                     if loading {
                         ProgressView().controlSize(.small)
                     } else if waveform == nil {
-                        Text("No waveform for this file").font(.caption).foregroundStyle(.secondary)
+                        Text("No waveform for this file").font(.dsCaption).foregroundStyle(.secondary)
                     }
                 }
             HStack(spacing: 8) {
@@ -94,7 +60,7 @@ struct PlayerPanel: View {
                 Spacer()
                 if selection != nil {
                     Button("Clear Selection", action: clearSelection)
-                        .buttonStyle(.link)
+                        .buttonStyle(.dsLink)
                 }
                 Button {
                     model.addToResolve(url, range: secondsSelected)
@@ -107,7 +73,7 @@ struct PlayerPanel: View {
                       : "Add the selection to the DaVinci Resolve timeline at its playhead, cut from the original file (⌘T)")
             }
             if player.url == url, let error = player.error {
-                Text(error).font(.caption).foregroundStyle(.red)
+                Text(error).font(.dsCaption).foregroundStyle(Color.dsInk)
             }
         }
         .onChange(of: selection) { model.playerSelection = secondsSelected.map { (url, $0) } }
@@ -271,12 +237,13 @@ struct NowPlayingBar: View {
                 }
                 .help("Stop and go back to the start")
                 Button("Show") { item.reveal(in: model) }
+                    .buttonStyle(.dsLink)
                     .help("Select it in the list")
             }
             .controlSize(.small)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.earmarkBlue.opacity(0.1)))
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.dsSelection))
         .padding([.horizontal, .top], 12)
     }
 }
@@ -289,7 +256,7 @@ private struct NowPlayingTime: View {
 
     var body: some View {
         TickingText("\(formatLength(model.player.currentTime, precise: precise)) / \(formatLength(duration, precise: precise))")
-            .font(.caption)
+            .font(.dsCaption)
             .foregroundStyle(.secondary)
     }
 }
@@ -305,11 +272,12 @@ struct FileChip: View {
                 .frame(width: 18, height: 18)
             Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 4)
-            Text("Drag to Resolve").font(.caption).foregroundStyle(.secondary)
+            Text("Drag to Resolve").font(.dsCaption).foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.06)))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.dsSunken))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.dsLine, lineWidth: 1))
         // An AppKit drag area rather than .onDrag: inside the detail pane's scroll view,
         // .onDrag's hit area sat a toolbar's height too high, over the player's buttons.
         .overlay(FileDragArea(url: url, tooltip: "Drag into DaVinci Resolve. Resolve uses this original file; nothing is copied."))
@@ -363,30 +331,87 @@ final class FileDragView: NSView, NSDraggingSource {
 struct InfoRow: Identifiable {
     let label: String
     let value: String
+    /// A path: shown on one line, cut at the start, with a button that copies `copy`.
+    var copy: String?
     var id: String { label }
+
+    /// A folder, shortened to its last two levels; the whole of it in the tooltip, and a button
+    /// that copies `full`.
+    static func folder(_ folder: String, full: String, label: String = "Folder") -> InfoRow? {
+        guard !folder.isEmpty else { return nil }
+        let parts = folder.split(separator: "/")
+        let short = parts.count > 2 ? "… / " + parts.suffix(2).joined(separator: " / ") : parts.joined(separator: " / ")
+        return InfoRow(label: label, value: short, copy: full)
+    }
 }
 
+/// A titled block of facts in the detail pane: a printed title, then one fact a line with
+/// hairlines between, labels in one column.
 struct InfoGrid: View {
+    let title: String?
     let rows: [InfoRow]
 
-    init(_ pairs: [(String, String?)]) {
+    init(_ title: String? = nil, _ pairs: [(String, String?)], then extra: [InfoRow?] = []) {
+        self.title = title
         rows = pairs.compactMap { label, value in
             guard let value, !value.isEmpty else { return nil }
             return InfoRow(label: label, value: value)
-        }
+        } + extra.compactMap { $0 }
     }
 
     var body: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
-            ForEach(rows) { row in
-                GridRow {
-                    Text(row.label).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
-                    Text(row.value).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)   // wrap long paths instead of truncating
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                if let title {
+                    Text(title).overlineStyle().padding(.bottom, 8)
+                    Rectangle().fill(Color.dsLinePrint).frame(height: 1)
+                }
+                ForEach(rows) { row in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(row.label).font(.dsCaption).foregroundStyle(Color.dsInkMuted)
+                            .frame(width: 92, alignment: .leading)
+                        if let copy = row.copy {
+                            Text(row.value).lineLimit(1).truncationMode(.head).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .help(copy)
+                            CopyButton(text: copy)
+                        } else {
+                            Text(row.value).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    if row.id != rows.last?.id { Rectangle().fill(Color.dsLine).frame(height: 1) }
                 }
             }
+            .font(.dsBodySm)
         }
-        .font(.callout)
+    }
+}
+
+/// Copies a text; a tick for a moment once it has.
+struct CopyButton: View {
+    let text: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            copyToPasteboard(text)
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.2))
+                copied = false
+            }
+        } label: {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(copied ? Color.dsAccent : Color.dsInkMuted)
+                .frame(width: 22, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Copy the path")
+        .accessibilityLabel("Copy the path")
     }
 }
 
@@ -395,11 +420,13 @@ struct FileActions: View {
     let online: Bool
 
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                 .disabled(!online)
             Button("Copy Path") { copyToPasteboard(url.path) }
+                .help("Copy the file's whole path")
         }
+        .buttonStyle(.dsGhost)
     }
 }
 
@@ -412,7 +439,7 @@ struct OfflineNotice: View {
             .foregroundStyle(.secondary)
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.05)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.dsSunken))
     }
 }
 
@@ -427,7 +454,7 @@ struct LibraryRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(library.name).lineLimit(1)
                     if !library.isOnline {
-                        Text("Offline").font(.caption).foregroundStyle(.secondary)
+                        Text("Offline").font(.dsCaption).foregroundStyle(.secondary)
                     }
                 }
             } icon: {
@@ -481,26 +508,24 @@ extension View {
     @ViewBuilder func edgeBar<Bar: View>(_ edge: VerticalEdge, shown visible: Bool = true,
                                          @ViewBuilder _ bar: () -> Bar) -> some View {
         if #available(macOS 26, *) {
-            safeAreaBar(edge: edge, spacing: 0) { bar().background(.bar).shown(visible) }
+            safeAreaBar(edge: edge, spacing: 0) { bar().background(Color.dsBackground).shown(visible) }
         } else {
             safeAreaInset(edge: edge, spacing: 0) {
                 bar()
-                    .background(.bar)
-                    .overlay(alignment: edge == .top ? .bottom : .top) { Divider() }
+                    .background(Color.dsBackground)
                     .shown(visible)
             }
         }
     }
 
-    /// Player buttons: round Liquid Glass buttons on macOS 26 and later; `prominent` (play)
-    /// is tinted glass in the app's blue. Both carry a white symbol on blue while active, so
-    /// both take the selection's blue, as the section pill.
+    /// Player buttons: round Liquid Glass buttons on macOS 26 and later; `prominent` (play) is
+    /// the screen's one red key, the others plain glass.
     @ViewBuilder func playerButtonStyle(prominent: Bool = false) -> some View {
         if #available(macOS 26, *) {
             if prominent {
-                buttonStyle(.glassProminent).buttonBorderShape(.circle).controlSize(.large).tint(.earmarkSelectionBlue)
+                buttonStyle(.glassProminent).buttonBorderShape(.circle).controlSize(.large).tint(.dsAccent)
             } else {
-                buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large).tint(.earmarkSelectionBlue)
+                buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
             }
         } else {
             self

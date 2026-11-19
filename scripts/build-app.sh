@@ -1,7 +1,8 @@
 #!/bin/bash
 # Builds a release Earmark.app from the SwiftPM package in app/.
 #
-#   scripts/build-app.sh            -> app/build/Earmark.app
+#   scripts/build-app.sh            -> app/build/Earmark.app, then installed in /Applications
+#   scripts/build-app.sh --no-install  -> app/build/Earmark.app only
 #
 # SwiftPM only produces a bare executable plus resource bundles, so this wraps
 # them into an .app: Info.plist (bundle id, usage strings for removable volumes
@@ -43,10 +44,15 @@ mv "$APP/Contents/MacOS/Earmark.sdk" "$APP/Contents/MacOS/Earmark"
 for b in "$BIN"/*.bundle; do
     cp -R "$b" "$APP/Contents/Resources/"
 done
+# The type: Tessel and Brakwell (app/Fonts), registered for the app alone by ATSApplicationFontsPath.
+mkdir -p "$APP/Contents/Resources/Fonts"
+cp "$PKG"/Fonts/*.ttf "$APP/Contents/Resources/Fonts/"
 # The icon: an Icon Composer file (app/Icon/AppIcon.icon, Liquid Glass layers), compiled into
 # Assets.car with an AppIcon.icns for older systems.
-xcrun actool "$PKG/Icon/AppIcon.icon" --compile "$APP/Contents/Resources" --platform macosx \
-    --minimum-deployment-target "$MIN_MACOS" --app-icon AppIcon \
+# The accent colour (app/Icon/Accent.xcassets): the design system's muted ink, so the system's
+# controls (selection, checkboxes, focus) aren't the system's blue.
+xcrun actool "$PKG/Icon/AppIcon.icon" "$PKG/Icon/Accent.xcassets" --compile "$APP/Contents/Resources" --platform macosx \
+    --minimum-deployment-target "$MIN_MACOS" --app-icon AppIcon --accent-color AccentColor \
     --output-partial-info-plist "$(mktemp -t earmark-icon)" > /dev/null
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -57,6 +63,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleExecutable</key><string>Earmark</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>NSAccentColorName</key><string>AccentColor</string>
+    <key>ATSApplicationFontsPath</key><string>Fonts</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
@@ -95,3 +103,21 @@ PLIST
 codesign --force --deep --sign - "$APP"
 codesign --verify --strict "$APP"
 echo "Built $APP ($VERSION, build $BUILD_NUMBER)"
+
+# Install a copy in /Applications. The build in app/build stays: the MCP server agents
+# start is registered at that path. A copy running from /Applications is asked to quit,
+# then replaced and opened again.
+if [ "${1:-}" != "--no-install" ]; then
+    DEST="/Applications/Earmark.app"
+    RUNNING=0
+    if pgrep -f "$DEST/Contents/MacOS/Earmark\$" >/dev/null; then
+        RUNNING=1
+        osascript -e 'tell application id "'"$BUNDLE_ID"'" to quit' >/dev/null 2>&1 || true
+        while pgrep -f "$DEST/Contents/MacOS/Earmark\$" >/dev/null; do sleep 0.2; done
+    fi
+    rm -rf "$DEST"
+    ditto "$APP" "$DEST"
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DEST"
+    echo "Installed $DEST"
+    if [ "$RUNNING" = 1 ]; then open "$DEST"; fi
+fi

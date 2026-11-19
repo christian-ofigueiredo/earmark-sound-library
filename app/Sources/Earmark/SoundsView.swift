@@ -184,7 +184,7 @@ struct SoundSidebar: View {
             Label("All Sounds", systemImage: "square.grid.2x2")
                 .badge(model.soundIndex.shownCount)
                 .tag(SoundScope.all)
-            Section("Libraries") {
+            Section {
                 ForEach(model.soundLibraries) { lib in
                     LibraryRow(library: lib, count: model.soundIndex.libraryCounts[lib.id ?? -1] ?? 0,
                                scanning: model.isScanning(lib))
@@ -205,9 +205,11 @@ struct SoundSidebar: View {
                         .help("Sounds that are in the libraries more than once: copies of one file, or the same recording "
                               + "under another name. Earmark only shows them; it never deletes files.")
                 }
+            } header: {
+                Text("Libraries").overlineStyle()
             }
             if let similar = browser.similar {
-                Section("Similar") {
+                Section {
                     HStack {
                         Label("Similar to “\(similar.name)”", systemImage: "waveform.path.ecg")
                             .lineLimit(1)
@@ -223,10 +225,12 @@ struct SoundSidebar: View {
                     }
                     .badge(similar.scores.count)
                     .tag(SoundScope.similar(similar.source))
+                } header: {
+                    Text("Similar").overlineStyle()
                 }
             }
             if !model.sounds.isEmpty {
-                Section("Categories") {
+                Section {
                     OutlineGroup(model.categoryTree, children: \.children) { node in
                         if case .group(let id) = node.id, let group = model.groups.byId[id] {
                             Text(node.title).badge(node.count).tag(node.id)
@@ -261,10 +265,17 @@ struct SoundSidebar: View {
                     MapFoldersButton()
                         .buttonStyle(.borderless)
                         .foregroundStyle(.secondary)
+                } header: {
+                    Text("Categories").overlineStyle()
                 }
             }
         }
         .listStyle(.sidebar)
+        // Icons in ink, as the design system's: never a colour of their own.
+        .listItemTint(.fixed(.dsInk))
+        .tint(Color.dsRuby)   // the selection
+        .font(.dsBodySm)
+        .scrollContentBackground(.hidden)
     }
 }
 
@@ -420,16 +431,17 @@ struct SoundDetail: View {
     var body: some View {
         let online = model.isOnline(libraryId: sound.libraryId)
         DetailScroll {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(sound.displayName)
-                        .font(.title2.weight(.semibold))
+                        .font(.dsTitle3)
                         .textSelection(.enabled)
+                        .padding(.bottom, 2)
                     if let label = sound.ucsLabel {
-                        HStack(spacing: 6) {
-                            Text(label.capitalized).font(.callout.weight(.medium))
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(label.capitalized).font(.dsHeading)
                             if let catID = sound.catID {
-                                Text(catID).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                Text(catID).font(.dsCaption).foregroundStyle(.secondary)
                             }
                         }
                         GroupLine(sound: sound)
@@ -447,14 +459,14 @@ struct SoundDetail: View {
                             }
                             CategoryChangeMenu(sound: sound, title: "Change", mapFolder: mapFolder)
                         }
-                        .font(.caption)
+                        .font(.dsCaption)
                         .foregroundStyle(.secondary)
                     } else {
                         HStack(spacing: 6) {
                             Text("Not categorised yet").foregroundStyle(.secondary)
                             CategoryChangeMenu(sound: sound, title: "Choose a Category", mapFolder: mapFolder)
                         }
-                        .font(.callout)
+                        .font(.dsBodySm)
                     }
                 }
                 if online {
@@ -465,30 +477,36 @@ struct SoundDetail: View {
                 } else {
                     OfflineNotice(library: model.library(id: sound.libraryId))
                 }
-                InfoGrid([
-                    ("Description", sound.details),
-                    ("Keywords", sound.keywords),
-                    ("Library", sound.vendorLibrary),
-                    ("Manufacturer", sound.manufacturer),
-                    ("Designer", sound.designer),
-                    ("Loudness", model.analysis.facts[sound.id ?? -1].flatMap { loudnessText($0, for: sound) }),
-                    ("Embedding", embeddingText(for: sound)),
-                    ("Format", sound.formatText),
-                    ("Length", formatLength(sound.duration)),
-                    ("Folder", sound.folder),
-                    ("File", sound.fileName),
-                ])
                 Button {
                     model.findSimilar(to: sound)
                 } label: {
                     Label("Find Similar Sounds", systemImage: "waveform.path.ecg")
                 }
+                .buttonStyle(.dsKey)
                 .disabled(!model.canFindSimilar(sound))
                 .help(model.canFindSimilar(sound) ? "Sounds that sound most like this one (CLAP)"
                                                   : "Available once this sound has been analysed")
-                FileActions(url: sound.url, online: online)
+                InfoGrid("About", [
+                    ("Description", sound.details),
+                    ("Keywords", sound.keywords),
+                    ("Library", sound.vendorLibrary),
+                    ("Manufacturer", sound.manufacturer),
+                    ("Designer", sound.designer),
+                ])
+                InfoGrid("Sound", [
+                    ("Length", formatLength(sound.duration)),
+                    ("Format", sound.formatText),
+                    ("Loudness", model.analysis.facts[sound.id ?? -1].flatMap { loudnessText($0, for: sound) }),
+                    ("Embedding", embeddingText(for: sound)),
+                ])
+                VStack(alignment: .leading, spacing: 14) {
+                    InfoGrid("File", [("Name", sound.fileName)],
+                             then: [.folder(sound.folder, full: sound.url.deletingLastPathComponent().path)])
+                    FileActions(url: sound.url, online: online)
+                }
             }
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -503,7 +521,7 @@ struct OtherFormats: View {
         let copies = (model.soundIndex.twins.alternates[sound.id ?? -1] ?? []).compactMap { model.sound(id: $0) }
         if !copies.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Also in this pack as").font(.caption).foregroundStyle(.secondary)
+                Text("Also in this pack as").font(.dsCaption).foregroundStyle(.secondary)
                 ForEach(copies) { copy in FileChip(url: copy.url) }
             }
         }
@@ -525,12 +543,12 @@ struct SameSounds: View {
 
     private func list(_ title: String, _ sounds: [SoundRecord]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(title).font(.dsCaption).foregroundStyle(.secondary)
             ForEach(sounds) { s in
                 VStack(alignment: .leading, spacing: 2) {
                     FileChip(url: s.url)
                     Text([model.library(id: s.libraryId)?.name, s.folder].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " › "))
-                        .font(.caption2)
+                        .font(.dsCaption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)

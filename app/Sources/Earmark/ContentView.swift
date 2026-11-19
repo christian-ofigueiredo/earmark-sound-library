@@ -26,13 +26,15 @@ struct ContentView: View {
                 ToolbarItem(placement: .principal) { HStack(spacing: 8) { SectionSwitch(); AutoPlayToggle() } }
             }
         }
+        .dsWindowBackground()
+        .toolbarBackground(Color.dsBackground, for: .windowToolbar)
         .onChange(of: model.section) { _, section in
             model.player.stop()
             UserDefaults.standard.set(section.rawValue, forKey: "section")
         }
-        .sheet(isPresented: $model.showWelcome) { WelcomeView().environment(model) }
-        .sheet(item: $model.exportRequest) { ExportAnalysisSheet(request: $0).environment(model) }
-        .sheet(item: $model.groupNaming) { GroupNameSheet(naming: $0).environment(model) }
+        .sheet(isPresented: $model.showWelcome) { WelcomeView().environment(model).dsSheet() }
+        .sheet(item: $model.exportRequest) { ExportAnalysisSheet(request: $0).environment(model).dsSheet() }
+        .sheet(item: $model.groupNaming) { GroupNameSheet(naming: $0).environment(model).dsSheet() }
         .sheet(item: $model.categoryChoosing) { choosing in
             let first = model.sound(id: choosing.sounds.first)
             UCSChooser(title: choosing.sounds.count == 1 ? "Category for “\(first?.displayName ?? "")”"
@@ -84,6 +86,8 @@ struct LibraryView: View {
                 SoundSidebar()
                 MusicSidebar()
             }
+            // Behind both lists (each list's own would cover the other's, hidden in AppKit).
+            .background(Color.dsSurface)
             .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 380)
         } detail: {
             ZStack {
@@ -166,6 +170,8 @@ struct DetailColumn: View {
             }
             .offset(y: slide)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color.dsSurface)
         .animation(Self.motion, value: playing != nil)
         .onChange(of: playing != nil) { _, shown in
             // The details usually change too (another row selected), so there's no old
@@ -266,10 +272,9 @@ extension LibraryView {
 }
 
 /// Play sounds (or songs) as you select them, each section with its own setting: a round
-/// button after the section switch, blue glass while on.
+/// button after the section switch, sunk in and bright while on (as a pressed chip).
 struct AutoPlayToggle: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.controlActiveState) private var activeState
     @AppStorage("autoplaySounds") private var autoplaySounds = false
     @AppStorage("autoplayMusic") private var autoplayMusic = false
 
@@ -280,12 +285,13 @@ struct AutoPlayToggle: View {
             if music { autoplayMusic.toggle() } else { autoplaySounds.toggle() }
         } label: {
             if #available(macOS 26, *) {
-                // Drawn like the switch: its glass, tinted blue while on.
-                Image(systemName: on ? "play.circle.fill" : "play.circle")
-                    .font(.title3)
-                    .foregroundStyle(on && activeState != .inactive ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                // Drawn like the switch: its glass, sunk in while on.
+                // Drawn like the switch: its glass, red glass while on.
+                Image(systemName: on ? "play.fill" : "play.circle")
+                    .font(on ? .body : .title3)
+                    .foregroundStyle(on ? Color.dsSeashell : Color.dsInkMuted)
                     .frame(width: 34, height: 34)
-                    .glassEffect(on ? .regular.tint(.earmarkSelectionBlue).interactive() : .regular.interactive(), in: .circle)
+                    .glassEffect(on ? .regular.tint(Color.dsRuby).interactive() : .regular.interactive(), in: .circle)
                     .contentShape(Circle())
             } else {
                 Label("Auto-play", systemImage: on ? "play.circle.fill" : "play.circle")
@@ -301,14 +307,12 @@ struct AutoPlayToggle: View {
     }
 }
 
-/// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose blue-tinted glass
-/// pill slides to the chosen section (`AppModel.show`).
+/// Sound Effects / Music. On macOS 26 and later a Liquid Glass capsule whose sunken pill slides
+/// to the chosen section (`AppModel.show`), as the design system's pressed chip.
 struct SectionSwitch: View {
     /// How long the pill slides, seconds; the section changes after it (`AppModel.show`).
     static let slide = 0.28
     @Environment(AppModel.self) private var model
-    /// In an inactive window the system greys the glass's tint: dark text then, not white.
-    @Environment(\.controlActiveState) private var activeState
     /// Where each segment is, for the pill to move to.
     @State private var segments: [AppSection: CGRect] = [:]
 
@@ -325,14 +329,15 @@ struct SectionSwitch: View {
                     // stuttered in that direction only.)
                     .background(alignment: .topLeading) {
                         if let frame = segments[model.switchSection] {
+                            // The chosen section's key: red glass to the switch's own edge (no pill
+                            // inside a pill), Ruby Red in both modes (Milano was too bright as glass).
                             Color.clear
-                                .glassEffect(.regular.tint(.earmarkSelectionBlue).interactive(), in: .capsule)
+                                .glassEffect(.regular.tint(Color.dsRuby), in: .capsule)
                                 .frame(width: frame.width, height: frame.height)
                                 .offset(x: frame.minX, y: frame.minY)
                         }
                     }
                     .coordinateSpace(.named(Self.space))
-                    .padding(3)
                     .glassEffect(.regular.interactive(), in: .capsule)
                     .animation(.snappy(duration: Self.slide), value: model.switchSection)
                 }
@@ -355,12 +360,12 @@ struct SectionSwitch: View {
         return Button {
             model.show(section)
         } label: {
-            // The same weight either way (bold made the label jump); the chosen one sits on
-            // blue-tinted glass, the system's way to colour glass (no painted gradient).
+            // The same weight either way (bold made the label jump); the chosen one is light, on red.
             Text(section.title)
-                .foregroundStyle(chosen && activeState != .inactive ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-                .padding(.horizontal, 16)
-                .frame(height: 28)
+                .font(.dsLabel)
+                .foregroundStyle(chosen ? Color.dsSeashell : Color.dsInkMuted)
+                .padding(.horizontal, 18)
+                .frame(height: 34)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { segments[section] = $0 }
                 .contentShape(Capsule())
         }
@@ -416,7 +421,7 @@ struct StatusBar: View {
             .help("Analysis is much faster when you're not using the Mac. Leave Earmark open overnight: "
                 + "it analyses sounds in the background and slows down while you work.")
         }
-        .font(.callout)
+        .font(.dsBodySm)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }
@@ -436,57 +441,125 @@ struct StatusBar: View {
     }
 }
 
+/// The introduction, shown at first launch and from Help: five short pages on what Earmark
+/// does, the last with the buttons that add a first library.
 struct WelcomeView: View {
     @Environment(AppModel.self) private var model
+    @State private var page = 0
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Welcome to Earmark").font(.largeTitle.weight(.bold))
-            WelcomePoint(icon: "lock.shield", title: "Your files are never changed",
-                         text: "Earmark only reads your sound effects and music. It never writes to, renames or moves "
-                             + "them. Everything it learns is kept in its own database in "
-                             + "~/Library/Application Support/Earmark.")
-            WelcomePoint(icon: "moon.zzz", title: "Analysis is much faster when you're not using the Mac",
-                         text: "Earmark listens to your sounds in the background to sort and group them. It slows down "
-                             + "while you work, so leave it open overnight to get through a large library.")
-            WelcomePoint(icon: "film", title: "Drag into DaVinci Resolve",
-                         text: "Drag any sound or song from the list into Resolve's media pool or timeline. Resolve "
-                             + "uses the original file; nothing is copied.")
-            HStack {
-                Button("Add Sound Library…") {
-                    model.finishWelcome()
-                    model.chooseLibrary(.sounds)
-                }
-                Button("Add Music Folder…") {
-                    model.finishWelcome()
-                    model.chooseLibrary(.music)
-                }
-                Spacer()
-                Button("Get Started") { model.finishWelcome() }
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(28)
-        .frame(width: 580)
-        .interactiveDismissDisabled()
+    private struct Page {
+        let icon: String
+        let eyebrow: String
+        let title: String
+        let text: String
+        var points: [(String, String)] = []
     }
-}
 
-private struct WelcomePoint: View {
-    let icon: String
-    let title: String
-    let text: String
+    private static let pages: [Page] = [
+        Page(icon: "waveform", eyebrow: "Welcome to Earmark", title: "Your sounds and music, sorted by ear",
+             text: "Earmark reads your sound effect and music folders, listens to every file and sorts them, "
+                 + "so you find the right sound quickly and send it to your edit.",
+             points: [("lock.shield", "Your files are never changed. Earmark only reads them: no renaming, no moving, no writing."),
+                      ("moon.zzz", "It listens in the background and is much faster while the Mac is idle. Leave it open overnight for a large library.")]),
+        Page(icon: "magnifyingglass", eyebrow: "Find", title: "Browse by category, search, or by what sounds alike",
+             text: "Every sound gets a category, from its file, its folder or how it sounds.",
+             points: [("sidebar.left", "The sidebar lists the categories. Inside each, sounds that sound alike are grouped."),
+                      ("waveform.path.ecg", "Find Similar Sounds shows the sounds closest to the one you picked."),
+                      ("circle.grid.cross", "Map draws the whole library as dots, similar sounds close together.")]),
+        Page(icon: "play.fill", eyebrow: "Listen", title: "Hear a sound before you use it",
+             text: "Select a sound and press Space, or turn on auto-play in the toolbar to hear each one as you select it.",
+             points: [("cursorarrow.click", "Click the waveform to play from there."),
+                      ("arrow.left.and.right", "Drag across the waveform to select only the part you want.")]),
+        Page(icon: "film", eyebrow: "Use", title: "Send it to DaVinci Resolve",
+             text: "Resolve uses your original file. Nothing is copied.",
+             points: [("hand.draw", "Drag a sound or song from the list into Resolve's media pool or timeline."),
+                      ("plus.rectangle.on.rectangle", "Or press ⌘T to add it to the timeline at the playhead (Resolve Studio). With a part selected, only that part is added.")]),
+        Page(icon: "music.note", eyebrow: "Music", title: "Tempo and key for every song",
+             text: "The Music section works out each song's tempo and key, so you can filter by BPM or key and find songs that mix well together.",
+             points: [("slider.horizontal.3", "If a tempo or key is wrong, correct it: Earmark keeps your correction.")]),
+    ]
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(Color.earmarkBlue)
-                .frame(width: 30)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline)
-                Text(text).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        let current = Self.pages[page], last = page == Self.pages.count - 1
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 22) {
+                Image(systemName: current.icon)
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(Color.dsSeashell)
+                    .frame(width: 68, height: 68)
+                    .background(RoundedRectangle(cornerRadius: 18).fill(Color.dsAccent))
+                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(
+                        LinearGradient(colors: [.white.opacity(0.25), .clear, .black.opacity(0.12)], startPoint: .top, endPoint: .bottom),
+                        lineWidth: 1))
+                    .keyShadow(0.8)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(current.eyebrow).overlineStyle()
+                    Text(current.title).font(.dsTitle2).fixedSize(horizontal: false, vertical: true)
+                    Text(current.text).font(.dsBody).foregroundStyle(Color.dsInkPrint)
+                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(current.points.enumerated()), id: \.offset) { index, point in
+                            if index > 0 { Rectangle().fill(Color.dsLine).frame(height: 1) }
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Image(systemName: point.0).foregroundStyle(Color.dsInk).frame(width: 22)
+                                Text(point.1).fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.vertical, 10)
+                        }
+                    }
+                    .padding(.top, 6)
+                }
             }
+            .frame(maxWidth: .infinity, minHeight: 300, alignment: .topLeading)
+            .id(page)
+            .transition(.opacity)
+            HStack(spacing: 10) {
+                // Where you are: the current page's light is red.
+                HStack(spacing: 7) {
+                    ForEach(Self.pages.indices, id: \.self) { index in
+                        Circle().fill(index == page ? Color.dsAccent : Color.dsInk.opacity(0.16)).frame(width: 7, height: 7)
+                    }
+                }
+                .accessibilityElement()
+                .accessibilityLabel("Page \(page + 1) of \(Self.pages.count)")
+                Spacer()
+                if last {
+                    Button("Add Sound Library…") {
+                        model.finishWelcome()
+                        model.chooseLibrary(.sounds)
+                    }
+                    .buttonStyle(.dsGhost)
+                    Button("Add Music Folder…") {
+                        model.finishWelcome()
+                        model.chooseLibrary(.music)
+                    }
+                    .buttonStyle(.dsGhost)
+                    Button("Get Started") { model.finishWelcome() }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.dsPrimary)
+                } else {
+                    Button("Skip") { model.finishWelcome() }
+                        .keyboardShortcut(.cancelAction)
+                        .buttonStyle(.dsLink)
+                        .padding(.trailing, 6)
+                    if page > 0 {
+                        Button("Back") { go(to: page - 1) }.buttonStyle(.dsGhost)
+                    }
+                    Button("Next") { go(to: page + 1) }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.dsPrimary)
+                }
+            }
+            .padding(.top, 22)
         }
+        .padding(30)
+        .frame(width: 640)
+        .interactiveDismissDisabled()
+        .onKeyPress(.leftArrow) { if page > 0 { go(to: page - 1) }; return .handled }
+        .onKeyPress(.rightArrow) { if !last { go(to: page + 1) }; return .handled }
+    }
+
+    private func go(to index: Int) {
+        withAnimation(.easeOut(duration: 0.2)) { page = index }
     }
 }

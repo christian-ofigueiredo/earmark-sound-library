@@ -9,8 +9,10 @@ extension EarmarkTools {
         they sound like), duplicates, loudness, and which sounds sound alike. Find sounds with \
         search_sounds (words, category, group, length) and find_similar, look closer with get_sound, \
         then put them on the timeline open in DaVinci Resolve with add_to_resolve (check resolve_status \
-        first; use preview to see where they'd go). Sound ids come from search_sounds. Lengths and \
-        ranges are in seconds. Earmark never changes the sound files.
+        first; use preview to see where they'd go). When Resolve Studio can't be reached (the free \
+        Resolve has no scripting) or the owner uses Final Cut Pro, save_timeline_file writes a timeline \
+        file they import instead. Sound ids come from search_sounds. Lengths and ranges are in seconds. \
+        Earmark never changes the sound files.
         """
 
     static func schema(_ properties: [String: Value], required: [String] = []) -> Value {
@@ -103,6 +105,31 @@ extension EarmarkTools {
                 "preview": prop("boolean", "Only say where they'd go."),
              ], required: ["items"]),
              annotations: .init(title: "Add to the Resolve timeline", readOnlyHint: false, destructiveHint: false,
+                                idempotentHint: false, openWorldHint: false)),
+        Tool(name: "save_timeline_file", title: "Save a timeline file",
+             description: "Writes the sounds into a timeline file (FCPXML 1.10) that the free DaVinci Resolve (File ▸ Import ▸ "
+                + "Timeline…), Resolve Studio and Final Cut Pro (File ▸ Import ▸ XML…) import as a new timeline, as cuts of the "
+                + "original files. Each item: `sound_id`; `start`/`end` in seconds into the file (default all); `at`, seconds "
+                + "from the timeline's start (default: where the previous one ends). Each goes on the first track free at its "
+                + "time. Cuts are whole frames. `frame_rate`: one of 23.976, 24, 25, 29.97, 29.97 DF, 30, 50, 59.94, 59.94 DF, "
+                + "60 (default 25; use the owner's timeline's). Saved in ~/Movies/Earmark as `name`.fcpxml (never overwrites). "
+                + "Returns the path and each item's track and timecodes.",
+             inputSchema: schema([
+                "items": .object([
+                    "type": "array",
+                    "description": "The sounds to put in the file.",
+                    "items": schema([
+                        "sound_id": prop("integer", "The sound's id."),
+                        "start": prop("number", "Seconds into the file where the cut starts."),
+                        "end": prop("number", "Seconds into the file where the cut ends."),
+                        "at": prop("number", "Seconds from the timeline's start."),
+                    ], required: ["sound_id"]),
+                ]),
+                "frame_rate": prop("string", "The timeline's frame rate, e.g. \"25\" or \"29.97 DF\"."),
+                "start_timecode": prop("string", "The timeline's start timecode (default 01:00:00:00)."),
+                "name": prop("string", "The file's and timeline's name (default \"Earmark sounds\")."),
+             ], required: ["items"]),
+             annotations: .init(title: "Save a timeline file", readOnlyHint: false, destructiveHint: false,
                                 idempotentHint: false, openWorldHint: false)),
     ]
 }

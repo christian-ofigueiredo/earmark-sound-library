@@ -52,8 +52,8 @@ import Testing
         return (db, ids, root)
     }
 
-    static func connect(_ db: LibraryDatabase, _ recorder: Recorder,
-                        placements: [ResolveBridge.Placement] = []) async throws -> (Client, Server) {
+    static func connect(_ db: LibraryDatabase, _ recorder: Recorder, placements: [ResolveBridge.Placement] = [],
+                        timelineFolder: URL = FileManager.default.temporaryDirectory) async throws -> (Client, Server) {
         let outside = EarmarkTools.Outside(
             open: { recorder.open($0) },
             resolveStatus: { throw ResolveBridge.Failure.notConnected },
@@ -63,7 +63,8 @@ import Testing
                                                                                          start: "01:00:02:00", end: "01:00:03:06", newTrack: true) }
                                                 : placements
                 return ResolveBridge.Added(project: "Film", timeline: "Edit 1", items: placed)
-            })
+            },
+            timelineFolder: timelineFolder)
         let server = await EarmarkServer.make(EarmarkTools(database: db, outside: outside))
         let (clientSide, serverSide) = await InMemoryTransport.createConnectedPair()
         try await server.start(transport: serverSide)
@@ -85,7 +86,7 @@ import Testing
         let (client, server) = try await Self.connect(db, Recorder())
         let (tools, _) = try await client.listTools()
         #expect(tools.map(\.name) == ["library_overview", "search_sounds", "get_sound", "find_similar", "list_groups",
-                                      "show_in_earmark", "resolve_status", "add_to_resolve"])
+                                      "show_in_earmark", "resolve_status", "add_to_resolve", "save_timeline_file"])
         let readOnly = Set(tools.filter { $0.annotations.readOnlyHint == true }.map(\.name))
         #expect(readOnly == ["library_overview", "search_sounds", "get_sound", "find_similar", "list_groups", "resolve_status"])
         #expect(tools.allSatisfy { $0.annotations.destructiveHint != true })
@@ -167,6 +168,31 @@ import Testing
         let r = try await Self.call(client, "add_to_resolve", ["items": [["sound_id": .int(Int(ids["Forest Night.wav"]!)), "track": 1]]])
         let item = (r.json["items"] as? [[String: Any]])?.first
         #expect(item?["placed"] as? Bool == false && item?["problem"] as? String == "That track has a clip there.")
+        await server.stop()
+    }
+
+    @Test func savingATimelineFile() async throws {
+        let (db, ids, root) = try Self.library()
+        let folder = root.appendingPathComponent("Timelines")
+        let (client, server) = try await Self.connect(db, Recorder(), timelineFolder: folder)
+        let creak = Int(ids["Door Creak.wav"]!), slam = Int(ids["Door Wood Slam 01.wav"]!)
+        let items: Value = [["sound_id": .int(creak)], ["sound_id": .int(slam), "start": 0.2, "end": 1, "at": 1]]
+
+        let saved = try await Self.call(client, "save_timeline_file", ["items": items, "frame_rate": "29.97 DF", "name": "Doors: take 1"])
+        #expect(!saved.error)
+        let path = try #require(saved.json["path"] as? String)
+        #expect(path == folder.appendingPathComponent("Doors- take 1.fcpxml").path)
+        let xml = try String(contentsOfFile: path, encoding: .utf8)
+        #expect(xml.contains(#"tcFormat="DF""#) && xml.contains(#"<project name="Doors- take 1">"#))
+        let placed = saved.json["items"] as? [[String: Any]]
+        #expect(placed?.map { $0["track"] as? Int } == [1, 2])
+        #expect(placed?.first?["start"] as? String == "01:00:00;00" && placed?.last?["start"] as? String == "01:00:01;00")
+
+        // Never overwrites; a frame rate it doesn't know is refused.
+        let again = try await Self.call(client, "save_timeline_file", ["items": items, "frame_rate": 29.97, "name": "Doors: take 1"])
+        #expect(again.json["path"] as? String == folder.appendingPathComponent("Doors- take 1 2.fcpxml").path)
+        let bad = try await Self.call(client, "save_timeline_file", ["items": items, "frame_rate": "12"])
+        #expect(bad.error && bad.text.contains("29.97 DF"))
         await server.stop()
     }
 }

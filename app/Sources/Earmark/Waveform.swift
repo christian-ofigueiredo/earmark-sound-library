@@ -180,8 +180,9 @@ final class WaveformCanvas: NSView {
             playheadLayer.bounds = CGRect(x: 0, y: 0, width: 10, height: height)
             playheadLayer.anchorPoint = CGPoint(x: 0.5, y: 0)
         }
-        var color = NSColor.labelColor.cgColor
-        effectiveAppearance.performAsCurrentDrawingAppearance { color = NSColor.labelColor.cgColor }
+        // The playhead is the screen's red signal: where the sound is playing.
+        var color = NSColor.dsAccent.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance { color = NSColor.dsAccent.cgColor }
         playheadLayer.fillColor = color
         playheadLayer.position = CGPoint(x: x, y: 0)
         playheadLayer.isHidden = false
@@ -234,17 +235,17 @@ final class WaveformCanvas: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let r = bounds
-        // The app's blue (SwiftUI's tint doesn't reach AppKit drawing); grey when inactive.
-        let accent = active ? NSColor.earmarkBlue : NSColor.secondaryLabelColor
-        NSColor.labelColor.withAlphaComponent(0.05).setFill()
-        NSBezierPath(roundedRect: r, xRadius: 8, yRadius: 8).fill()
+        // Ink on a sunken well (the design system: neutrals do the work; the red is the playhead).
+        NSColor.dsSunken.setFill()
+        NSBezierPath(roundedRect: r, xRadius: 12, yRadius: 12).fill()
+        NSColor.dsLine.setStroke()
+        NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12).stroke()
         if let sel = selection {
-            accent.withAlphaComponent(0.22).setFill()
+            NSColor.dsInk.withAlphaComponent(0.16).setFill()
             NSRect(x: sel.lowerBound * r.width, y: 0, width: max((sel.upperBound - sel.lowerBound) * r.width, 1), height: r.height).fill()
         }
         if let peaks, !peaks.isEmpty {
-            // Solid: see-through, the bars came out a duller blue than the rest of the app.
-            (active ? NSColor.earmarkBlue : NSColor.labelColor.withAlphaComponent(0.4)).setFill()
+            NSColor.dsInk.withAlphaComponent(active ? 0.85 : 0.45).setFill()
             let mid = r.height / 2, step = r.width / CGFloat(peaks.count)
             for (i, p) in peaks.enumerated() {
                 let h = max(0.5, CGFloat(min(p, 1)) * (mid - 2))

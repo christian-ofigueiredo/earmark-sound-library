@@ -233,14 +233,13 @@ enum MapPalette {
         return SIMD3(Float(hex >> 16 & 0xFF), Float(hex >> 8 & 0xFF), Float(hex & 0xFF)) / 255
     }
 
-    /// Behind the map: near black in dark mode (the glow and the fine lines show on it), white
-    /// in light mode.
+    /// Behind the map: the window's ground, Shark or Seashell (the glow and the fine lines show on it).
     static let background = NSColor(name: "soundMapBackground") { appearance in
         background(dark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
     }
 
     static func background(dark: Bool) -> NSColor {
-        dark ? NSColor(srgbRed: 0.043, green: 0.051, blue: 0.063, alpha: 1) : NSColor(white: 1, alpha: 1)
+        dark ? .dsShark : .dsSeashell
     }
 }
 
@@ -343,8 +342,8 @@ struct SoundMapPane: View {
                     }
             }
             if let p = state.progress {
-                VStack(spacing: 8) {
-                    ProgressView(value: p).frame(width: 220)
+                VStack(spacing: 10) {
+                    ProgressView(value: p).frame(width: 220).tint(.dsAccent)
                     Text("Drawing the map of \(state.inScope.formatted()) sounds…").foregroundStyle(.secondary)
                 }
             } else if state.layout == nil || state.layout?.ids.isEmpty == true {
@@ -353,6 +352,8 @@ struct SoundMapPane: View {
                                                          : "These sounds haven't been analysed yet. The map shows sounds once they have their embeddings."))
             }
         }
+        // The whole pane, over the list: alone, the progress got a square of ground its own size.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: MapPalette.background))
         .shown(!model.sectionFaded)
         .task(id: MapKey(scope: browser.scope, version: model.version, groups: showsGroup ? model.groupsVersion : 0)) {
@@ -411,12 +412,13 @@ private struct MapLegend: View {
                 }
             }
             if highlight != nil {
-                Button("Show All") { highlight = nil }.buttonStyle(.link).font(.caption)
+                Button("Show All") { highlight = nil }.buttonStyle(.dsLink).font(.dsCaption)
             }
         }
         .padding(10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .font(.callout)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.dsBackground).keyShadow(0.6))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.dsLine, lineWidth: 1))
+        .font(.dsBodySm)
     }
 
     private func row(_ entry: MapStyle.Entry, lit: Bool) -> some View {
@@ -450,27 +452,28 @@ struct SoundViewBar: View {
     var body: some View {
         @Bindable var state = model.soundMap
         HStack(spacing: 12) {
-            Picker("View", selection: $state.showing) {
-                Text("List").tag(false)
-                Text("Map").tag(true)
+            HStack(spacing: 8) {
+                DSChip(title: "List", chosen: !state.showing) { state.showing = false }
+                DSChip(title: "Map", chosen: state.showing) { state.showing = true }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("View")
             .help("Show the sounds as a list or as a map, sounds that sound alike close together (⇧⌘M)")
             if state.showing {
                 Toggle("Play on hover", isOn: $state.playOnHover).toggleStyle(.checkbox)
                 Button("Fit") { state.fit() }
+                    .buttonStyle(.dsGhost)
                     .help("Show the whole map")
                 Spacer()
                 let ready = state.newlyAnalysed(model.analysis)
                 let waiting = state.missing - ready
                 if waiting > 0 {
-                    Text("\(waiting.formatted()) not analysed yet").foregroundStyle(.secondary).font(.callout)
+                    Text("\(waiting.formatted()) not analysed yet").foregroundStyle(.secondary).font(.dsBodySm)
                         .help("Sounds here that aren't on the map: they join once analysed")
                 }
                 if ready > 0 {
                     Button("Add \(ready.formatted()) New \(ready == 1 ? "Sound" : "Sounds")") { state.addNewSounds(database: model.database) }
+                        .buttonStyle(.dsGhost)
                         .help("Make the map again with the sounds analysed since it was made. The others stay about where they are.")
                 }
             } else {
@@ -478,7 +481,7 @@ struct SoundViewBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
     }
 }
 
@@ -906,13 +909,13 @@ final class SoundMapCanvas: NSView {
             ctx.fillPath()
             if chosen.count <= 40 { for i in chosen { ring(i, .labelColor, 1, 2.5) } }
         }
-        if let p = playing, p < points.count { ring(p, .earmarkBlue, 1.5, 3.5) }
+        if let p = playing, p < points.count { ring(p, .dsAccent, 1.5, 3.5) }
         if let m = marquee {
             let rect = CGRect(x: min(m.start.x, m.end.x), y: min(m.start.y, m.end.y),
                               width: abs(m.end.x - m.start.x), height: abs(m.end.y - m.start.y))
-            ctx.setFillColor(NSColor.earmarkSelectionBlue.withAlphaComponent(0.1).cgColor)
+            ctx.setFillColor(NSColor.dsSelection.cgColor)
             ctx.fill(rect)
-            ctx.setStrokeColor(NSColor.earmarkBlue.cgColor)
+            ctx.setStrokeColor(NSColor.dsInk.withAlphaComponent(0.7).cgColor)
             ctx.setLineWidth(0.75)
             ctx.stroke(rect)
         }

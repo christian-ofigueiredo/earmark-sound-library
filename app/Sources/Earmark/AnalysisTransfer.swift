@@ -146,7 +146,7 @@ struct ExportAnalysisSheet: View {
         let sounds = model.soundLibraries.filter { chosen.contains($0.id ?? -1) }
             .reduce(0) { $0 + (model.soundIndex.libraryCounts[$1.id ?? -1] ?? 0) }
         VStack(alignment: .leading, spacing: 14) {
-            Text("Export Analysis").font(.title2.weight(.semibold))
+            Text("Export Analysis").font(.dsTitle3)
             Text("One file per library, to import into Earmark on another Mac. Files are matched by their content there, "
                  + "so another drive name or folder layout is fine. Your libraries aren't touched.")
                 .foregroundStyle(.secondary)
@@ -169,7 +169,7 @@ struct ExportAnalysisSheet: View {
                 Text(sounds == 0 ? "For sound libraries only."
                      : "About \(ByteCountFormatter.string(fromByteCount: Int64(sounds) * 8_500, countStyle: .file)) for "
                        + "\(sounds.formatted()) sounds. They're the slow part to redo: without them, the other Mac works them out again.")
-                    .font(.callout)
+                    .font(.dsBodySm)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 20)
@@ -178,6 +178,7 @@ struct ExportAnalysisSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .buttonStyle(.dsGhost)
                 Button("Export…") {
                     let ids = chosen, embeddings = includeEmbeddings && sounds > 0
                     dismiss()
@@ -185,6 +186,7 @@ struct ExportAnalysisSheet: View {
                     DispatchQueue.main.async { model.export(libraryIds: ids, includeEmbeddings: embeddings) }
                 }
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(.dsPrimary)
                 .disabled(chosen.isEmpty)
             }
         }

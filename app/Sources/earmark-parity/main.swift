@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreML
 import EarmarkCore
 import EarmarkML
@@ -11,6 +12,8 @@ import Foundation
 //   swift run -c release earmark-parity <clap|peav> <model> <reference> --file <path>
 //
 // The reference files come from models/parity_clap.py / parity_peav.py --reference.
+//
+//   earmark-parity metadata|scan|twins|keys|phase0|db-new|db-ops|audio|similar|categories|musicsteps|anafile-export|anafile-import|timeline …   (see below; for the Rust engine)
 
 /// Embeds a batch of files (PE-AV runs part by part over the whole batch).
 protocol BatchEmbedder { func embed(batch: [[Float]]) throws -> [[Float]?] }
@@ -27,6 +30,423 @@ extension PeavEmbedder: BatchEmbedder {
 }
 
 var args = CommandLine.arguments
+
+// What Swift reads from each file whose path comes on stdin, as JSON lines, for the Rust engine's
+// parity check (engine/parity/compare.py). Reads the files only.
+//   earmark-parity metadata < paths.txt
+if args.count >= 2, args[1] == "metadata" {
+    struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    while let path = readLine(), !path.isEmpty {
+        let url = URL(fileURLWithPath: path)
+        let raw = MetadataReader.read(url: url)
+        let row = Row(path: path, raw: raw, normalized: MetadataNormalizer.normalize(raw, url: url),
+                      timeReference: MetadataReader.timeReference(url: url))
+        FileHandle.standardOutput.write(try encoder.encode(row) + Data("\n".utf8))
+    }
+    exit(0)
+}
+
+// Decoded audio and what Swift measures from it, for the Rust engine's parity check
+// (engine/parity/compare.py audio). For each file whose path comes on stdin: <n>.pcm (the file at
+// its own rate, float32, channel after channel), <n>.mono (mono 48 kHz, as the CLAP stage decodes
+// it) and <n>.clap (CLAP's features of each window), then one JSON line. Reads the files only.
+//   earmark-parity audio <work folder> < paths.txt
+if args.count >= 3, args[1] == "audio" {
+    struct Window: Encodable { var length: Int; var rms: Double }
+    struct Row: Encodable {
+        var index: Int; var path: String; var rate: Double; var channels: Int; var frames: Int
+        var loudness: LoudnessMeter.Result; var monoFrames: Int; var prepared: Int?; var windows: [Window]; var peavLengths: [Int]
+    }
+    let work = URL(fileURLWithPath: args[2], isDirectory: true)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    var index = 0
+    while let path = readLine(), !path.isEmpty {
+        defer { index += 1 }
+        let url = URL(fileURLWithPath: path)
+        guard let file = try? AVAudioFile(forReading: url),
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)) else { continue }
+        try file.read(into: buffer)
+        let channels = Int(buffer.format.channelCount), frames = Int(buffer.frameLength)
+        var meter = LoudnessMeter(sampleRate: buffer.format.sampleRate, channels: channels)
+        var pcm = Data()
+        var pointers: [UnsafeBufferPointer<Float>] = []
+        for c in 0 ..< channels {
+            let p = UnsafeBufferPointer(start: buffer.floatChannelData![c], count: frames)
+            pointers.append(p)
+            pcm.append(Data(buffer: p))
+        }
+        // In the app's chunks (64 K frames).
+        var start = 0
+        while start < frames {
+            let n = min(1 << 16, frames - start)
+            meter.process(pointers.map { UnsafeBufferPointer(rebasing: $0[start ..< start + n]) }, frames: n)
+            start += n
+        }
+        try pcm.write(to: work.appendingPathComponent("\(index).pcm"))
+        let mono = try AudioDecoder.mono(url: url, sampleRate: Double(Phase0Audio.sampleRate), maxSeconds: Phase0Audio.maxSeconds)
+        try mono.withUnsafeBufferPointer { try Data(buffer: $0).write(to: work.appendingPathComponent("\(index).mono")) }
+        let prepared = Phase0Audio.prepare(mono)
+        let windows = prepared.map(Phase0Audio.windows) ?? []
+        var clap = Data()
+        for w in windows { ClapAudio.features(w).withUnsafeBufferPointer { clap.append(Data(buffer: $0)) } }
+        try clap.write(to: work.appendingPathComponent("\(index).clap"))
+        let row = Row(index: index, path: path, rate: buffer.format.sampleRate, channels: channels, frames: frames, loudness: meter.result,
+                      monoFrames: mono.count, prepared: prepared?.count,
+                      windows: windows.map { w in Window(length: w.count, rms: (w.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(w.count)).squareRoot()) },
+                      peavLengths: windows.map { PeavAudio.input($0).count })
+        FileHandle.standardOutput.write(try encoder.encode(row) + Data("\n".utf8))
+    }
+    exit(0)
+}
+
+// Neighbours and duplicate sets on the database's vectors, for the Rust engine's parity check.
+//   earmark-parity similar <library.sqlite> < ids.txt   each sound's 20 nearest by CLAP
+//   earmark-parity dupsets <library.sqlite>             identical copies and saved near pairs, as sets
+if args.count >= 3, ["similar", "dupsets"].contains(args[1]) {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    func emit(_ value: some Encodable) throws { FileHandle.standardOutput.write(try encoder.encode(value) + Data("\n".utf8)) }
+    if args[1] == "similar" {
+        struct Row: Encodable { var id: Int64; var ids: [Int64]; var scores: [Float] }
+        let index = SimilarityIndex(vectors: try db.vectors(model: "clap-general"))
+        while let line = readLine(), let id = Int64(line) {
+            let near = index.nearest(to: id, count: 20)
+            try emit(Row(id: id, ids: near.map(\.id), scores: near.map(\.score)))
+        }
+    } else {
+        struct Other: Encodable { var id: Int64; var identical: Bool; var similarity: Float }
+        struct Out: Encodable { var identical: Int; var near: Int; var members: [[Int64]]; var others: [String: [Other]] }
+        let sounds = try db.sounds()
+        let identical = Duplicates.identicalPairs(sounds, hidden: FormatTwins.group(sounds).hidden)
+        let near = try db.nearDuplicates()
+        let sets = Duplicates.sets(identical + near)
+        try emit(Out(identical: identical.count, near: near.count, members: sets.members,
+                     others: Dictionary(uniqueKeysWithValues: sets.others.map { ("\($0.key)", $0.value.map { Other(id: $0.id, identical: $0.identical, similarity: $0.similarity) }) })))
+    }
+    exit(0)
+}
+
+// Each sound's 15 nearest (the sound map's neighbour search), for the Rust engine's parity check:
+//   earmark-parity knn <library.sqlite> <out.json> [category]
+if args.count >= 4, args[1] == "knn" {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    let category = args.count > 4 ? args[4] : nil
+    let peav = Dictionary(uniqueKeysWithValues: try db.vectors(model: "pe-av-large").map { ($0.id, $0.vector) })
+    let clap = Dictionary(uniqueKeysWithValues: try db.vectors(model: "clap-general").map { ($0.id, $0.vector) })
+    let sounds = try db.sounds().filter { s in
+        guard let id = s.id, peav[id] != nil, clap[id] != nil else { return false }
+        return category == nil || s.category == category
+    }.sorted { $0.id! < $1.id! }
+    let flat = PageBuffer(count: sounds.count * 1536)
+    flat.withFloats { f in
+        for (i, s) in sounds.enumerated() { for (c, v) in SoundMap.combine([peav[s.id!]!, clap[s.id!]!]).enumerated() { f[i * 1536 + c] = v } }
+    }
+    let (indices, distances) = flat.withFloats { SoundMap.nearestNeighbours(UnsafeBufferPointer($0), n: sounds.count, d: 1536, k: 15) }
+    struct Out: Encodable { var indices: [Int]; var distances: [Float] }
+    try JSONEncoder().encode(Out(indices: indices, distances: distances)).write(to: URL(fileURLWithPath: args[3]))
+    exit(0)
+}
+
+// The categories as the app works them out, for the Rust engine's parity check
+// (engine/parity/compare.py categories). Reads only:
+//   earmark-parity categories <library.sqlite>
+// 1. every sound's category after folder rules, guesses and per-sound choices (SoundCatalog);
+// 2. every open folder's suggestions, as FolderGuesser makes them (all folders, not only the stale);
+// 3. SoundGuesser's vote: Earmark's per-sound guesses and the near-duplicate pairs.
+if args.count >= 3, args[1] == "categories" {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    func emit(_ value: some Encodable) throws { FileHandle.standardOutput.write(try encoder.encode(value) + Data("\n".utf8)) }
+    let rules = try db.folderRules(), guesses = try db.folderGuesses(), choices = try db.soundCategoryChoices()
+    let applied = SoundCategories.apply(choices, to: FolderRules.apply(rules, guesses: guesses, to: try db.sounds()))
+    struct Applied: Encodable { var id: Int64; var catID: String?; var source: String? }
+    for s in applied { try emit(Applied(id: s.id!, catID: s.catID, source: s.categorySource)) }
+
+    let hidden = FormatTwins.group(applied).hidden
+    var open: [String: (lib: Int64, folder: String, sounds: [SoundRecord])] = [:]
+    for s in applied where s.catID == nil || s.categorySource == FolderRules.source || s.categorySource == FolderRules.guessSource
+        || s.categorySource == SoundCategories.soundGuessSource {
+        guard let id = s.id, !hidden.contains(id) else { continue }
+        open["\(s.libraryId)/\(s.folder)", default: (s.libraryId, s.folder, [])].sounds.append(s)
+    }
+    let index = SimilarityIndex(vectors: try db.vectors(model: "clap-general"))
+    let labels = FolderSuggester.labels(applied), shared = FolderSuggester.sharedDescriptions(applied)
+    struct Option: Encodable { var catID: String; var score: Double; var words: [String]; var fileWords: [String]; var soundShare: Double; var uncertain: Bool }
+    struct Folder: Encodable { var folder: String; var options: [Option] }
+    for key in open.keys.sorted() {
+        let f = open[key]!
+        let options = FolderSuggester.suggest(folder: f.folder, sounds: f.sounds, index: index, labels: labels, sharedDescriptions: shared)
+        try emit(Folder(folder: key, options: options.map {
+            Option(catID: $0.entry.catID, score: $0.score, words: $0.words, fileWords: $0.fileWords, soundShare: $0.soundShare,
+                   uncertain: $0.isUncertain)
+        }))
+    }
+
+    // SoundGuesser.run, step by step.
+    let owners = choices.filter { $0.value.byOwner }
+    let sounds = SoundCategories.apply(owners, to: FolderRules.apply(rules, guesses: guesses, to: try db.sounds()))
+    let twinsHidden = FormatTwins.group(sounds).hidden
+    let byId = Dictionary(uniqueKeysWithValues: sounds.compactMap { s in s.id.map { ($0, s) } })
+    let d = 1536
+    var rows: [SoundRecord] = []
+    var buffer = PageBuffer(count: 0)
+    try db.forEachVectors(models: ["pe-av-large", "clap-general"], count: { buffer = PageBuffer(count: $0 * d) }) { id, blocks in
+        guard let s = byId[id], !twinsHidden.contains(id), (rows.count + 1) * d <= buffer.count else { return }
+        let r = rows.count
+        buffer.withFloats { x in for (c, v) in SoundMap.combine(blocks).enumerated() { x[r * d + c] = v } }
+        rows.append(s)
+    }
+    let k = min(60, rows.count)
+    let (indices, distances) = buffer.withFloats { x in
+        SoundMap.nearestNeighbours(UnsafeBufferPointer(rebasing: x[0 ..< rows.count * d]), n: rows.count, d: d, k: k)
+    }
+    let votes = CategoryVotes.votes(indices: indices, distances: distances, k: k, labels: rows.map(\.catID),
+                                    folders: rows.map { "\($0.libraryId)/\($0.folder)" })
+    let duplicates = Duplicates.nearPairs(ids: rows.map { $0.id! }, durations: rows.map(\.duration), indices: indices,
+                                          distances: distances, k: k)
+    let folders = Dictionary(grouping: guesses, by: \.libraryId).mapValues { Set($0.map(\.folder)) }
+    let byFolder = Dictionary(guesses.map { ("\($0.libraryId)/\($0.folder)", $0) }, uniquingKeysWith: { a, _ in a })
+    let made = SoundCategories.guesses(sounds: rows, votes: votes) { s in
+        guard let f = FolderRules.ruleFolder(for: s.folder, in: folders[s.libraryId] ?? []),
+              let g = byFolder["\(s.libraryId)/\(f)"] else { return [] }
+        return Set(g.alternativeIDs)
+    }
+    struct Guess: Encodable { var guess: Int64; var catID: String; var share: Double?; var replaced: String? }
+    for g in made { try emit(Guess(guess: g.soundId, catID: g.catID, share: g.share, replaced: g.replaced)) }
+    struct Pair: Encodable { var pair: [Int64]; var similarity: Float }
+    for p in duplicates { try emit(Pair(pair: [p.a, p.b], similarity: p.similarity)) }
+    struct Top: Encodable { var vote: Int64; var votes: [CategoryVotes.Vote] }
+    for (r, v) in votes.enumerated() where r % 50 == 0 { try emit(Top(vote: rows[r].id!, votes: v)) }
+    exit(0)
+}
+
+// Each step of a song's tempo and key analysis, for the Rust engine's parity check
+// (engine/parity/compare.py music). For each song whose path comes on stdin: <n>.m44 (mono
+// 44.1 kHz as decoded), <n>.half (after HalfRate), <n>.spect, <n>.beat and <n>.down (the
+// aggregated logits), then one JSON line with the key probabilities and the results. Reads only.
+//   earmark-parity musicsteps <models folder> <work folder> < paths.txt
+if args.count >= 4, args[1] == "musicsteps" {
+    let analyzer = try MusicAnalyzer(folder: URL(fileURLWithPath: args[2]))
+    let work = URL(fileURLWithPath: args[3], isDirectory: true)
+    func save(_ v: [Float], _ name: String) throws {
+        try v.withUnsafeBufferPointer { try Data(buffer: $0).write(to: work.appendingPathComponent(name)) }
+    }
+    struct Row: Encodable {
+        var index: Int; var path: String; var keyProbabilities: [Float]; var beats: [Double]; var downbeats: [Double]
+        var bpm: Double?; var bpmRange: [Double]?; var stability: String; var beatsPerBar: Int?; var confidence: Double
+        var key: MusicKey?; var keyConfidence: Double?; var runnerUp: MusicKey?
+    }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    var index = 0
+    while let path = readLine(), !path.isEmpty {
+        defer { index += 1 }
+        let m44 = try AudioDecoder.mono(url: URL(fileURLWithPath: path), sampleRate: 44_100, maxSeconds: BeatThisAudio.maxSeconds)
+        let half = HalfRate.decimate(m44)
+        try save(m44, "\(index).m44"); try save(half, "\(index).half")
+        let sr = BeatThisAudio.sampleRate
+        let x = half.count > Int(BeatThisAudio.maxSeconds) * sr ? Array(half.prefix(Int(BeatThisAudio.maxSeconds) * sr)) : half
+        guard x.count >= 2 * sr, let peak = x.lazy.map(abs).max(), peak >= 1e-5 else { continue }
+        let spect = BeatThisAudio.spectrogram(x)
+        let frames = BeatThisAudio.frameCount(samples: x.count)
+        let starts = BeatThisAudio.chunkStarts(frames: frames)
+        var beatOut: [[Float]] = [], downOut: [[Float]] = []
+        for start in starts {
+            let (b, d) = try analyzer.logits(BeatThisAudio.chunk(spect, frames: frames, start: start))
+            beatOut.append(b); downOut.append(d)
+        }
+        let beat = BeatThisAudio.aggregate(beatOut, starts: starts, frames: frames)
+        let down = BeatThisAudio.aggregate(downOut, starts: starts, frames: frames)
+        try save(spect, "\(index).spect"); try save(beat, "\(index).beat"); try save(down, "\(index).down")
+        let peaks = BeatTracking.peaks(beatLogits: beat, downbeatLogits: down)
+        let t = BeatTracking.summarize(beats: peaks.beats, downbeats: peaks.downbeats, beatProbability: beat.map(BeatTracking.sigmoid))
+        let probs = try analyzer.keyProbabilities(x.map { $0 / peak })
+        let k = KeyDetection.estimate(probabilities: probs)
+        let row = Row(index: index, path: path, keyProbabilities: probs, beats: t.beats, downbeats: t.downbeats, bpm: t.bpm,
+                      bpmRange: t.bpmRange.map { [$0.lowerBound, $0.upperBound] }, stability: t.stability, beatsPerBar: t.beatsPerBar,
+                      confidence: t.confidence, key: k?.key, keyConfidence: k?.confidence, runnerUp: k?.runnerUp)
+        FileHandle.standardOutput.write(try encoder.encode(row) + Data("\n".utf8))
+    }
+    exit(0)
+}
+
+// Analysis files and timeline files, for the Rust engine's parity check (engine/parity/compare.py).
+//   earmark-parity anafile-export <copy of library.sqlite> <out folder>     one file per library
+//   earmark-parity anafile-import <copy of library.sqlite> <file…>  imports them, says what it added
+//   earmark-parity timeline < cases.json                            each case's file text or failure
+// Numbers in cases.json are text: Foundation's JSONDecoder can be off in the last digit.
+if args.count >= 2, ["anafile-export", "anafile-import", "timeline"].contains(args[1]) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    func emit(_ value: some Encodable) throws { FileHandle.standardOutput.write(try encoder.encode(value) + Data("\n".utf8)) }
+    switch args[1] {
+    case "anafile-export":
+        let db = try LibraryDatabase(path: args[2])
+        for lib in try db.libraries() {
+            try db.writeAnalysisFile(for: lib, includeEmbeddings: true, to: URL(fileURLWithPath: args[3]).appendingPathComponent(AnalysisFile.fileName(for: lib)),
+                                     exportedAt: Date(timeIntervalSince1970: 1_800_000_000))
+        }
+    case "anafile-import":
+        struct Report: Encodable {
+            var sounds, soundsMatched, facts, embeddings, folderCategories, soundCategories, songs, songsMatched, songAnalyses, corrections: Int
+        }
+        let db = try LibraryDatabase(path: args[2])
+        for path in args[3...] {
+            let r = try db.importAnalysis(try AnalysisFile.read(try Data(contentsOf: URL(fileURLWithPath: path))))
+            try emit(Report(sounds: r.sounds, soundsMatched: r.soundsMatched, facts: r.facts, embeddings: r.embeddings,
+                            folderCategories: r.folderCategories, soundCategories: r.soundCategories, songs: r.songs,
+                            songsMatched: r.songsMatched, songAnalyses: r.songAnalyses, corrections: r.corrections))
+        }
+    default:
+        struct RawClip: Decodable {
+            var path: String; var name: String; var length: String; var sampleRate: Int; var channels: Int; var timeReference: Int64
+            var start: String?; var end: String?; var at: String?
+        }
+        struct Case: Decodable { var clips: [RawClip]; var rate: String; var start: String; var name: String }
+        struct Row: Encodable { var xml: String?; var placements: [TimelineFile.Placement]?; var failure: String? }
+        for c in try JSONDecoder().decode([Case].self, from: FileHandle.standardInput.readDataToEndOfFile()) {
+            let clips = c.clips.map {
+                TimelineFile.Clip(path: $0.path, name: $0.name, length: Double($0.length)!, sampleRate: $0.sampleRate, channels: $0.channels,
+                                  timeReference: $0.timeReference, start: $0.start.flatMap(Double.init), end: $0.end.flatMap(Double.init),
+                                  at: $0.at.flatMap(Double.init))
+            }
+            do {
+                let file = try TimelineFile.fcpxml(clips, rate: TimelineFile.Rate.named(c.rate)!, startTimecode: c.start, name: c.name)
+                try emit(Row(xml: file.xml, placements: file.placements, failure: nil))
+            } catch {
+                try emit(Row(xml: nil, placements: nil, failure: error.localizedDescription))
+            }
+        }
+    }
+    exit(0)
+}
+
+// The database, for the Rust engine's parity check (engine/parity/compare.py db). Only ever
+// given copies of Earmark's database.
+//   earmark-parity db-new <path>         a new, empty database
+//   earmark-parity db-ops <path> < ops.json   applies the operations in order
+if args.count >= 3, ["db-new", "db-ops"].contains(args[1]) {
+    let db = try LibraryDatabase(path: args[2])
+    if args[1] == "db-ops" {
+        struct Op: Decodable {
+            var op: String
+            var kind: String?
+            var path: String?
+            var root: String?
+            var scanned: [ScannedSound]?
+            var files: [File]?
+            var file: String?
+            var results: [Result]?
+        }
+        struct File: Decodable {
+            var path: String; var fileSize: Int64; var modified: Double
+            var title: String?; var artist: String?; var album: String?; var duration: Double?
+        }
+        struct Result: Decodable { var songId: Int64; var analysis: SongAnalysis }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let ops = try decoder.decode([Op].self, from: FileHandle.standardInput.readDataToEndOfFile())
+        func library(_ path: String?) throws -> Int64 {
+            guard let lib = try db.libraries().first(where: { $0.path == path }), let id = lib.id else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            return id
+        }
+        for op in ops {
+            switch op.op {
+            case "addLibrary":
+                try db.addLibrary(kind: Library.Kind(rawValue: op.kind!)!, path: op.path!, bookmark: nil)
+            case "removeLibrary":
+                try db.removeLibrary(id: try library(op.path))
+            case "replaceSounds":
+                try db.replaceSounds(libraryId: try library(op.path), root: URL(fileURLWithPath: op.root!), scanned: op.scanned!)
+            case "replaceSongs":
+                try db.replaceSongs(libraryId: try library(op.path), root: URL(fileURLWithPath: op.root!), files: op.files!.map {
+                    SongFile(path: $0.path, fileSize: $0.fileSize, modified: Date(timeIntervalSince1970: $0.modified),
+                             title: $0.title, artist: $0.artist, album: $0.album, duration: $0.duration)
+                })
+            case "applySongAnalysis":
+                print(try db.applySongAnalysis(Phase0MusicImport.read(Data(contentsOf: URL(fileURLWithPath: op.file!)))))
+            case "saveSongAnalysis":
+                print(try db.saveSongAnalysis(op.results!.map { ($0.songId, $0.analysis) }).compactMap(\.id))
+            default:
+                throw CocoaError(.featureUnsupported)
+            }
+        }
+    }
+    exit(0)
+}
+
+// How names sort and capitalise, for the Rust engine's parity (compare.py names).
+//   earmark-parity names < names.txt      the lines in localizedStandardCompare's order, then capitalised
+if args.count >= 2, args[1] == "names" {
+    var names: [String] = []
+    while let line = readLine() { names.append(line) }
+    struct Answer: Encodable { var sorted: [String]; var capitalized: [String] }
+    let answer = Answer(sorted: names.sorted { $0.localizedStandardCompare($1) == .orderedAscending },
+                        capitalized: names.map(\.capitalized))
+    FileHandle.standardOutput.write(try JSONEncoder().encode(answer) + Data("\n".utf8))
+    exit(0)
+}
+
+// The scanner, format twins, music keys and the Phase 0 import, for the Rust engine's parity
+// check (engine/parity/compare.py). Reads only.
+//   earmark-parity scan <folder>          one JSON line per audio file
+//   earmark-parity twins <library.sqlite> the sounds and their format twins (read-only)
+//   earmark-parity keys < texts.txt       each text parsed as a key
+//   earmark-parity phase0 <music_analysis.json>
+if args.count >= 2, ["scan", "twins", "keys", "phase0"].contains(args[1]) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    func emit(_ value: some Encodable) throws { FileHandle.standardOutput.write(try encoder.encode(value) + Data("\n".utf8)) }
+    struct Key: Encodable {
+        var key: MusicKey; var name: String; var shortName: String; var camelot: String; var relative: MusicKey; var mixesWith: [MusicKey]
+        init(_ k: MusicKey) {
+            key = k; name = k.name; shortName = k.shortName; camelot = k.camelot; relative = k.relative; mixesWith = k.mixesWith
+        }
+    }
+    switch args[1] {
+    case "scan":
+        struct Row: Encodable {
+            var path: String; var fileSize: Int64; var modified: Double; var fingerprint: String?
+            var technical: AudioTechnical; var metadata: NormalizedMetadata; var warnings: [String]
+        }
+        for s in await LibraryScanner().scan(root: URL(fileURLWithPath: args[2])) {
+            try emit(Row(path: s.path, fileSize: s.fileSize, modified: s.modified.timeIntervalSince1970, fingerprint: s.fingerprint,
+                         technical: s.technical, metadata: s.metadata, warnings: s.warnings))
+        }
+    case "twins":
+        struct Candidate: Encodable {
+            var id: Int64; var libraryId: Int64; var fileName: String; var folder: String; var path: String
+            var duration: Double?; var sampleRate: Double?; var bitsPerSample: Int?
+        }
+        struct Out: Encodable { var sounds: [Candidate]; var alternates: [String: [Int64]]; var hidden: [Int64] }
+        let sounds = try LibraryDatabase(path: args[2], readOnly: true).sounds()
+        let groups = FormatTwins.group(sounds)
+        try emit(Out(sounds: sounds.map { Candidate(id: $0.id!, libraryId: $0.libraryId, fileName: $0.fileName, folder: $0.folder,
+                                                    path: $0.path, duration: $0.duration, sampleRate: $0.sampleRate,
+                                                    bitsPerSample: $0.bitsPerSample) },
+                     alternates: Dictionary(uniqueKeysWithValues: groups.alternates.map { ("\($0.key)", $0.value) }),
+                     hidden: groups.hidden.sorted()))
+    case "keys":
+        struct Row: Encodable { var text: String; var parsed: Key? }
+        while let text = readLine() { try emit(Row(text: text, parsed: MusicKey(parsing: text).map(Key.init))) }
+        for k in MusicKey.all { try emit(Row(text: "all", parsed: Key(k))) }
+    default:
+        struct Row: Encodable {
+            var path: String?; var fileName: String; var size: Int64?; var title: String?; var artist: String?; var analysis: SongAnalysis
+        }
+        for e in try Phase0MusicImport.read(Data(contentsOf: URL(fileURLWithPath: args[2]))) {
+            try emit(Row(path: e.path, fileName: e.fileName, size: e.size, title: e.title, artist: e.artist, analysis: e.analysis))
+        }
+    }
+    exit(0)
+}
 
 // Folder suggestions, checked on folders that already have UCS categories:
 //   earmark-parity folders <copy of library.sqlite>
@@ -186,9 +606,13 @@ if args.count >= 4, args[1] == "map" {
         guard let id = s.id, peav[id] != nil, clap[id] != nil else { return false }
         return category == nil || s.category == category
     }.sorted { $0.id! < $1.id! }
-    let vectors = sounds.map { SoundMap.combine([peav[$0.id!]!, clap[$0.id!]!]) }
+    // In a PageBuffer, as the app's: Accelerate's sums depend on where the matrix sits.
+    let flat = PageBuffer(count: sounds.count * 1536)
+    flat.withFloats { f in
+        for (i, s) in sounds.enumerated() { for (c, v) in SoundMap.combine([peav[s.id!]!, clap[s.id!]!]).enumerated() { f[i * 1536 + c] = v } }
+    }
     let t = Date()
-    let map = SoundMap.layout(vectors)!
+    let map = flat.withFloats { SoundMap.layout(flat: UnsafeBufferPointer($0), count: sounds.count, dimensions: 1536) }!
     let seconds = Date().timeIntervalSince(t)
     print(String(format: "%d sounds%@: layout in %.1f s", sounds.count, category.map { " in \($0)" } ?? "", seconds))
     struct Out: Encodable { var ids: [Int64]; var x: [Float]; var y: [Float]; var seconds: Double }

@@ -37,6 +37,26 @@ Read `CLAUDE.md` and `docs/PLAN.md` first; this file says where the work stopped
 The repository was renamed sound-library → earmark-sound-library on 2026-10-28 (the old
 address redirects). The local folder is still `~/Documents/sound-library`.
 
+**2026-10-29: the `alpha2` branch** (from `main`/`phase1` at 07ed061) is where the second
+alpha is built. The owner approved, in their words: implement FCPXML and "start porting it to
+Rust so we can have new Mac version and the Windows version". On it so far:
+- Timeline files (`docs/timeline-file-plan.md`): `EarmarkCore/TimelineFile.swift`,
+  File ▸ Save as Timeline File… (⇧⌘T, `Earmark/TimelineFileExport.swift`) and the MCP tool
+  `save_timeline_file` (writes to `~/Movies/Earmark`). Checked in Resolve Studio 21
+  (`docs/timeline-file-plan.md`, Results): cuts match ⌘T's after rounding BWF starts to
+  frames.
+- The Rust engine (`docs/rust-engine-plan.md`): `engine/`, a Cargo workspace. Steps 1 (UCS,
+  CSV, metadata reading and normalising) 2 (scanning, fingerprints, format twins, music
+  keys, Phase 0 import) 3 (the database, `earmark-db`) 4 (analysis maths:
+  loudness, model inputs, similarity, duplicates, the sound map, groups, folder rules and
+  suggestions, category votes, song corrections, the music maths), 5 (analysis files and
+  timeline files) and 6 (the Resolve bridge, `earmark-resolve`, and the MCP server,
+  `earmark-mcp`, with the catalog in `earmark_db::catalog`) are ported,
+  matching Swift on the owner's library (see the plan for what that took). `engine/parity/compare.py`
+  compares it with the Swift code on real data (read-only), one mode per piece; `.github/workflows/engine.yml`
+  tests it on macOS, Windows and Linux. Cargo comes from Homebrew's rustup
+  (`/opt/homebrew/opt/rustup/bin`, not on the shell's PATH).
+
 ## Where the code is
 
 - `main`: Phase 0 (Python tools in `phase0/`, CI in `.github/workflows/checks.yml` and
