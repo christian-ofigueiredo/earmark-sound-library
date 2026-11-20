@@ -8,7 +8,9 @@ use earmark_core::metadata::AudioTechnical;
 use earmark_core::scan;
 use earmark_core::ucs::UcsCatalog;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::UNIX_EPOCH;
 
 uniffi::setup_scaffolding!();
 
@@ -74,6 +76,83 @@ pub fn scan_sounds(root: String, parallelism: u32, listener: Arc<dyn ScanListene
         })
         .collect();
     serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
+}
+
+/// A song's tags and length, as the app's reader (AVFoundation) finds them.
+#[derive(uniffi::Record, Default)]
+pub struct SongTags {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration: Option<f64>,
+}
+
+/// A song file as found on disk (never changed), with its tags. `modified_seconds` and
+/// `modified_nanos` are the file system's time since 1970, absent when unknown.
+#[derive(uniffi::Record)]
+pub struct FoundSong {
+    pub path: String,
+    pub file_size: i64,
+    pub modified_seconds: Option<i64>,
+    pub modified_nanos: Option<u32>,
+    pub tags: SongTags,
+}
+
+/// What the app gives a music scan: progress as files complete, and its reader for tags.
+#[uniffi::export(with_foreign)]
+pub trait SongListener: Send + Sync {
+    fn progress(&self, done: u64, total: u64);
+    fn tags(&self, path: String) -> SongTags;
+}
+
+/// Reads every song under `root` on `parallelism` threads, as the app's music reader does:
+/// the same files in the same order (by path), with size and date from the file system and
+/// tags from `listener`. Never writes.
+#[uniffi::export]
+pub fn read_songs(
+    root: String,
+    parallelism: u32,
+    listener: Arc<dyn SongListener>,
+) -> Vec<FoundSong> {
+    let files = scan::list_audio_files(Path::new(&root));
+    let next = AtomicUsize::new(0);
+    let found = Mutex::new(Vec::with_capacity(files.len()));
+    std::thread::scope(|s| {
+        for _ in 0..(parallelism.max(1) as usize).min(files.len().max(1)) {
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(path) = files.get(i) else { break };
+                    let song = song_file(path, listener.as_ref());
+                    let done = {
+                        let mut found = found.lock().unwrap();
+                        found.push(song);
+                        found.len()
+                    };
+                    listener.progress(done as u64, files.len() as u64);
+                }
+            });
+        }
+    });
+    let mut out = found.into_inner().unwrap();
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out
+}
+
+fn song_file(path: &Path, listener: &dyn SongListener) -> FoundSong {
+    let meta = std::fs::metadata(path).ok();
+    let since_1970 = meta
+        .as_ref()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok());
+    let path = path.to_string_lossy().into_owned();
+    FoundSong {
+        file_size: meta.map_or(0, |m| m.len() as i64),
+        modified_seconds: since_1970.map(|d| d.as_secs() as i64),
+        modified_nanos: since_1970.map(|d| d.subsec_nanos()),
+        tags: listener.tags(path.clone()),
+        path,
+    }
 }
 
 /// The engine's version, so the app can say which engine it runs.

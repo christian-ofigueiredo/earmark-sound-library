@@ -222,7 +222,13 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
        itself is a link. The engine now does the same on the Mac (`scan::walked_root`);
        elsewhere it keeps the path as given. The new Swift tests
        (`EarmarkEngineTests`) found this; the owner's library, on a plain path, couldn't.
-     - Music folders still go through Swift (`MusicFiles`), and so does everything else.
+   - **8b, music folders (2026-11-20):** the engine lists a music folder's songs with their size
+     and date (`read_songs`), and the app's AVFoundation reader (`MusicFiles.songFile`, now in
+     `EarmarkML`) gives title, artist, album and length, as for sound files' MP3 lengths. On
+     the owner's music folder (814 songs) `earmark-parity enginemusic` finds the two readings
+     identical. The engine has no tag reader of its own yet; Windows and Linux will need one
+     (Symphonia reads ID3, MP4 and Vorbis tags) before step 9.
+   - Everything else still goes through Swift.
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
 

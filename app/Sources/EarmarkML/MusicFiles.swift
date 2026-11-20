@@ -3,8 +3,8 @@ import EarmarkCore
 
 /// Lists songs in a folder with their tags (title, artist, album, length).
 /// Files are opened read-only through AVFoundation.
-enum MusicFiles {
-    static func read(root: URL, parallelism: Int = 8,
+public enum MusicFiles {
+    public static func read(root: URL, parallelism: Int = 8,
                      progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) async -> [SongFile] {
         let urls = AudioFiles.list(in: root)
         var out: [SongFile] = []
@@ -29,7 +29,7 @@ enum MusicFiles {
         return out.sorted { $0.path < $1.path }
     }
 
-    static func songFile(_ url: URL) async -> SongFile {
+    public static func songFile(_ url: URL) async -> SongFile {
         let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
         var file = SongFile(path: url.path, fileSize: Int64(values?.fileSize ?? 0),
                             modified: values?.contentModificationDate ?? .distantPast)
@@ -54,8 +54,8 @@ enum MusicFiles {
 
 /// Length and format of compressed sound effects (MP3, AAC, FLAC…), which
 /// EarmarkCore's header reader skips. Opens the file read-only.
-enum SoundFiles {
-    static let technical: TechnicalReader = { url in
+public enum SoundFiles {
+    public static let technical: TechnicalReader = { url in
         guard let file = try? AVAudioFile(forReading: url) else { return nil }
         let format = file.fileFormat
         let rate = format.sampleRate

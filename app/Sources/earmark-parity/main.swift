@@ -70,6 +70,26 @@ if args.count >= 3, args[1] == "enginescan" {
     exit(swift.count == rust.count && differ == 0 ? 0 : 1)
 }
 
+// The app's music scan through the Rust engine (EngineMusicReader) against Swift's MusicFiles,
+// both with the app's AVFoundation tags. Only reads.
+//   earmark-parity enginemusic <folder>
+if args.count >= 3, args[1] == "enginemusic" {
+    let root = URL(fileURLWithPath: args[2])
+    var clock = ContinuousClock.now
+    let swift = await MusicFiles.read(root: root)
+    let swiftTime = ContinuousClock.now - clock
+    clock = ContinuousClock.now
+    let rust = await EngineMusicReader(tags: MusicFiles.songFile).read(root: root)
+    let rustTime = ContinuousClock.now - clock
+    var differ = 0
+    for (a, b) in zip(swift, rust) where a != b {
+        differ += 1
+        if differ <= 5 { print("differs:\n   \(a)\n   \(b)") }
+    }
+    print("engine \(Engine.version): \(swift.count) songs in Swift (\(swiftTime)), \(rust.count) through the engine (\(rustTime)); \(differ) differ")
+    exit(swift.count == rust.count && differ == 0 ? 0 : 1)
+}
+
 if args.count >= 2, args[1] == "metadata" {
     struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
     let encoder = JSONEncoder()

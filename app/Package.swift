@@ -26,7 +26,7 @@ targets.append(.target(name: "EarmarkEngine", dependencies: ["EarmarkCore", "Ear
                        swiftSettings: [.swiftLanguageMode(.v5)],
                        linkerSettings: [.linkedFramework("Accelerate")]))
 targets.append(.executableTarget(name: "Earmark", dependencies: ["EarmarkCore", "EarmarkML", "EarmarkEngine"]))
-targets.append(.testTarget(name: "EarmarkEngineTests", dependencies: ["EarmarkEngine", "EarmarkCore"]))
+targets.append(.testTarget(name: "EarmarkEngineTests", dependencies: ["EarmarkEngine", "EarmarkCore", "EarmarkML"]))
 products.append(.executable(name: "Earmark", targets: ["Earmark"]))
 // Checks the app's CLAP pipeline against Phase 0 (see models/parity_clap.py).
 targets.append(.executableTarget(name: "earmark-parity", dependencies: ["EarmarkCore", "EarmarkML", "EarmarkEngine"]))

@@ -40,16 +40,9 @@ public struct EngineScanner: Sendable {
             var technical: AudioTechnical; var metadata: NormalizedMetadata; var warnings: [String]
         }
         guard let rows = try? JSONDecoder().decode([Row].self, from: Data(json.utf8)) else { return [] }
-        // As Foundation makes a file's date from the file system's seconds and nanoseconds
-        // (CFURL: seconds - kCFAbsoluteTimeIntervalSince1970 + 1e-9 × nanoseconds), so dates are
-        // identical to LibraryScanner's to the bit. An unknown date is the distant past, as there.
-        func date(_ seconds: Int64?, _ nanos: Int64?) -> Date {
-            guard let seconds, let nanos else { return .distantPast }
-            return Date(timeIntervalSinceReferenceDate: Double(seconds) - 978_307_200.0 + 1.0e-9 * Double(nanos))
-        }
         return rows.map {
             ScannedSound(path: $0.path, fileSize: $0.fileSize,
-                         modified: date($0.modifiedSeconds, $0.modifiedNanos),
+                         modified: EngineDate.make($0.modifiedSeconds, $0.modifiedNanos),
                          fingerprint: $0.fingerprint, technical: $0.technical, metadata: $0.metadata,
                          warnings: $0.warnings)
         }

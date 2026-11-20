@@ -455,7 +455,9 @@ final class AppModel {
                     try await Task.detached { try db.replaceSounds(libraryId: id, root: root, scanned: found) }.value
                 }
             case .music:
-                let found = await MusicFiles.read(root: root, progress: report)
+                let found = Engine.isOn
+                    ? await EngineMusicReader(tags: MusicFiles.songFile).read(root: root, progress: report)
+                    : await MusicFiles.read(root: root, progress: report)
                 if confirmScanResult(found.count, known: known, library: library) {
                     try await Task.detached { try db.replaceSongs(libraryId: id, root: root, files: found) }.value
                 }
