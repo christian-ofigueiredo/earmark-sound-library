@@ -1,0 +1,16 @@
+[package]
+name = "earmark-models"
+description = "Runs Earmark's models through ONNX Runtime, on the systems without Core ML"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+earmark-audio.workspace = true
+earmark-core.workspace = true
+ort.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+ort = { workspace = true, features = ["directml"] }

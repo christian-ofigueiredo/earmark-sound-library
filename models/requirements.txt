@@ -6,6 +6,9 @@ coremltools
 numpy
 soundfile
 soxr
+# ONNX, for Windows (convert_onnx.py, make_onnx_fixtures.py)
+onnx
+onnxruntime
 # Tempo and key (convert_music.py, parity_music.py), the versions Phase 0 used
 beat-this==1.1.0
 einops>=0.8
