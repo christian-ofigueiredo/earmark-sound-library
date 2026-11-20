@@ -2,9 +2,9 @@ name: App
 
 on:
   push:
-    paths: ["app/**", ".github/workflows/app.yml"]
+    paths: ["app/**", "engine/**", "scripts/build-engine.sh", ".github/workflows/app.yml"]
   pull_request:
-    paths: ["app/**", ".github/workflows/app.yml"]
+    paths: ["app/**", "engine/**", "scripts/build-engine.sh", ".github/workflows/app.yml"]
   workflow_dispatch:
 
 permissions:
@@ -36,6 +36,18 @@ jobs:
           # The build folder holds absolute paths (Clang's module cache), so the key names the
           # repository: after the rename, the old cache broke the build.
           key: spm-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('app/Package.resolved') }}
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal && rustc --version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            engine/target
+          key: engine-ffi-${{ runner.os }}-${{ hashFiles('engine/Cargo.lock') }}
+      - name: Build the engine for the app
+        working-directory: .
+        run: scripts/build-engine.sh
       - name: Build (app and core)
         run: swift build
       - name: Test (core)

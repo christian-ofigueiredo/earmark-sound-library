@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreML
 import EarmarkCore
+import EarmarkEngine
 import EarmarkML
 import Foundation
 
@@ -34,6 +35,41 @@ var args = CommandLine.arguments
 // What Swift reads from each file whose path comes on stdin, as JSON lines, for the Rust engine's
 // parity check (engine/parity/compare.py). Reads the files only.
 //   earmark-parity metadata < paths.txt
+// The app's scan through the Rust engine (EngineScanner) against Swift's LibraryScanner, in one
+// process and with the app's AVFoundation reader for MP3/AAC lengths. Only reads.
+//   earmark-parity enginescan <folder>
+if args.count >= 3, args[1] == "enginescan" {
+    let technical: TechnicalReader = { url in
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        let rate = file.fileFormat.sampleRate
+        return AudioTechnical(sampleRate: rate > 0 ? rate : nil, channels: Int(file.fileFormat.channelCount), bitsPerSample: nil,
+                              duration: rate > 0 && file.length > 0 ? Double(file.length) / rate : nil)
+    }
+    let root = URL(fileURLWithPath: args[2])
+    var clock = ContinuousClock.now
+    let swift = await LibraryScanner(fallback: technical).scan(root: root)
+    let swiftTime = ContinuousClock.now - clock
+    clock = ContinuousClock.now
+    let rust = await EngineScanner(fallback: technical).scan(root: root)
+    let rustTime = ContinuousClock.now - clock
+    var differ = 0
+    for (a, b) in zip(swift, rust) where a != b {
+        differ += 1
+        if differ <= 5 {
+            print("differs: \(a.path)")
+            if a.path != b.path { print("   path \(b.path)") }
+            if a.fileSize != b.fileSize { print("   size \(a.fileSize) / \(b.fileSize)") }
+            if a.modified != b.modified { print("   modified \(a.modified.timeIntervalSince1970) / \(b.modified.timeIntervalSince1970)") }
+            if a.fingerprint != b.fingerprint { print("   fingerprint") }
+            if a.technical != b.technical { print("   technical \(a.technical) / \(b.technical)") }
+            if a.metadata != b.metadata { print("   metadata") }
+            if a.warnings != b.warnings { print("   warnings \(a.warnings) / \(b.warnings)") }
+        }
+    }
+    print("engine \(Engine.version): \(swift.count) files in Swift (\(swiftTime)), \(rust.count) through the engine (\(rustTime)); \(differ) differ")
+    exit(swift.count == rust.count && differ == 0 ? 0 : 1)
+}
+
 if args.count >= 2, args[1] == "metadata" {
     struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
     let encoder = JSONEncoder()

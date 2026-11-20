@@ -1,5 +1,6 @@
 import AppKit
 import EarmarkCore
+import EarmarkEngine
 import EarmarkML
 import Observation
 import SwiftUI
@@ -446,7 +447,10 @@ final class AppModel {
         do {
             switch library.kind {
             case .sounds:
-                let found = await LibraryScanner(fallback: SoundFiles.technical).scan(root: root, progress: report)
+                // The Rust engine reads the folder unless the owner turned it off (Engine.isOn).
+                let found = Engine.isOn
+                    ? await EngineScanner(fallback: SoundFiles.technical).scan(root: root, progress: report)
+                    : await LibraryScanner(fallback: SoundFiles.technical).scan(root: root, progress: report)
                 if confirmScanResult(found.count, known: known, library: library) {
                     try await Task.detached { try db.replaceSounds(libraryId: id, root: root, scanned: found) }.value
                 }

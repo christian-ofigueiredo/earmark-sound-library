@@ -48,6 +48,7 @@ fn library(root: &Path) -> (LibraryDatabase, HashMap<String, i64>) {
             path: file.to_string_lossy().into_owned(),
             file_size: 1,
             modified: 1_700_000_000.0,
+            modified_parts: None,
             fingerprint: Some(fingerprint.to_string()),
             technical: AudioTechnical {
                 sample_rate: Some(48000.0),

@@ -45,7 +45,8 @@ fn is_hidden(path: &Path, meta: &std::fs::Metadata) -> bool {
 }
 
 /// Every audio file under `root`, skipping hidden files and folders (and so macOS's "._name"
-/// files) and package contents, without following symbolic links. Sorted by path.
+/// files) and package contents, without following symbolic links. Sorted by path. On the Mac the
+/// paths start from the folder's real path, as Swift's (see `walked_root`).
 pub fn list_audio_files(root: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -69,9 +70,23 @@ pub fn list_audio_files(root: &Path) -> Vec<PathBuf> {
         }
     }
     let mut out = Vec::new();
-    walk(root, &mut out);
+    walk(&walked_root(root), &mut out);
     out.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
     out
+}
+
+/// Where the walk starts. On the Mac, as Foundation's enumerator: the real path, with links in
+/// the folders above resolved and names spelled as on disk ("soundfx" as "SoundFX", "é" as the
+/// disk stores it), and nothing at all when the folder itself is a link. Elsewhere, as given.
+fn walked_root(root: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        match std::fs::symlink_metadata(root) {
+            Ok(meta) if meta.file_type().is_symlink() => PathBuf::new(),
+            _ => std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()),
+        }
+    } else {
+        root.to_path_buf()
+    }
 }
 
 /// Folders macOS shows as one file (FileManager's `.skipsPackageDescendants`).
@@ -126,6 +141,10 @@ pub struct ScannedSound {
     pub file_size: i64,
     /// Last modified, in seconds since 1970 (0 when unknown).
     pub modified: f64,
+    /// The same time as the file system gives it, whole seconds and nanoseconds since 1970,
+    /// so the Mac app can make its date exactly as Foundation does. Not in the JSON.
+    #[serde(skip)]
+    pub modified_parts: Option<(i64, u32)>,
     pub fingerprint: Option<String>,
     pub technical: AudioTechnical,
     pub metadata: NormalizedMetadata,
@@ -147,15 +166,16 @@ pub fn inspect(
     {
         raw.technical = tech;
     }
-    let modified = meta
+    let since_1970 = meta
         .as_ref()
         .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map_or(0.0, |d| d.as_secs_f64());
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok());
+    let modified = since_1970.map_or(0.0, |d| d.as_secs_f64());
     ScannedSound {
         path: path.to_string_lossy().into_owned(),
         file_size: meta.map_or(0, |m| m.len() as i64),
         modified,
+        modified_parts: since_1970.map(|d| (d.as_secs() as i64, d.subsec_nanos())),
         fingerprint: fingerprint(path),
         metadata: normalize(&raw, path, catalog),
         technical: raw.technical,

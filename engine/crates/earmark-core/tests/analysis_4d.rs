@@ -19,6 +19,7 @@ fn record(path: &str, details: Option<&str>) -> SoundRecord {
         path: path.into(),
         file_size: 1,
         modified: 0.0,
+        modified_parts: None,
         fingerprint: None,
         technical: AudioTechnical::default(),
         metadata: NormalizedMetadata::default(),

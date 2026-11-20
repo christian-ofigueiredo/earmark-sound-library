@@ -1,0 +1,17 @@
+[package]
+name = "earmark-ffi"
+description = "The engine as the Mac app calls it: Swift bindings made by UniFFI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+# staticlib goes into the app; cdylib is only read by uniffi-bindgen for the bindings.
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[dependencies]
+earmark-core.workspace = true
+serde_json.workspace = true
+uniffi.workspace = true
