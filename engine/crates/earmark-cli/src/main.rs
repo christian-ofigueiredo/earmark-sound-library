@@ -109,6 +109,47 @@ fn main() {
                 emit(json!(format!("{line} {}", earmark_db::dates::format(t))));
             }
         }
+        (Some("embed"), Some(db)) => {
+            let (models, model, work) =
+                (Path::new(&args[3]), args[4].as_str(), Path::new(&args[5]));
+            let rows: Vec<Value> = stdin_lines()
+                .iter()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            for row in embed_rows(Path::new(db), models, model, work, &rows) {
+                emit(row);
+            }
+        }
+        (Some("tempo"), Some(models)) => {
+            let analyzer = earmark_models::MusicAnalyzer::open(
+                Path::new(models),
+                earmark_models::Compute::Cpu,
+            )
+            .unwrap();
+            for path in stdin_lines() {
+                let started = std::time::Instant::now();
+                let answer = earmark_models::MusicAnalyzer::decode(Path::new(&path))
+                    .and_then(|audio| analyzer.analyse(&audio, &|| false));
+                let seconds = started.elapsed().as_secs_f64();
+                emit(match answer {
+                    Ok(Some(r)) => json!({
+                        "path": path, "bpm": r.tempo.bpm, "bpmRange": r.tempo.bpm_range,
+                        "stability": r.tempo.stability, "beatsPerBar": r.tempo.beats_per_bar,
+                        "key": r.key.as_ref().map(|k| k.key), "keyConfidence": r.key.as_ref().map(|k| k.confidence),
+                        "audioSeconds": r.seconds, "seconds": seconds}),
+                    Ok(None) => json!({"path": path, "none": true}),
+                    Err(e) => json!({"path": path, "error": e.to_string()}),
+                });
+            }
+        }
+        (Some("decode"), Some(work)) => {
+            for line in stdin_lines() {
+                emit(decode_row(
+                    Path::new(work),
+                    &serde_json::from_str(&line).unwrap(),
+                ));
+            }
+        }
         (Some("audio"), Some(work)) => {
             for line in stdin_lines() {
                 emit(audio_row(
@@ -320,6 +361,214 @@ fn db_ops(path: &Path) {
             other => panic!("unknown operation {other}"),
         }
     }
+}
+
+/// The lag of `b` against `a` where they line up best, over the loudest part of `a`.
+fn best_lag(a: &[f32], b: &[f32], range: i64) -> i64 {
+    const SPAN: usize = 8192;
+    if a.len() < SPAN || b.len() < SPAN {
+        return 0;
+    }
+    let start = (0..(a.len() - SPAN) / 4096 + 1)
+        .map(|k| k * 4096)
+        .max_by(|&x, &y| {
+            let energy = |s: usize| a[s..s + SPAN].iter().map(|v| v * v).sum::<f32>();
+            energy(x).total_cmp(&energy(y))
+        })
+        .unwrap();
+    let mut best = (f64::MIN, 0);
+    for lag in -range..=range {
+        let from = start as i64 + lag;
+        if from < 0 || from as usize + SPAN > b.len() {
+            continue;
+        }
+        let other = &b[from as usize..from as usize + SPAN];
+        let score: f64 = a[start..start + SPAN]
+            .iter()
+            .zip(other)
+            .map(|(x, y)| f64::from(*x) * f64::from(*y))
+            .sum();
+        if score > best.0 {
+            best = (score, lag);
+        }
+    }
+    best.1
+}
+
+/// How close `b` is to `a` at that lag: signal to difference in dB, and the largest difference.
+fn closeness(a: &[f32], b: &[f32], lag: i64) -> (Option<f64>, f64) {
+    let (mut signal, mut noise, mut worst) = (0f64, 0f64, 0f64);
+    for (i, x) in a.iter().enumerate() {
+        let j = i as i64 + lag;
+        if j < 0 || j as usize >= b.len() {
+            continue;
+        }
+        let d = f64::from(*x) - f64::from(b[j as usize]);
+        signal += f64::from(*x) * f64::from(*x);
+        noise += d * d;
+        worst = worst.max(d.abs());
+    }
+    let snr = if noise == 0.0 {
+        None
+    } else {
+        Some(10.0 * (signal.max(1e-30) / noise).log10())
+    };
+    (snr, worst)
+}
+
+/// The five nearest of `vectors` (id, unit vector) to `v`, leaving out `id`.
+fn nearest_five(vectors: &[(i64, Vec<f32>)], v: &[f32], id: i64) -> Vec<i64> {
+    let mut scored: Vec<(f32, i64)> = vectors
+        .iter()
+        .filter(|(other, _)| *other != id)
+        .map(|(other, x)| (x.iter().zip(v).map(|(a, b)| a * b).sum(), *other))
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    scored.truncate(5);
+    scored.into_iter().map(|s| s.1).collect()
+}
+
+fn cosine(a: &[f32], b: &[f32]) -> f64 {
+    let dot: f64 = a
+        .iter()
+        .zip(b)
+        .map(|(x, y)| f64::from(*x) * f64::from(*y))
+        .sum();
+    let norm = |v: &[f32]| {
+        v.iter()
+            .map(|x| f64::from(*x) * f64::from(*x))
+            .sum::<f64>()
+            .sqrt()
+    };
+    dot / (norm(a) * norm(b)).max(1e-12)
+}
+
+/// Each sound's vector through ONNX, from the audio Swift decoded and from Symphonia's, against
+/// the one Core ML made (in the database): their cosines and how many of the five nearest stay.
+fn embed_rows(db: &Path, models: &Path, model: &str, work: &Path, rows: &[Value]) -> Vec<Value> {
+    use earmark_core::analysis::audio;
+    use earmark_models::{ClapEmbedder, Compute, FileResult, PeavEmbedder};
+    let db = LibraryDatabase::open(Some(db), true).unwrap();
+    let name = if model == "clap" {
+        "clap-general"
+    } else {
+        "pe-av-large"
+    };
+    let vectors = db.vectors(name).unwrap();
+    let stored: std::collections::HashMap<i64, &Vec<f32>> =
+        vectors.iter().map(|(id, v)| (*id, v)).collect();
+    let decoded: Vec<(Vec<f32>, Vec<f32>)> = rows
+        .iter()
+        .map(|r| {
+            let swift = floats(&work.join(format!("{}.mono", r["index"].as_u64().unwrap())));
+            let rust = earmark_audio::mono(
+                Path::new(r["path"].as_str().unwrap()),
+                48_000,
+                audio::MAX_SECONDS,
+            )
+            .unwrap_or_default();
+            (swift, rust)
+        })
+        .collect();
+    let started = std::time::Instant::now();
+    let mut windows_run = 0usize;
+    type Vector = Option<Vec<f32>>;
+    let results: Vec<(Vector, Vector)> = if model == "clap" {
+        let clap = ClapEmbedder::open(&models.join("CLAPAudio.onnx")).unwrap();
+        decoded
+            .iter()
+            .map(|(swift, rust)| {
+                windows_run += 2;
+                (clap.embed(swift).unwrap(), clap.embed(rust).unwrap())
+            })
+            .collect()
+    } else {
+        let peav = PeavEmbedder::new(models.join("PEAV"), Compute::Cpu).unwrap();
+        let mut batch: Vec<Vec<Vec<f32>>> = Vec::new();
+        for (swift, rust) in &decoded {
+            batch.push(PeavEmbedder::windows(swift));
+            batch.push(PeavEmbedder::windows(rust));
+        }
+        windows_run = batch.iter().map(Vec::len).sum();
+        let out = peav.embed(&batch, &|| false).unwrap().unwrap();
+        let vector = |r: &FileResult| match r {
+            FileResult::Vector(v) => Some(v.clone()),
+            _ => None,
+        };
+        out.chunks(2)
+            .map(|c| (vector(&c[0]), vector(&c[1])))
+            .collect()
+    };
+    let seconds = started.elapsed().as_secs_f64();
+    rows.iter()
+        .zip(results)
+        .map(|(r, (swift, rust))| {
+            let id = r["id"].as_i64().unwrap();
+            let Some(reference) = stored.get(&id) else {
+                return json!({"id": id, "path": r["path"], "noReference": true});
+            };
+            let kept = |v: &Option<Vec<f32>>| {
+                v.as_ref().map(|v| {
+                    let a = nearest_five(&vectors, reference, id);
+                    let b = nearest_five(&vectors, v, id);
+                    a.iter().filter(|x| b.contains(x)).count()
+                })
+            };
+            json!({"id": id, "path": r["path"],
+                   "swiftAudio": swift.as_ref().map(|v| cosine(reference, v)), "swiftKept": kept(&swift),
+                   "rustAudio": rust.as_ref().map(|v| cosine(reference, v)), "rustKept": kept(&rust),
+                   "batchSeconds": seconds, "batchWindows": windows_run})
+        })
+        .collect()
+}
+
+/// The lag (no lag, unless another is really closer) and how close they are there.
+fn aligned(a: &[f32], b: &[f32]) -> (i64, Option<f64>, f64) {
+    let (snr, worst) = closeness(a, b, 0);
+    let lag = best_lag(a, b, 3000);
+    if lag != 0 {
+        let (other, other_worst) = closeness(a, b, lag);
+        if other.unwrap_or(f64::MAX) > snr.unwrap_or(f64::MAX) + 3.0 {
+            return (lag, other, other_worst);
+        }
+    }
+    (0, snr, worst)
+}
+
+/// A file decoded here against Swift's <n>.pcm and <n>.mono (`earmark-parity audio`).
+fn decode_row(work: &Path, swift: &Value) -> Value {
+    let index = swift["index"].as_u64().unwrap();
+    let path = swift["path"].as_str().unwrap();
+    let floats = |name: String| floats(&work.join(name));
+    let file = Path::new(path);
+    let started = std::time::Instant::now();
+    let decoded = match earmark_audio::Reader::open(file).and_then(|r| r.read_all()) {
+        Ok(d) => d,
+        Err(e) => return json!({"path": path, "error": e.to_string()}),
+    };
+    let seconds = started.elapsed().as_secs_f64();
+    let channels = swift["channels"].as_u64().unwrap() as usize;
+    let frames = swift["frames"].as_u64().unwrap() as usize;
+    let pcm = floats(format!("{index}.pcm"));
+    let mut planar = vec![0f32; decoded.samples.len()];
+    let n = decoded.samples.len() / decoded.channels.max(1);
+    for f in 0..n {
+        for c in 0..decoded.channels {
+            planar[c * n + f] = decoded.samples[f * decoded.channels + c];
+        }
+    }
+    let first = |x: &[f32], frames: usize| x[..frames.min(x.len())].to_vec();
+    let (lag, pcm_snr, pcm_worst) = aligned(&first(&pcm, frames), &first(&planar, n));
+    let mono_swift = floats(format!("{index}.mono"));
+    let started = std::time::Instant::now();
+    let mono = earmark_audio::mono(file, 48000, 600.0).unwrap_or_default();
+    let mono_seconds = started.elapsed().as_secs_f64();
+    let (mono_lag, mono_snr, mono_worst) = aligned(&mono_swift, &mono);
+    json!({"path": path, "rate": swift["rate"], "rustRate": decoded.sample_rate,
+           "channels": channels, "rustChannels": decoded.channels, "frames": frames, "rustFrames": n,
+           "lag": lag, "snr": pcm_snr, "worst": pcm_worst, "decodeSeconds": seconds,
+           "monoFrames": mono_swift.len(), "rustMonoFrames": mono.len(), "monoLag": mono_lag,
+           "monoSnr": mono_snr, "monoWorst": mono_worst, "monoSeconds": mono_seconds})
 }
 
 fn twin(s: &earmark_db::SoundRecord) -> TwinCandidate {

@@ -15,6 +15,9 @@
     python3 engine/parity/compare.py timeline <library.sqlite>
     python3 engine/parity/compare.py anafiles <library.sqlite>
     python3 engine/parity/compare.py db <library.sqlite> <sounds folder> <music folder> <music_analysis.json>
+    python3 engine/parity/compare.py decode <library.sqlite> [--count N]
+    python3 engine/parity/compare.py embed <library.sqlite> <onnx folder> clap|peav [--count N]
+    python3 engine/parity/compare.py tempo <library.sqlite> <onnx folder> [--count N]
     python3 engine/parity/compare.py names <library.sqlite> [--count N]
     python3 engine/parity/compare.py mcp <library.sqlite> [--count N]
 
@@ -715,6 +718,130 @@ def first_difference(a, b):
     return f"at {n}:\n    {a[max(0, n - 60):n + 120]!r}\n    {b[max(0, n - 60):n + 120]!r}"
 
 
+def decode_mode(db, count):
+    """Files decoded by Symphonia against AVFoundation: at their own rate, and mono at 48 kHz."""
+    wavs = sample_sounds(db, count, "lower(fileName) LIKE '%.wav'")
+    mp3s = sample_sounds(db, count // 4, "lower(fileName) LIKE '%.mp3'")
+    aacs = sample_sounds(db, count // 4, "lower(fileName) LIKE '%.aac'")
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    songs = [r for r in con.execute("SELECT id, path FROM song ORDER BY path").fetchall()]
+    con.close()
+    songs = [r for r in songs[:: max(1, len(songs) // (count // 8 or 1))] if os.path.exists(r[1])][:count // 8]
+    rows, bad, apple_failed = [], 0, []
+    for label, group in [("wav", wavs), ("mp3 sounds", mp3s), ("aac", aacs), ("songs", songs)]:
+        for b in range(0, len(group), 10):
+            work = tempfile.mkdtemp(prefix="earmark-decode-parity-")
+            try:
+                paths = [p for _, p in group[b:b + 10]]
+                swift = run([SWIFT, "audio", work], "\n".join(paths) + "\n")
+                read = {x["path"] for x in swift}
+                for p in paths:
+                    if p not in read:
+                        apple_failed.append(p)
+                for r in run([RUST, "decode", work], "\n".join(json.dumps(x) for x in swift) + "\n"):
+                    r["label"] = label
+                    rows.append(r)
+            finally:
+                shutil.rmtree(work)
+    with open(os.environ.get("DECODE_OUT", os.devnull), "w") as f:
+        json.dump(rows, f)
+    for p in apple_failed:
+        print("Apple's decoder couldn't read", os.path.basename(p))
+    def stats(xs):
+        xs = sorted(x for x in xs if x is not None)
+        return f"min {xs[0]:.1f} p10 {xs[len(xs) // 10]:.1f} median {xs[len(xs) // 2]:.1f}" if xs else "all exact"
+    for label in ["wav", "mp3 sounds", "aac", "songs"]:
+        group = [r for r in rows if r["label"] == label]
+        failed = [r for r in group if "error" in r]
+        fine = [r for r in group if "error" not in r]
+        print(f"{label}: {len(group)} files, {len(failed)} couldn't be read")
+        for r in failed[:6]:
+            print("   ", os.path.basename(r["path"]), r["error"])
+        bad += len(failed)
+        if not fine:
+            continue
+        exact = sum(1 for r in fine if r["snr"] is None and r["lag"] == 0 and r["frames"] == r["rustFrames"])
+        print(f"  own rate: {exact} identical; SNR {stats([r['snr'] for r in fine])} dB; "
+              f"frames differ on {sum(r['frames'] != r['rustFrames'] for r in fine)} (largest {max((abs(r['frames'] - r['rustFrames']) for r in fine), default=0)}); "
+              f"lags {sorted(set(r['lag'] for r in fine))[:12]}")
+        resampled = [r for r in fine if r["rate"] != 48000]
+        if resampled:
+            print(f"  resampled to 48 kHz, {len(resampled)} files: SNR {stats([r['monoSnr'] for r in resampled])} dB; "
+                  f"frames differ on {sum(r['monoFrames'] != r['rustMonoFrames'] for r in resampled)} (largest {max(abs(r['monoFrames'] - r['rustMonoFrames']) for r in resampled)}); "
+                  f"lags {sorted(set(r['monoLag'] for r in resampled))[:12]}")
+    return bad
+
+
+def embed_mode(db, models, model, count):
+    """ONNX's vectors, from Swift's audio and from Symphonia's, against Core ML's in the database."""
+    sounds = sample_sounds(db, count)
+    ids = {p: i for i, p in sounds}
+    rows = []
+    for b in range(0, len(sounds), 20):
+        work = tempfile.mkdtemp(prefix="earmark-embed-parity-")
+        try:
+            swift = run([SWIFT, "audio", work], "\n".join(p for _, p in sounds[b:b + 20]) + "\n")
+            lines = [{"id": ids[x["path"]], "index": x["index"], "path": x["path"]} for x in swift]
+            rows += run([RUST, "embed", db, models, model, work], "\n".join(json.dumps(x) for x in lines) + "\n")
+        finally:
+            shutil.rmtree(work)
+        print(f"  {len(rows)} of {len(sounds)}", flush=True)
+    rows = [r for r in rows if not r.get("noReference")]
+    def line(label, cos, kept):
+        c = sorted(r[cos] for r in rows if r[cos] is not None)
+        k = [r[kept] for r in rows if r[kept] is not None]
+        print(f"{label}: cosine min {c[0]:.6f} p1 {c[len(c) // 100]:.6f} median {c[len(c) // 2]:.6f}; "
+              f"top-5 kept {100 * sum(k) / (5 * len(k)):.1f}%; {len(rows) - len(c)} without a vector")
+        return c[0]
+    print(f"{model}: {len(rows)} sounds with a stored vector")
+    worst = line("ONNX on Swift's audio", "swiftAudio", "swiftKept")
+    line("ONNX on Symphonia and the resampler", "rustAudio", "rustKept")
+    seen = {}
+    for r in rows:
+        seen[(r["batchSeconds"], r["batchWindows"])] = 1
+    print(f"model time per window: {sum(s for s, _ in seen) / max(1, sum(w for _, w in seen)):.3f} s")
+    return 0 if worst > 0.9999 else 1
+
+
+def tempo_mode(db, models, count):
+    """Tempo and key through ONNX and Symphonia, against what's stored."""
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    songs = con.execute("SELECT path, bpm, tempoStability, beatsPerBar, keyPitchClass, keyMinor, keyConfidence FROM song WHERE bpm IS NOT NULL ORDER BY path").fetchall()
+    con.close()
+    songs = [s for s in songs[:: max(1, len(songs) // count)] if os.path.exists(s[0])][:count]
+    rows = run([RUST, "tempo", models], "\n".join(s[0] for s in songs) + "\n")
+    by_path = {s[0]: s for s in songs}
+    near, equal, n, same_key, same_bar, same_steady, keys, failed, conf = 0, 0, 0, 0, 0, 0, 0, 0, []
+    for r in rows:
+        s = by_path[r["path"]]
+        if r.get("error") or r.get("none"):
+            failed += 1
+            print("  ", os.path.basename(r["path"]), r.get("error", "no result"))
+            continue
+        if r["bpm"] is not None:
+            n += 1
+            near += abs(r["bpm"] - s[1]) / s[1] <= 0.02
+            equal += abs(r["bpm"] - s[1]) <= 0.01
+            if abs(r["bpm"] - s[1]) / s[1] > 0.02:
+                print(f"   tempo {s[1]:.2f} → {r['bpm']:.2f}: {os.path.basename(r['path'])[:50]}")
+        same_steady += r["stability"] == s[2]
+        same_bar += r["beatsPerBar"] == s[3]
+        if r["key"] is not None and s[4] is not None:
+            keys += 1
+            k = r["key"]
+            match = (k["pitchClass"], bool(k["minor"])) == (s[4], bool(s[5]))
+            same_key += match
+            conf.append(abs(r["keyConfidence"] - s[6]))
+            if not match:
+                print(f"   key differs: {os.path.basename(r['path'])[:50]} {k} / {s[4]} {s[5]}")
+    conf.sort()
+    print(f"{len(rows)} songs, {failed} failed. BPM within 2%: {near}/{n}; equal to 0.01: {equal}/{n}; "
+          f"key the same: {same_key}/{keys} (confidence |Δ| median {conf[len(conf) // 2] if conf else 0:.4f}, max {conf[-1] if conf else 0:.4f}); "
+          f"steadiness {same_steady}/{len(rows)}; beats per bar {same_bar}/{len(rows)}; "
+          f"{sum(r.get('audioSeconds', 0) for r in rows) / 60:.0f} minutes of audio in {sum(r.get('seconds', 0) for r in rows):.0f} s")
+    return 1 if near < 0.97 * n or same_key < 0.97 * keys else 0
+
+
 def names_mode(database, count):
     """Names sorted and capitalised, from the library, the UCS list and made up."""
     db = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
@@ -789,6 +916,12 @@ def main():
         bad = anafiles_mode(arg)
     elif mode == "db":
         bad = db_mode(arg, sys.argv[3], sys.argv[4], sys.argv[5])
+    elif mode == "decode":
+        bad = decode_mode(arg, int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 200)
+    elif mode == "embed":
+        bad = embed_mode(arg, sys.argv[3], sys.argv[4], int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 300)
+    elif mode == "tempo":
+        bad = tempo_mode(arg, sys.argv[3], int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 100)
     elif mode == "names":
         bad = names_mode(arg, int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 20000)
     elif mode == "mcp":

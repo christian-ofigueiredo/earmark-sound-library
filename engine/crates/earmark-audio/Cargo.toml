@@ -1,0 +1,12 @@
+[package]
+name = "earmark-audio"
+description = "Reads sound files into samples and changes their sample rate, without changing the files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+earmark-core.workspace = true
+symphonia.workspace = true

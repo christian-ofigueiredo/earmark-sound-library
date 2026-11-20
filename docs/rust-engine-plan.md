@@ -162,8 +162,41 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
    - Licences: all the new dependencies are MIT, Apache-2.0, BSD or Zlib, or offer one of
      them. `unicode-normalization` and `unicode-ident` also carry Unicode-3.0, which allows
      redistribution though it isn't named in the list above.
-7. Audio decoding (Symphonia) and the models (ONNX), with the same parity checks as the
-   Core ML conversion. Only Windows uses these at first.
+7. **Done:** audio decoding (Symphonia) and the models (ONNX), with the same parity checks
+   as the Core ML conversion. Only Windows and Linux use these; the Mac stays on Core Audio
+   and Core ML.
+   - `earmark-audio` reads sound files with Symphonia and changes their sample rate with
+     its own resampler. `earmark-models` runs CLAP, PE-AV, Beat This! and S-KEY through
+     ONNX Runtime (`ort`). The ONNX files are made by `models/convert_onnx.py` from the same
+     weights as the Core ML ones, and aren't in the repository.
+   - **Decoding, against Apple's decoder** (`compare.py decode`, on the owner's library):
+     200 WAV files identical sample for sample. MP3 (48 sounds) and AAC (11) decode to the
+     same sound within rounding (signal-to-noise 46 dB at worst, 70 dB median for MP3;
+     61 dB at worst for AAC); one MP3 comes out 576 samples earlier and 1,105 frames
+     longer, the encoder's padding, which Apple's decoder trims. 14 songs: 57 dB at worst.
+     Symphonia also read two MP3 files that Apple's decoder couldn't.
+   - **The resampler** is the weakest part: on files resampled to 48 kHz the median is
+     70 dB, but the worst WAV is 23 dB and 14 of 189 differ by one frame in length.
+   - **Sound vectors** (`compare.py embed`), against the vectors the Mac app stored:
+     with the same audio samples, CLAP (198 sounds) and PE-AV (40 sounds) give cosine
+     1.000000 on every sound. With Symphonia and the resampler, CLAP's worst is 0.9858
+     (1st percentile 0.9937, median 1.000000) and 99.9% of each sound's five nearest
+     neighbours stay the same; PE-AV's worst is 0.9998 on its 40 sounds. So what differs
+     is the audio going in, not the models.
+   - **Tempo and key** (`compare.py tempo`), 56 songs, 223 minutes: tempo within 2% on all
+     56 (within 0.01 BPM on 52), the same key on all 56 (confidence differs by 0.0005 at
+     most), the same steadiness on all 56. **Beats per bar differ on 6 of 56**, not looked
+     into yet.
+   - **ONNX Runtime picks a device by itself** unless told otherwise (Core ML on a Mac), so
+     the engine now asks for the processor every time, except when the graphics card is
+     chosen on Windows. The numbers above are on the processor, the path Windows and Linux
+     use: the 223 minutes of music took 6 minutes (they had taken 4 h 45 min and 13 GB of
+     memory through Core ML, on a busy Mac).
+   - **Not run:** the real models on Windows or Linux (CI builds and tests there with
+     tiny stand-in models, which exercise ONNX Runtime but not the models); DirectML (the graphics card on Windows); FLAC, Ogg and ALAC files, which
+     the library sample didn't have; PE-AV on more than 40 sounds.
+   - Licences: Symphonia is MPL-2.0 (used unchanged), `ort` MIT or Apache-2.0, ONNX Runtime
+     MIT; see `THIRD_PARTY_NOTICES.md`.
 8. **The Mac app switches to the engine**, piece by piece, behind the same Swift types.
    It ships as an alpha, so Mac users test the new engine before Windows exists.
 9. The Windows app (Tauri), as ROADMAP.md describes.

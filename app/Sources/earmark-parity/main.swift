@@ -68,7 +68,7 @@ if args.count >= 3, args[1] == "audio" {
         let url = URL(fileURLWithPath: path)
         guard let file = try? AVAudioFile(forReading: url),
               let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)) else { continue }
-        try file.read(into: buffer)
+        guard (try? file.read(into: buffer)) != nil else { continue }
         let channels = Int(buffer.format.channelCount), frames = Int(buffer.frameLength)
         var meter = LoudnessMeter(sampleRate: buffer.format.sampleRate, channels: channels)
         var pcm = Data()
@@ -86,7 +86,7 @@ if args.count >= 3, args[1] == "audio" {
             start += n
         }
         try pcm.write(to: work.appendingPathComponent("\(index).pcm"))
-        let mono = try AudioDecoder.mono(url: url, sampleRate: Double(Phase0Audio.sampleRate), maxSeconds: Phase0Audio.maxSeconds)
+        guard let mono = try? AudioDecoder.mono(url: url, sampleRate: Double(Phase0Audio.sampleRate), maxSeconds: Phase0Audio.maxSeconds) else { continue }
         try mono.withUnsafeBufferPointer { try Data(buffer: $0).write(to: work.appendingPathComponent("\(index).mono")) }
         let prepared = Phase0Audio.prepare(mono)
         let windows = prepared.map(Phase0Audio.windows) ?? []

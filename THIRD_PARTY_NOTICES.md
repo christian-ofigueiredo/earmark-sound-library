@@ -27,6 +27,7 @@ downloaded by `setup.sh` or on first use, under its own license.
 | `CLAPAudio.mlpackage` (Core ML) | LAION CLAP `laion/larger_clap_general`, audio tower and projection, converted unchanged except that its bicubic time resize is written as the equivalent matrix multiply | Apache-2.0, as the original. Converted with coremltools (BSD-3-Clause), which isn't distributed. |
 | `BeatThis.mlpackage` (Core ML) | Beat This! `final0` (CPJKU), the network only (the spectrogram and peak picking are in the app's code), converted unchanged except that its attention and rotary position embedding are written out as the equivalent plain operations | MIT, as the original, with the same note about its training audio |
 | `SKey.mlpackage` (Core ML) | S-KEY (Deezer) at the pinned commit with its constant-Q front end (nnAudio), converted unchanged except that its layer norm and final pooling are written out as the equivalent plain operations | MIT, as the original (nnAudio: MIT) |
+| `CLAPAudio.onnx`, `PEAV/*.onnx` (5 parts), `BeatThis.onnx`, `SKey.onnx` (ONNX, made by `models/convert_onnx.py`) | The same four models and the same parts of them as the Core ML files above, for the systems without Core ML | As each original: Apache-2.0 (PE-AV, CLAP), MIT (Beat This!, S-KEY) |
 
 ## Data made with these models (in the repository)
 
@@ -45,6 +46,16 @@ scikit-learn's (BSD-3-Clause); no scikit-learn code is included.
 | MCP Swift SDK (`modelcontextprotocol/swift-sdk`) | The `earmark-mcp` server | MIT, moving to Apache-2.0 (see its LICENSE) |
 | swift-nio, swift-log, swift-system, swift-atomics, swift-collections (Apple) | Used by the MCP Swift SDK | Apache-2.0 |
 | eventsource (Mattt) | Used by the MCP Swift SDK | MIT |
+
+## Rust crates (built into the engine in `engine/`, which no released app uses yet)
+
+| Crate | Used for | License |
+|---|---|---|
+| Symphonia 0.6 and its format and codec crates (16 crates) | Reading sound files where there's no Core Audio | MPL-2.0. Used unchanged. A build that includes it must say so and point to its source, github.com/pdeljanov/Symphonia. |
+| `ort` 2.0.0-rc.15 (pyke) | Calls ONNX Runtime | MIT or Apache-2.0 |
+| ONNX Runtime (Microsoft), the library `ort` downloads when the engine is built | Runs the models where there's no Core ML | MIT |
+| `webpki-roots` | Certificates for that download, at build time only | CDLA-Permissive-2.0 |
+| The other crates (`rusqlite` with SQLite, `rmcp`, `serde` and what they use) | Database, MCP server, data formats | MIT, Apache-2.0, BSD, ISC or Zlib, or a choice that includes one of them |
 
 ## Python libraries (installed by `setup.sh`, not distributed here)
 
