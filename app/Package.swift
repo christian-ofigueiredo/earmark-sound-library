@@ -18,10 +18,18 @@ var dependencies: [Package.Dependency] = [.package(url: "https://github.com/grou
 #if os(macOS)
 // EarmarkML: decoding (AVFoundation) and Core ML models, macOS only.
 targets.append(.target(name: "EarmarkML", dependencies: ["EarmarkCore"]))
-targets.append(.executableTarget(name: "Earmark", dependencies: ["EarmarkCore", "EarmarkML"]))
+// EarmarkEngine: the Rust engine (engine/crates/earmark-ffi) behind the app's types. Its library
+// and Swift bindings are made by scripts/build-engine.sh, which must run before `swift build`.
+targets.append(.binaryTarget(name: "EarmarkFFI", path: "Engine/EarmarkFFI.xcframework"))
+targets.append(.target(name: "EarmarkEngine", dependencies: ["EarmarkCore", "EarmarkFFI"],
+                       // UniFFI's generated code predates Swift 6's checks.
+                       swiftSettings: [.swiftLanguageMode(.v5)],
+                       linkerSettings: [.linkedFramework("Accelerate")]))
+targets.append(.executableTarget(name: "Earmark", dependencies: ["EarmarkCore", "EarmarkML", "EarmarkEngine"]))
+targets.append(.testTarget(name: "EarmarkEngineTests", dependencies: ["EarmarkEngine", "EarmarkCore"]))
 products.append(.executable(name: "Earmark", targets: ["Earmark"]))
 // Checks the app's CLAP pipeline against Phase 0 (see models/parity_clap.py).
-targets.append(.executableTarget(name: "earmark-parity", dependencies: ["EarmarkCore", "EarmarkML"]))
+targets.append(.executableTarget(name: "earmark-parity", dependencies: ["EarmarkCore", "EarmarkML", "EarmarkEngine"]))
 // The MCP server agents start (docs/mcp-plan.md): its tools in a library, so they can be tested.
 dependencies.append(.package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", .upToNextMinor(from: "0.12.1")))
 targets.append(.target(name: "EarmarkMCP", dependencies: ["EarmarkCore", .product(name: "MCP", package: "swift-sdk")]))

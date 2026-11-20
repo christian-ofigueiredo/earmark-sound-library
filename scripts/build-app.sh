@@ -23,6 +23,8 @@ SHORT_VERSION="${VERSION%%-*}"
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
 MIN_MACOS="14.0"   # as in app/Package.swift
 
+# The Rust engine and its Swift bindings (app/Engine, app/Sources/EarmarkEngine/Generated).
+"$ROOT/scripts/build-engine.sh"
 cd "$PKG"
 swift build -c release --product Earmark
 swift build -c release --product earmark-mcp

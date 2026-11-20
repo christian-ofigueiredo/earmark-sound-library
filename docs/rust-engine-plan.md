@@ -199,6 +199,30 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      MIT; see `THIRD_PARTY_NOTICES.md`.
 8. **The Mac app switches to the engine**, piece by piece, behind the same Swift types.
    It ships as an alpha, so Mac users test the new engine before Windows exists.
+   - **How it's built:** `engine/crates/earmark-ffi` is the engine as the app calls it;
+     UniFFI writes its Swift side. `scripts/build-engine.sh` builds it into
+     `app/Engine/EarmarkFFI.xcframework` (a static library) and
+     `app/Sources/EarmarkEngine/Generated/`, neither in the repository; `build-app.sh` and
+     CI run it before `swift build`. The `EarmarkEngine` target turns the engine's answers
+     into the app's own types. Records with many fields cross as JSON in the shape Swift's
+     `Codable` types read (the shape the parity checks compare), so the app keeps its types.
+   - **The way back:** `defaults write io.github.christian-ofigueiredo.Earmark swiftEngine
+     -bool YES` makes the app use its Swift code again, until step 8 is finished.
+   - **8a, scanning (2026-11-20):** reading a sound library's files goes through the engine,
+     with the app's AVFoundation reader still giving MP3 and AAC lengths. On the owner's
+     SoundFX library (29,177 files), `earmark-parity enginescan` finds Swift's and the
+     engine's results identical, dates to the bit, in the same time (about 13 s each). What
+     it took:
+     - **Dates as Foundation makes them**, from the file system's seconds and nanoseconds,
+       which the engine now passes alongside its date (2,841 files differed in the last bit
+       before).
+     - **The real path on the Mac.** Foundation's folder walk starts from the folder's real
+       path: links in the folders above it resolved, names spelled as on disk ("soundfx" as
+       "SoundFX", accents as the disk stores them), and nothing listed when the folder
+       itself is a link. The engine now does the same on the Mac (`scan::walked_root`);
+       elsewhere it keeps the path as given. The new Swift tests
+       (`EarmarkEngineTests`) found this; the owner's library, on a plain path, couldn't.
+     - Music folders still go through Swift (`MusicFiles`), and so does everything else.
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
 

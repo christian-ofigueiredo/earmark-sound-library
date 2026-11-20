@@ -120,5 +120,12 @@ pub fn temp_dir(name: &str) -> PathBuf {
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    // On the Mac, the real path, as a folder picked in the app comes: the temporary folder is under
+    // /var, a link to /private/var, and scanning lists files by their real path. (Elsewhere as
+    // given: Windows would add its \\?\ prefix.)
+    if cfg!(target_os = "macos") {
+        std::fs::canonicalize(&dir).unwrap()
+    } else {
+        dir
+    }
 }

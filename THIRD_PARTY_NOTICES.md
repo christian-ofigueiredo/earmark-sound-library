@@ -47,11 +47,12 @@ scikit-learn's (BSD-3-Clause); no scikit-learn code is included.
 | swift-nio, swift-log, swift-system, swift-atomics, swift-collections (Apple) | Used by the MCP Swift SDK | Apache-2.0 |
 | eventsource (Mattt) | Used by the MCP Swift SDK | MIT |
 
-## Rust crates (built into the engine in `engine/`, which no released app uses yet)
+## Rust crates (the engine in `engine/`; no released app uses it yet)
 
 | Crate | Used for | License |
 |---|---|---|
 | Symphonia 0.6 and its format and codec crates (16 crates) | Reading sound files where there's no Core Audio | MPL-2.0. Used unchanged. A build that includes it must say so and point to its source, github.com/pdeljanov/Symphonia. |
+| UniFFI 0.32 (Mozilla: `uniffi`, `uniffi_core` and the crates that write the bindings) | The Mac app calling the engine (`earmark-ffi`); `uniffi_core` is built into the app | MPL-2.0. Used unchanged; its source is github.com/mozilla/uniffi-rs. |
 | `ort` 2.0.0-rc.15 (pyke) | Calls ONNX Runtime | MIT or Apache-2.0 |
 | ONNX Runtime (Microsoft), the library `ort` downloads when the engine is built | Runs the models where there's no Core ML | MIT |
 | `webpki-roots` | Certificates for that download, at build time only | CDLA-Permissive-2.0 |

@@ -48,6 +48,12 @@ public struct ScannedSound: Sendable, Codable, Equatable {
     public var technical: AudioTechnical
     public var metadata: NormalizedMetadata
     public var warnings: [String]
+
+    public init(path: String, fileSize: Int64, modified: Date, fingerprint: String?, technical: AudioTechnical,
+                metadata: NormalizedMetadata, warnings: [String]) {
+        self.path = path; self.fileSize = fileSize; self.modified = modified; self.fingerprint = fingerprint
+        self.technical = technical; self.metadata = metadata; self.warnings = warnings
+    }
 }
 
 /// Reads length and format of files MetadataReader can't parse (MP3, AAC, FLAC…).
