@@ -2,8 +2,8 @@
 
 Approved by the owner on 2026-10-29: "start porting it to Rust so we can have a new Mac
 version and the Windows version". This is option B in ROADMAP.md: the engine moves to
-Rust; the Mac keeps its SwiftUI interface; Windows gets its own interface on the same
-engine.
+Rust; the Mac keeps its SwiftUI interface; Windows and Linux share their own interface
+(Tauri) on the same engine. Linux was added on 2026-11-20, marked untested.
 
 ## Where it lives
 
@@ -199,7 +199,8 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      MIT; see `THIRD_PARTY_NOTICES.md`.
 8. **The Mac app switches to the engine**, piece by piece, behind the same Swift types.
    It ships as an alpha, so Mac users test the new engine before Windows exists.
-9. The Windows app (Tauri), as ROADMAP.md describes.
+9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
+   marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
 
 Until step 8 the Mac app doesn't use Rust at all, so nothing changes for testers.
 Features added to Swift meanwhile (such as timeline files) are ported in their step.

@@ -22,8 +22,8 @@ label for test versions.
 | **0.1.0-alpha.1** (2026-10-28) | Everything in PLAN.md phases 1–4, Mac only. Released on GitHub as a pre-release. |
 | 0.1.0-alpha.2, .3… | Fixes from the owner's testing |
 | **0.2.0-alpha.1** | The second alpha: everything planned but not built yet (below), Mac only |
-| **1.0.0-beta.1** | The Windows version joins: both platforms, every feature |
-| 1.0.0-beta.2… | Fixes from testing on both platforms |
+| **1.0.0-beta.1** | The Windows and Linux versions join, every feature. The Linux package is marked untested. |
+| 1.0.0-beta.2… | Fixes from testing on Mac and Windows (and on Linux, if testers report) |
 | **1.0.0** | The first stable release |
 
 ## Second alpha (0.2.0): what was planned and not built
@@ -70,7 +70,7 @@ the same way in both versions of Resolve:
 - Earmark isn't Blackmagic's product. Most people trying a free tool won't buy a
   $295 app first to see whether it's useful.
 
-## Beta (1.0.0): Windows
+## Beta (1.0.0): Windows and Linux
 
 ### Should Earmark be rewritten in Rust?
 
@@ -115,17 +115,31 @@ the details and where it stands.
 3. **Models for Windows.** Convert PE-AV, CLAP, Beat This! and S-KEY to ONNX, the
    same way `models/` converts them to Core ML, with the same parity checks. On the
    Mac, Core ML stays: it's tested and fast on Apple's GPU.
-4. **Windows interface (Tauri)**: the two sections, the sound map (drawn with
-   WebGL), the player, Preferences and Connect an AI Agent.
+4. **Windows and Linux interface (Tauri)**: one app for both, with the two sections,
+   the sound map (drawn with WebGL), the player, Preferences and Connect an AI Agent.
+   Tauri builds it for Windows and Linux from the same code, so Linux costs little
+   extra; the Mac keeps its SwiftUI app.
 5. **Windows-specific parts:**
    - drive letters and network drives;
    - idle detection, so analysis waits while you work;
    - Resolve's scripting on Windows (the same Python API, from a different folder);
    - an installer.
 
+   **Linux-specific parts** (added 2026-11-20, owner's decision):
+   - an AppImage and a `.deb` package, which Tauri makes;
+   - the database and settings in the usual Linux folders (`~/.local/share/Earmark`,
+     `~/.config/Earmark`);
+   - Resolve's scripting where Resolve installs on Linux (`/opt/resolve`);
+   - the models on the processor at first: no graphics-card acceleration is planned for
+     Linux.
+
+   **The Linux package is marked untested.** CI builds it and runs the engine's tests on
+   Linux, but no one tries the app on a Linux desktop before release. Its download page
+   says so, and Linux users' reports decide what gets fixed.
+
 This is the biggest piece of work left, comparable to phases 1–2 of PLAN.md.
 
-### Windows risks
+### Windows and Linux risks
 
 - **Graphics memory.** PE-AV large needs about 4.2 GB, so PCs with small graphics
   cards will have to run it on the processor (about 3× slower, as on the Mac).
@@ -136,6 +150,8 @@ This is the biggest piece of work left, comparable to phases 1–2 of PLAN.md.
   protected your PC" ▸ More info ▸ Run anyway). Windows signing also costs money (for
   example Microsoft's Trusted Signing, about $10 a month). **Owner decides**, as for
   the Mac.
+- **Linux desktops differ.** Tauri's web view (WebKitGTK), audio output and file
+  dialogs vary with the distribution and desktop. Untested, as said above.
 
 ## Not signing (Mac and Windows)
 
