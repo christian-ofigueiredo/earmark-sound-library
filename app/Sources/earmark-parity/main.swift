@@ -319,6 +319,43 @@ if args.count >= 3, args[1] == "enginecategories" {
     exit(bad == 0 ? 0 : 1)
 }
 
+// Loudness by Swift's LoudnessMeter and through the Rust engine (EngineLoudnessMeter), fed the
+// same chunks the app decodes (AVAudioFile, 65,536 frames at a time). Only reads.
+//   earmark-parity engineloudness <library.sqlite> [count]
+if args.count >= 3, args[1] == "engineloudness" {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    let wanted = args.count > 3 ? Int(args[3]) ?? 500 : 500
+    let all = try db.sounds().filter { FileManager.default.fileExists(atPath: $0.path) }
+    let picked = stride(from: 0, to: all.count, by: max(1, all.count / wanted)).map { all[$0] }.prefix(wanted)
+    var same = 0, failed = 0, bad = 0, swiftTime = Duration.zero, rustTime = Duration.zero
+    for s in picked {
+        guard let file = try? AVAudioFile(forReading: s.url) else { failed += 1; continue }
+        let format = file.processingFormat, channels = Int(format.channelCount)
+        var swift = LoudnessMeter(sampleRate: format.sampleRate, channels: channels)
+        let rust = EngineLoudnessMeter(sampleRate: format.sampleRate, channels: channels)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1 << 16), let data = buffer.floatChannelData
+        else { failed += 1; continue }
+        while file.framePosition < file.length {
+            guard (try? file.read(into: buffer)) != nil else { break }
+            let n = Int(buffer.frameLength)
+            if n == 0 { break }
+            let chunks = (0 ..< channels).map { UnsafeBufferPointer(start: data[$0], count: n) }
+            var clock = ContinuousClock.now
+            swift.process(chunks, frames: n)
+            swiftTime += ContinuousClock.now - clock
+            clock = ContinuousClock.now
+            rust.process(chunks, frames: n)
+            rustTime += ContinuousClock.now - clock
+        }
+        if swift.result == rust.result { same += 1 } else {
+            bad += 1
+            if bad <= 5 { print("differs: \(s.fileName): \(swift.result) / \(rust.result)") }
+        }
+    }
+    print("loudness of \(picked.count) files: \(same) identical, \(bad) differ, \(failed) unreadable; meters took Swift \(swiftTime), engine \(rustTime)")
+    exit(bad == 0 ? 0 : 1)
+}
+
 if args.count >= 2, args[1] == "metadata" {
     struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
     let encoder = JSONEncoder()

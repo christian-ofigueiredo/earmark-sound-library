@@ -8,6 +8,11 @@ public struct LoudnessMeter: Sendable {
         public var integrated: Double?
         /// Highest sample in dBFS (not oversampled true peak); nil for digital silence.
         public var peak: Double?
+
+        public init(integrated: Double?, peak: Double?) {
+            self.integrated = integrated
+            self.peak = peak
+        }
     }
 
     /// K-weighting: a high shelf then a high pass, per channel (biquad, direct form I).
