@@ -141,6 +141,12 @@ public enum FolderSuggester {
         /// ("Pickups": a synonym of METAL, GLASS, WOOD… / HANDLE): worth listening first.
         public var isUncertain = false
 
+        public init(entry: UCSEntry, score: Double, words: [String], fileWords: [String], soundShare: Double,
+                    isUncertain: Bool = false) {
+            self.entry = entry; self.score = score; self.words = words; self.fileWords = fileWords
+            self.soundShare = soundShare; self.isUncertain = isUncertain
+        }
+
         /// Worth listening to before trusting: uncertain, or nothing but a few similar sounds agree.
         public var isWeak: Bool { isUncertain || words.isEmpty && fileWords.isEmpty && soundShare < 0.3 }
     }

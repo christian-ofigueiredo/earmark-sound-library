@@ -236,6 +236,89 @@ if args.count >= 3, args[1] == "engineneighbours" {
     exit(bad == 0 ? 0 : 1)
 }
 
+// Earmark's category guesses by Swift and through the Rust engine (EngineCategories): the
+// neighbours' votes and per-sound guesses as SoundGuesser makes them, and every folder's
+// suggestions as FolderGuesser does. Only reads.
+//   earmark-parity enginecategories <library.sqlite>
+if args.count >= 3, args[1] == "enginecategories" {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    var bad = 0
+    let rules = try db.folderRules(), guesses = try db.folderGuesses()
+    let owners = try db.soundCategoryChoices().filter { $0.value.byOwner }
+    let sounds = SoundCategories.apply(owners, to: FolderRules.apply(rules, guesses: guesses, to: try db.sounds()))
+    let hidden = FormatTwins.group(sounds).hidden
+    let byId = Dictionary(uniqueKeysWithValues: sounds.compactMap { s in s.id.map { ($0, s) } })
+    let d = 1536
+    var rows: [SoundRecord] = []
+    var buffer = PageBuffer(count: 0)
+    try db.forEachVectors(models: ["pe-av-large", "clap-general"], count: { buffer = PageBuffer(count: $0 * d) }) { id, blocks in
+        guard let s = byId[id], !hidden.contains(id), (rows.count + 1) * d <= buffer.count else { return }
+        let r = rows.count
+        buffer.withFloats { x in for (c, v) in SoundMap.combine(blocks).enumerated() { x[r * d + c] = v } }
+        rows.append(s)
+    }
+    let k = min(60, rows.count)
+    let (indices, distances) = buffer.withFloats { SoundMap.nearestNeighbours(UnsafeBufferPointer(rebasing: $0[0 ..< rows.count * d]), n: rows.count, d: d, k: k) }
+    let labels = rows.map(\.catID), folders = rows.map { "\($0.libraryId)/\($0.folder)" }
+    var clock = ContinuousClock.now
+    let votesA = CategoryVotes.votes(indices: indices, distances: distances, k: k, labels: labels, folders: folders)
+    let swiftVotes = ContinuousClock.now - clock
+    clock = ContinuousClock.now
+    let votesB = EngineCategories.votes(indices: indices, distances: distances, k: k, labels: labels, folders: folders)
+    let rustVotes = ContinuousClock.now - clock
+    let votesSame = zip(votesA, votesB).filter { $0 == $1 }.count
+    if votesSame != rows.count { bad += 1 }
+    let folderSets = Dictionary(grouping: guesses, by: \.libraryId).mapValues { Set($0.map(\.folder)) }
+    let byFolder = Dictionary(guesses.map { ("\($0.libraryId)/\($0.folder)", $0) }, uniquingKeysWith: { a, _ in a })
+    let alternatives: (SoundRecord) -> Set<String> = { s in
+        guard let f = FolderRules.ruleFolder(for: s.folder, in: folderSets[s.libraryId] ?? []),
+              let g = byFolder["\(s.libraryId)/\(f)"] else { return [] }
+        return Set(g.alternativeIDs)
+    }
+    func key(_ c: SoundCategoryChoice) -> String { "\(c.soundId) \(c.fingerprint ?? "-") \(c.catID) \(c.byOwner) \(c.share ?? -1) \(c.replaced ?? "-")" }
+    let guessesA = SoundCategories.guesses(sounds: rows, votes: votesA, alternatives: alternatives).map(key)
+    let guessesB = EngineCategories.guesses(sounds: rows, votes: votesA, alternatives: alternatives).map(key)
+    if guessesA != guessesB { bad += 1 }
+    print("votes of \(rows.count) sounds: \(votesSame) identical (Swift \(swiftVotes), engine \(rustVotes)); guesses \(guessesA == guessesB ? "identical" : "differ") (\(guessesA.count))")
+    // Folder suggestions with each side's own Find Similar index.
+    let clap = try db.vectors(model: "clap-general")
+    let swiftIndex = SimilarityIndex(vectors: clap), rustIndex = EngineSimilarityIndex(vectors: clap)
+    let labelsA = FolderSuggester.labels(sounds), labelsB = EngineCategories.labels(sounds)
+    let sharedA = FolderSuggester.sharedDescriptions(sounds), sharedB = EngineCategories.sharedDescriptions(sounds)
+    if labelsA != labelsB || sharedA != sharedB { bad += 1 }
+    print("labels \(labelsA == labelsB ? "identical" : "differ") (\(labelsA.count)), shared descriptions \(sharedA == sharedB ? "identical" : "differ") (\(sharedA.count))")
+    let byFolderSounds = Dictionary(grouping: sounds, by: { "\($0.libraryId)\u{1}\($0.folder)" })
+    var same = 0, lastDigit = 0, swiftTime = Duration.zero, rustTime = Duration.zero, shown = 0
+    for (key, list) in byFolderSounds.sorted(by: { $0.key < $1.key }) {
+        let folder = String(key.split(separator: "\u{1}", omittingEmptySubsequences: false)[1])
+        clock = ContinuousClock.now
+        let a = FolderSuggester.suggest(folder: folder, sounds: list, index: swiftIndex, labels: labelsA, sharedDescriptions: sharedA)
+        swiftTime += ContinuousClock.now - clock
+        clock = ContinuousClock.now
+        let b = EngineCategories.suggest(folder: folder, sounds: list, index: rustIndex, labels: labelsA, sharedDescriptions: sharedA)
+        rustTime += ContinuousClock.now - clock
+        // Swift adds a folder's scores in its dictionaries' order, which changes from run to run:
+        // two Swift runs differ in the last digit on about 9 of these folders. So scores may
+        // differ by that much; everything else must be identical.
+        func close(_ x: Double, _ y: Double) -> Bool { abs(x - y) <= 1e-12 * max(1, abs(x), abs(y)) }
+        let near = a.count == b.count && zip(a, b).allSatisfy { p, q in
+            p.entry == q.entry && p.words == q.words && p.fileWords == q.fileWords && p.isUncertain == q.isUncertain
+                && close(p.score, q.score) && close(p.soundShare, q.soundShare)
+        }
+        if a == b { same += 1 } else if near { lastDigit += 1 } else {
+            bad += 1
+            shown += 1
+            if shown <= 5 {
+                print("differs: \(folder)")
+                print("   \(a.map { "\($0.entry.catID) \($0.score) \($0.words) \($0.fileWords) \($0.soundShare) \($0.isUncertain)" })")
+                print("   \(b.map { "\($0.entry.catID) \($0.score) \($0.words) \($0.fileWords) \($0.soundShare) \($0.isUncertain)" })")
+            }
+        }
+    }
+    print("folder suggestions: \(same) of \(byFolderSounds.count) folders identical, \(lastDigit) only in a score's last digit, \(byFolderSounds.count - same - lastDigit) differ; Swift \(swiftTime), engine \(rustTime)")
+    exit(bad == 0 ? 0 : 1)
+}
+
 if args.count >= 2, args[1] == "metadata" {
     struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
     let encoder = JSONEncoder()

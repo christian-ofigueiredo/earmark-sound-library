@@ -3,7 +3,7 @@ import Foundation
 
 /// Find Similar's index through the Rust engine: the same answers as Swift's `SimilarityIndex`.
 public final class EngineSimilarityIndex: SoundNeighbourIndex, @unchecked Sendable {
-    private let index: SoundIndex
+    let index: SoundIndex
 
     /// `vectors`: (sound id, normalised vector); vectors of another length are skipped, as there.
     public init(vectors: [(id: Int64, vector: [Float])]) {

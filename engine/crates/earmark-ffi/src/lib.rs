@@ -4,8 +4,9 @@
 //! Records with many fields cross as JSON in the shape Swift's `Codable` types already read
 //! (the parity checks compare exactly that JSON), so the app keeps its own types.
 
-use earmark_core::analysis::{duplicates, groups, similarity, sound_map};
+use earmark_core::analysis::{categories, duplicates, folder_rules, groups, similarity, sound_map};
 use earmark_core::metadata::AudioTechnical;
+use earmark_core::records::SoundRecord;
 use earmark_core::scan;
 use earmark_core::ucs::UcsCatalog;
 use std::collections::{HashMap, HashSet};
@@ -473,6 +474,212 @@ pub fn duplicate_sets(pairs: Vec<DuplicatePair>) -> DuplicateSets {
             })
             .collect(),
     }
+}
+
+/// A sound's fields that categories and folder guesses read, as in Swift's `SoundRecord`.
+#[derive(uniffi::Record)]
+pub struct SoundFields {
+    pub id: Option<i64>,
+    pub library_id: i64,
+    pub path: String,
+    pub file_name: String,
+    pub folder: String,
+    pub fingerprint: Option<String>,
+    pub duration: Option<f64>,
+    pub fx_name: Option<String>,
+    pub details: Option<String>,
+    pub keywords: Option<String>,
+    pub vendor_library: Option<String>,
+    pub manufacturer: Option<String>,
+    pub designer: Option<String>,
+    pub cat_id: Option<String>,
+    pub category: Option<String>,
+    pub subcategory: Option<String>,
+    pub category_source: Option<String>,
+}
+
+impl From<SoundFields> for SoundRecord {
+    fn from(s: SoundFields) -> SoundRecord {
+        SoundRecord {
+            id: s.id,
+            library_id: s.library_id,
+            path: s.path,
+            file_name: s.file_name,
+            folder: s.folder,
+            file_size: 0,
+            modified_at: String::new(),
+            fingerprint: s.fingerprint,
+            duration: s.duration,
+            sample_rate: None,
+            channels: None,
+            bits_per_sample: None,
+            fx_name: s.fx_name,
+            details: s.details,
+            keywords: s.keywords,
+            vendor_library: s.vendor_library,
+            manufacturer: s.manufacturer,
+            designer: s.designer,
+            cat_id: s.cat_id,
+            category: s.category,
+            subcategory: s.subcategory,
+            category_source: s.category_source,
+        }
+    }
+}
+
+fn records(sounds: Vec<SoundFields>) -> Vec<SoundRecord> {
+    sounds.into_iter().map(SoundRecord::from).collect()
+}
+
+/// A category's share of a sound's neighbours' vote, as Swift's `CategoryVotes.Vote`.
+#[derive(uniffi::Record)]
+pub struct CategoryVote {
+    pub cat_id: String,
+    pub share: f64,
+}
+
+/// Each row's top 3 categories by its neighbours' vote, from a neighbour search (`nearest_rows`,
+/// k per row), as Swift's `CategoryVotes.votes(indices:…)`.
+#[uniffi::export]
+pub fn category_votes(
+    indices: Vec<u32>,
+    distances: Vec<f32>,
+    k: u32,
+    labels: Vec<Option<String>>,
+    folders: Vec<String>,
+    voters: u32,
+) -> Vec<Vec<CategoryVote>> {
+    let indices: Vec<usize> = indices.into_iter().map(|i| i as usize).collect();
+    categories::votes_from(
+        &indices,
+        &distances,
+        k as usize,
+        &labels,
+        &folders,
+        voters as usize,
+    )
+    .into_iter()
+    .map(|row| {
+        row.into_iter()
+            .map(|v| CategoryVote {
+                cat_id: v.cat_id,
+                share: v.share,
+            })
+            .collect()
+    })
+    .collect()
+}
+
+/// Earmark's guess for one sound, from its neighbours' vote.
+#[derive(uniffi::Record)]
+pub struct SoundGuess {
+    pub sound_id: i64,
+    pub fingerprint: Option<String>,
+    pub cat_id: String,
+    pub share: Option<f64>,
+    pub replaced: Option<String>,
+}
+
+/// Earmark's guesses from the votes, as Swift's `SoundCategories.guesses`: `alternatives` are
+/// each sound's folder guess's runners-up.
+#[uniffi::export]
+pub fn sound_guesses(
+    sounds: Vec<SoundFields>,
+    votes: Vec<Vec<CategoryVote>>,
+    alternatives: Vec<Vec<String>>,
+    strong: f64,
+    weak: f64,
+) -> Vec<SoundGuess> {
+    let sounds = records(sounds);
+    let votes: Vec<Vec<categories::Vote>> = votes
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|v| categories::Vote {
+                    cat_id: v.cat_id,
+                    share: v.share,
+                })
+                .collect()
+        })
+        .collect();
+    let by_id: HashMap<i64, HashSet<String>> = sounds
+        .iter()
+        .zip(alternatives)
+        .filter_map(|(s, a)| s.id.map(|id| (id, a.into_iter().collect())))
+        .collect();
+    let empty = HashSet::new();
+    let alternatives =
+        |s: &SoundRecord| s.id.and_then(|id| by_id.get(&id)).unwrap_or(&empty).clone();
+    categories::guesses(&sounds, &votes, &alternatives, strong, weak, "")
+        .into_iter()
+        .map(|c| SoundGuess {
+            sound_id: c.sound_id,
+            fingerprint: c.fingerprint,
+            cat_id: c.cat_id,
+            share: c.share,
+            replaced: c.replaced,
+        })
+        .collect()
+}
+
+/// One category Earmark suggests for a folder, as Swift's `FolderSuggester.Option`.
+#[derive(uniffi::Record)]
+pub struct FolderOption {
+    pub cat_id: String,
+    pub score: f64,
+    pub words: Vec<String>,
+    pub file_words: Vec<String>,
+    pub sound_share: f64,
+    pub is_uncertain: bool,
+}
+
+/// Up to `count` categories for a folder, best first, as Swift's `FolderSuggester.suggest`:
+/// from its name, its files' words and, with `index`, its sounds' categorised neighbours.
+#[uniffi::export]
+pub fn folder_suggestions(
+    folder: String,
+    sounds: Vec<SoundFields>,
+    index: Option<Arc<SoundIndex>>,
+    labels: HashMap<i64, String>,
+    shared_descriptions: Vec<String>,
+    count: u32,
+) -> Vec<FolderOption> {
+    let sounds = records(sounds);
+    let shared: HashSet<String> = shared_descriptions.into_iter().collect();
+    folder_rules::suggest(
+        &folder,
+        &sounds,
+        index.as_ref().map(|i| &i.index),
+        &labels,
+        &shared,
+        count as usize,
+        &folder_rules::Tuning::default(),
+    )
+    .into_iter()
+    .map(|o| FolderOption {
+        cat_id: o.entry.cat_id,
+        score: o.score,
+        words: o.words,
+        file_words: o.file_words,
+        sound_share: o.sound_share,
+        is_uncertain: o.is_uncertain,
+    })
+    .collect()
+}
+
+/// The categories that came with the files, as Swift's `FolderSuggester.labels`.
+#[uniffi::export]
+pub fn folder_labels(sounds: Vec<SoundFields>) -> HashMap<i64, String> {
+    folder_rules::labels(&records(sounds))
+}
+
+/// Descriptions shared by files in at least `min_folders` folders, as Swift's
+/// `FolderSuggester.sharedDescriptions`.
+#[uniffi::export]
+pub fn shared_descriptions(sounds: Vec<SoundFields>, min_folders: u32) -> Vec<String> {
+    folder_rules::shared_descriptions(&records(sounds), min_folders as usize)
+        .into_iter()
+        .collect()
 }
 
 /// The engine's version, so the app can say which engine it runs.
