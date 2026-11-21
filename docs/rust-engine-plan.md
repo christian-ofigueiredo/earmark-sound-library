@@ -268,9 +268,15 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      the engine's meter was three times slower than Swift's, in place it's as fast. On 1,000 of
      the owner's files, picked evenly, `earmark-parity engineloudness` finds every loudness and
      peak identical (the meters took Swift 4.2 s, engine 4.0 s).
-   - Still in Swift: the database, with applying the owner's rules and choices to the sounds;
-     analysis and timeline files; the Resolve bridge (the app's; agents already use the
-     engine's); and the models (Core ML stays on the Mac).
+   - **8h, timeline files (2026-11-21):** `EngineTimeline` writes File ▸ Save as Timeline File…
+     through the engine (agents' `save_timeline_file` already did, since 8c). `earmark-parity
+     enginetimeline`: 721 files from the owner's sounds, at all 10 frame rates and six start
+     timecodes (one not a timecode), whole sounds and parts, placed at times, none, and a part
+     shorter than a frame: all identical, text and placements, and the 171 failures with the
+     same message.
+   - Still in Swift: the database (with analysis-file export and import, and applying the
+     owner's rules and choices to the sounds), the Resolve bridge (the app's; agents already use
+     the engine's), and the models (Core ML stays on the Mac).
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
 
