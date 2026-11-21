@@ -1,0 +1,14 @@
+{
+  "name": "earmark-desktop",
+  "private": true,
+  "description": "Earmark for Windows and Linux: the Tauri shell around the Rust engine",
+  "license": "MIT",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

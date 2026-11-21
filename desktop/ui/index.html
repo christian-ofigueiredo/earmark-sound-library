@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Earmark</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="wordmark">EARMARK</div>
+      <div class="switch-pill" role="tablist">
+        <button class="segment on" id="tab-sounds" role="tab">Sound Effects</button>
+        <button class="segment" id="tab-music" role="tab">Music</button>
+      </div>
+      <span class="spacer"></span>
+      <input class="search" id="search" type="search" placeholder="Search" spellcheck="false" />
+    </header>
+
+    <div class="body">
+      <nav class="sidebar" id="sidebar">
+        <div class="side-group">
+          <button class="side-item on" id="all-sounds"><span class="label">All Sounds</span><span class="count" id="all-count"></span></button>
+        </div>
+        <div class="side-title">Libraries</div>
+        <div class="side-group" id="libraries"></div>
+        <button class="side-add" id="add-library">Add Library…</button>
+        <div class="side-group">
+          <button class="side-item" id="duplicates"><span class="label">Duplicates</span><span class="count" id="dup-count"></span></button>
+        </div>
+        <div class="side-title">Categories</div>
+        <div class="side-group" id="categories"></div>
+      </nav>
+
+      <main class="content">
+        <div class="toolbar">
+          <div class="mini-pill">
+            <button class="segment on" id="view-list">List</button>
+            <button class="segment" id="view-map">Map</button>
+          </div>
+          <span class="spacer"></span>
+          <button class="key" id="import">Import Analysis…</button>
+          <button class="key" id="rescan">Rescan All Folders</button>
+        </div>
+
+        <section class="list" id="list">
+          <div class="row head" id="list-head"></div>
+          <div class="rows" id="rows"></div>
+        </section>
+
+        <section class="map" id="map" hidden>
+          <canvas id="map-canvas"></canvas>
+          <div class="map-note" id="map-note"></div>
+        </section>
+
+        <section class="empty" id="empty" hidden>
+          <h1 id="empty-title">Add your sound library</h1>
+          <p id="empty-text">Pick the folder that holds your sound effects. Earmark reads the files and never changes them.</p>
+          <div class="empty-keys">
+            <button class="key red" id="empty-sounds">Add Sound Library…</button>
+            <button class="key" id="empty-music">Add Music Folder…</button>
+            <button class="key" id="empty-import">Import Analysis…</button>
+          </div>
+        </section>
+      </main>
+
+      <aside class="details" id="details">
+        <div class="details-empty" id="details-empty">
+          <div class="details-icon"></div>
+          <div class="details-title">No Sound Selected</div>
+          <div class="note">Select a sound to hear it.</div>
+        </div>
+        <div class="details-body" id="details-body" hidden></div>
+      </aside>
+    </div>
+
+    <footer class="status">
+      <span id="status-counts"></span>
+      <span class="spacer"></span>
+      <span id="status-activity"></span>
+    </footer>
+
+    <audio id="player" preload="none"></audio>
+    <script src="app.js"></script>
+  </body>
+</html>

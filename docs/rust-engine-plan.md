@@ -315,6 +315,13 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      `SoundCategories.apply`), which the engine has but the app doesn't call through it yet.
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
+   - **9a, the app (2026-11-21):** `desktop/` (see its README), built as Offload's: the
+     libraries, list, search, categories, duplicates, details, playing, Find Similar, the map,
+     timeline files, Resolve and importing an analysis file from the Mac. The `Desktop` workflow
+     builds the Windows installer and the Linux AppImage and .deb at every push. Checked on a
+     Mac against a copy of the owner's database (`earmark-desktop --check`: the same counts as
+     the Mac app, search, details, Find Similar, a category's map). Not yet: analysing on
+     Windows and Linux (the ONNX models), song tags, and anyone opening it there.
 
 Until step 8 the Mac app doesn't use Rust at all, so nothing changes for testers.
 Features added to Swift meanwhile (such as timeline files) are ported in their step.

@@ -1,0 +1,395 @@
+/* Earmark's window for Windows and Linux, in Christian Figueiredo's design system, as the Mac app
+   (app/Sources/Earmark/DesignSystem.swift): dark; the ground and the keys are one colour and depth
+   comes from light and shadow; red marks what's chosen and what's playing. Brakwell for the
+   wordmark and big numbers, Tessel for everything you read or press. */
+
+@font-face {
+  font-family: "Brakwell";
+  src: url("fonts/Brakwell.ttf") format("truetype");
+  font-weight: 100 900;
+}
+@font-face {
+  font-family: "Tessel";
+  src: url("fonts/Tessel.ttf") format("truetype");
+  font-weight: 100 900;
+}
+
+:root {
+  --shark: #131314;
+  --ebony: #040404;
+  --seashell: #f1f1f1;
+  --milano: #d41101;
+  --ruby: #a00a00;
+
+  --ink: var(--seashell);
+  --ink-print: rgb(241 241 241 / 0.78);
+  --ink-muted: rgb(241 241 241 / 0.62);
+  --ink-note: rgb(241 241 241 / 0.46);
+  --line: rgb(241 241 241 / 0.1);
+  --sunken: rgb(4 4 4 / 0.42);
+  --selection: rgb(160 10 0 / 0.5);
+
+  --key-shadow: -2px -2px 5px rgb(255 255 255 / 0.05), 3px 3px 8px rgb(0 0 0 / 0.6);
+  --rim: inset 0 1px 0 rgb(255 255 255 / 0.18), inset 0 0 0 1px rgb(255 255 255 / 0.045);
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  background: var(--shark);
+  color: var(--ink);
+  font: 400 13px/1.3 "Tessel", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+button {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: default;
+}
+[hidden] {
+  display: none !important;
+}
+.spacer {
+  flex: 1;
+}
+.note {
+  color: var(--ink-note);
+}
+
+/* Header: the wordmark, the section switch, search. */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 18px;
+}
+.wordmark {
+  font: 700 30px/1 "Brakwell", sans-serif;
+  letter-spacing: 0.01em;
+}
+.switch-pill,
+.mini-pill {
+  display: flex;
+  border-radius: 999px;
+  background: var(--sunken);
+  box-shadow: inset 1px 1px 3px rgb(0 0 0 / 0.6);
+}
+.segment {
+  padding: 0 18px;
+  height: 34px;
+  border-radius: 999px;
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+.mini-pill .segment {
+  height: 26px;
+  padding: 0 14px;
+}
+.segment.on {
+  background: var(--ruby);
+  color: var(--seashell);
+  box-shadow: var(--rim), var(--key-shadow);
+}
+.search {
+  width: 280px;
+  height: 32px;
+  border-radius: 999px;
+  border: 0;
+  padding: 0 14px;
+  background: var(--sunken);
+  box-shadow: inset 1px 1px 3px rgb(0 0 0 / 0.6);
+  outline: none;
+}
+.key {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--shark);
+  box-shadow: var(--rim), var(--key-shadow);
+  font-weight: 500;
+}
+.key:active {
+  box-shadow: inset 2px 2px 4px rgb(0 0 0 / 0.6);
+}
+.key.red {
+  background: var(--ruby);
+}
+
+/* Three columns: sidebar, list or map, details. */
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.sidebar {
+  width: 240px;
+  overflow-y: auto;
+  padding: 4px 10px 20px;
+}
+.side-title {
+  margin: 16px 8px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-note);
+}
+.side-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  text-align: left;
+}
+.side-item > .label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-item.on {
+  background: var(--selection);
+}
+.side-item.sub {
+  padding-left: 26px;
+  color: var(--ink-print);
+}
+.side-item.offline {
+  color: var(--ink-note);
+}
+.count {
+  color: var(--ink-note);
+  font-size: 11px;
+}
+.side-add {
+  margin: 2px 8px 0;
+  color: var(--ink-note);
+}
+.disclosure {
+  display: flex;
+  width: 12px;
+  color: var(--ink-note);
+  transition: transform 0.12s;
+}
+.disclosure.open {
+  transform: rotate(90deg);
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+/* The list. */
+.list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.rows {
+  flex: 1;
+  overflow-y: auto;
+}
+.row {
+  display: grid;
+  grid-template-columns: 22px minmax(160px, 2.2fr) minmax(120px, 1.4fr) 70px minmax(120px, 1.6fr) minmax(110px, 1fr);
+  gap: 10px;
+  align-items: center;
+  height: 28px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+.row.music {
+  grid-template-columns: 22px minmax(160px, 2fr) minmax(110px, 1.2fr) minmax(110px, 1.2fr) 70px 60px 70px;
+}
+.row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row.head {
+  height: 26px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-note);
+  border-bottom: 1px solid var(--line);
+}
+.row:not(.head):hover {
+  background: rgb(241 241 241 / 0.03);
+}
+.row.on {
+  background: var(--selection);
+}
+.row .muted {
+  color: var(--ink-muted);
+}
+.mark {
+  color: var(--milano);
+  font-size: 10px;
+}
+
+/* The sound map. */
+.map {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  background: var(--shark);
+}
+.map canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.map-note {
+  position: absolute;
+  left: 16px;
+  top: 10px;
+  color: var(--ink-note);
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px;
+}
+.empty h1 {
+  font: 700 34px/1.1 "Brakwell", sans-serif;
+  margin: 0 0 10px;
+}
+.empty p {
+  max-width: 460px;
+  color: var(--ink-muted);
+}
+.empty-keys {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* The details pane. */
+.details {
+  width: 340px;
+  overflow-y: auto;
+  padding: 18px;
+}
+.details-empty {
+  margin-top: 30vh;
+  text-align: center;
+}
+.details-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.details h2 {
+  font: 600 17px/1.25 "Tessel", sans-serif;
+  margin: 0 0 4px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.block {
+  margin-top: 18px;
+}
+.block-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-note);
+  margin-bottom: 6px;
+}
+.pair {
+  display: flex;
+  gap: 10px;
+  padding: 5px 0;
+  border-top: 1px solid var(--line);
+}
+.pair > span:first-child {
+  width: 96px;
+  color: var(--ink-note);
+  flex: none;
+}
+.pair > span:last-child {
+  user-select: text;
+  -webkit-user-select: text;
+  overflow-wrap: anywhere;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.play {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--shark);
+  box-shadow: var(--rim), var(--key-shadow);
+  font-size: 15px;
+}
+.play.on {
+  background: var(--ruby);
+}
+.similar-item {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  padding: 4px 0;
+  text-align: left;
+  border-top: 1px solid var(--line);
+}
+.similar-item > span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  display: flex;
+  gap: 16px;
+  padding: 6px 18px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-note);
+  font-size: 12px;
+}
