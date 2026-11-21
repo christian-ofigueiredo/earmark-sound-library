@@ -64,3 +64,48 @@ struct EngineAnalysisTests {
         }
     }
 }
+
+/// Loudness through the Rust engine gives Swift's LoudnessMeter's, chunk for chunk.
+/// (On real files: `earmark-parity engineloudness <library.sqlite>`.)
+struct EngineLoudnessTests {
+    @Test(arguments: [(48_000.0, 1), (44_100.0, 2), (96_000.0, 6)])
+    func sameAsSwift(rate: Double, channels: Int) {
+        let frames = Int(rate * 3.3)
+        let signal = (0 ..< channels).map { c in
+            (0 ..< frames).map { i in Float(sin(Double(i) * (0.01 + 0.003 * Double(c))) * (i < frames / 3 ? 0.001 : 0.4)) }
+        }
+        var swift = LoudnessMeter(sampleRate: rate, channels: channels)
+        let engine = EngineLoudnessMeter(sampleRate: rate, channels: channels)
+        var start = 0
+        for chunk in [1, 4800, 65_536, 999_999] where start < frames {
+            let n = min(chunk, frames - start)
+            let buffers = signal.map { $0.withUnsafeBufferPointer { Array($0[start ..< start + n]) } }
+            buffers.withPointers { pointers in
+                swift.process(pointers, frames: n)
+                engine.process(pointers, frames: n)
+            }
+            start += n
+        }
+        #expect(engine.result == swift.result)
+        #expect(swift.result.integrated != nil)
+    }
+
+    @Test func silence() {
+        var swift = LoudnessMeter(sampleRate: 48_000, channels: 1)
+        let engine = EngineLoudnessMeter(sampleRate: 48_000, channels: 1)
+        let zeros = [Float](repeating: 0, count: 48_000)
+        zeros.withUnsafeBufferPointer { swift.process([$0], frames: 48_000); engine.process([$0], frames: 48_000) }
+        #expect(engine.result == swift.result)
+        #expect(engine.result.integrated == nil)
+    }
+}
+
+private extension Array where Element == [Float] {
+    /// Each channel's buffer, alive for the length of `body`.
+    func withPointers<R>(_ body: ([UnsafeBufferPointer<Float>]) -> R) -> R {
+        func go(_ i: Int, _ done: [UnsafeBufferPointer<Float>]) -> R {
+            i == count ? body(done) : self[i].withUnsafeBufferPointer { go(i + 1, done + [$0]) }
+        }
+        return go(0, [])
+    }
+}

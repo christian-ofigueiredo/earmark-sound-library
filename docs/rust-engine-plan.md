@@ -263,9 +263,14 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      10 differing only in a score's last digit. That last digit isn't the engine's: Swift adds
      a folder's scores in its dictionaries' order, which changes from run to run, and two Swift
      runs differ the same way on about 9 folders. The engine gives the same answer every time.
+   - **8g, loudness (2026-11-21):** `EngineLoudnessMeter` measures the chunks the app decodes
+     (AVFoundation stays the Mac's decoder), reading them in place: copied across the bridge,
+     the engine's meter was three times slower than Swift's, in place it's as fast. On 1,000 of
+     the owner's files, picked evenly, `earmark-parity engineloudness` finds every loudness and
+     peak identical (the meters took Swift 4.2 s, engine 4.0 s).
    - Still in Swift: the database, with applying the owner's rules and choices to the sounds;
-     loudness; analysis and timeline files; the Resolve bridge (the app's; agents already use
-     the engine's); and the models (Core ML stays on the Mac).
+     analysis and timeline files; the Resolve bridge (the app's; agents already use the
+     engine's); and the models (Core ML stays on the Mac).
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
 

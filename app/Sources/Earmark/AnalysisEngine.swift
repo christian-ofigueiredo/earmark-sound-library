@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreML
 import EarmarkCore
+import EarmarkEngine
 import EarmarkML
 import Foundation
 import Observation
@@ -798,6 +799,8 @@ enum SoundAnalyzer {
             let format = file.processingFormat   // float32, one buffer per channel
             let channels = Int(format.channelCount)
             var meter = LoudnessMeter(sampleRate: format.sampleRate, channels: channels)
+            // The Rust engine measures unless the owner turned it off (Engine.isOn).
+            let engineMeter = Engine.isOn ? EngineLoudnessMeter(sampleRate: format.sampleRate, channels: channels) : nil
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1 << 16),
                   let data = buffer.floatChannelData else {
                 return SoundFacts(soundId: soundId, fingerprint: fingerprint, loudness: nil, error: "unsupported format")
@@ -807,9 +810,10 @@ enum SoundAnalyzer {
                 try file.read(into: buffer)
                 let n = Int(buffer.frameLength)
                 if n == 0 { break }
-                meter.process((0 ..< channels).map { UnsafeBufferPointer(start: data[$0], count: n) }, frames: n)
+                let chunks = (0 ..< channels).map { UnsafeBufferPointer(start: data[$0], count: n) }
+                if let engineMeter { engineMeter.process(chunks, frames: n) } else { meter.process(chunks, frames: n) }
             }
-            return SoundFacts(soundId: soundId, fingerprint: fingerprint, loudness: meter.result)
+            return SoundFacts(soundId: soundId, fingerprint: fingerprint, loudness: engineMeter?.result ?? meter.result)
         } catch {
             return SoundFacts(soundId: soundId, fingerprint: fingerprint, loudness: nil, error: error.localizedDescription)
         }

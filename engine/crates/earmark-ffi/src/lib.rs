@@ -4,7 +4,9 @@
 //! Records with many fields cross as JSON in the shape Swift's `Codable` types already read
 //! (the parity checks compare exactly that JSON), so the app keeps its own types.
 
-use earmark_core::analysis::{categories, duplicates, folder_rules, groups, similarity, sound_map};
+use earmark_core::analysis::{
+    categories, duplicates, folder_rules, groups, loudness, similarity, sound_map,
+};
 use earmark_core::metadata::AudioTechnical;
 use earmark_core::records::SoundRecord;
 use earmark_core::scan;
@@ -680,6 +682,51 @@ pub fn shared_descriptions(sounds: Vec<SoundFields>, min_folders: u32) -> Vec<St
     folder_rules::shared_descriptions(&records(sounds), min_folders as usize)
         .into_iter()
         .collect()
+}
+
+/// A sound's integrated loudness (LUFS) and sample peak (dBFS); None for digital silence.
+#[derive(uniffi::Record)]
+pub struct Loudness {
+    pub integrated: Option<f64>,
+    pub peak: Option<f64>,
+}
+
+/// Swift's `LoudnessMeter` through the engine: fed decoded audio in chunks, so long files are
+/// never held in memory.
+#[derive(uniffi::Object)]
+pub struct LoudnessMeasure {
+    meter: Mutex<loudness::LoudnessMeter>,
+}
+
+#[uniffi::export]
+impl LoudnessMeasure {
+    #[uniffi::constructor]
+    pub fn new(sample_rate: f64, channels: u32) -> Arc<LoudnessMeasure> {
+        Arc::new(LoudnessMeasure {
+            meter: Mutex::new(loudness::LoudnessMeter::new(sample_rate, channels as usize)),
+        })
+    }
+
+    /// `frames` frames of deinterleaved float audio: one address per channel, each of `frames`
+    /// floats, which the app keeps alive and unchanged until the call returns (read in place,
+    /// as `rows`: a copy across the bridge cost more than the measuring).
+    pub fn process(&self, channels: Vec<u64>, frames: u32) {
+        let slices: Vec<&[f32]> = channels
+            .iter()
+            .map(|&a| unsafe { rows(a, 1, frames) })
+            .collect();
+        if let Ok(mut meter) = self.meter.lock() {
+            meter.process(&slices, frames as usize);
+        }
+    }
+
+    pub fn result(&self) -> Loudness {
+        let r = self.meter.lock().map(|m| m.result()).unwrap_or_default();
+        Loudness {
+            integrated: r.integrated,
+            peak: r.peak,
+        }
+    }
 }
 
 /// The engine's version, so the app can say which engine it runs.
