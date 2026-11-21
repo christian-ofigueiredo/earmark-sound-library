@@ -830,6 +830,131 @@ pub fn timeline_fcpxml(
     })
 }
 
+/// Where on the timeline: a timecode, or seconds from its start, as Swift's `ResolveBridge.At`.
+#[derive(uniffi::Enum)]
+pub enum ResolveAt {
+    Timecode { timecode: String },
+    Seconds { seconds: f64 },
+}
+
+/// Which audio track, as Swift's `ResolveBridge.Track`.
+#[derive(uniffi::Enum)]
+pub enum ResolveTrack {
+    Free,
+    Earmark,
+    Index { index: i64 },
+}
+
+/// One sound to put on the timeline open in Resolve, as Swift's `ResolveBridge.Item`.
+#[derive(uniffi::Record)]
+pub struct ResolveItem {
+    pub path: String,
+    pub start: Option<f64>,
+    pub end: Option<f64>,
+    pub at: Option<ResolveAt>,
+    pub track: ResolveTrack,
+    pub length: Option<f64>,
+    pub channels: Option<i64>,
+}
+
+/// Where one item went (or would go), or why it couldn't, as Swift's `ResolveBridge.Placement`.
+#[derive(uniffi::Record)]
+pub struct ResolvePlacement {
+    pub ok: Option<bool>,
+    pub error: Option<String>,
+    pub track: Option<i64>,
+    pub track_name: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub new_track: Option<bool>,
+}
+
+#[derive(uniffi::Record)]
+pub struct ResolveAdded {
+    pub project: String,
+    pub timeline: String,
+    pub items: Vec<ResolvePlacement>,
+}
+
+/// Why Resolve couldn't be asked, as Swift's `ResolveBridge.Failure`.
+#[derive(Debug, uniffi::Error)]
+pub enum ResolveError {
+    NotInstalled,
+    NotConnected,
+    NoProject,
+    NoTimeline,
+    Other { detail: String },
+}
+
+impl std::fmt::Display for ResolveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResolveError::NotInstalled => earmark_resolve::Failure::NotInstalled.fmt(f),
+            ResolveError::NotConnected => earmark_resolve::Failure::NotConnected.fmt(f),
+            ResolveError::NoProject => earmark_resolve::Failure::NoProject.fmt(f),
+            ResolveError::NoTimeline => earmark_resolve::Failure::NoTimeline.fmt(f),
+            ResolveError::Other { detail } => {
+                earmark_resolve::Failure::Other(detail.clone()).fmt(f)
+            }
+        }
+    }
+}
+
+/// Places the items on the timeline open in DaVinci Resolve Studio, one after another, through
+/// the same bridge script as Swift's `ResolveBridge.add`. `preview`: where they'd go, with
+/// nothing imported or placed. Waits for Resolve (up to a minute): call it off the main thread.
+#[uniffi::export]
+pub fn resolve_add(
+    items: Vec<ResolveItem>,
+    preview: bool,
+    move_playhead: bool,
+) -> Result<ResolveAdded, ResolveError> {
+    use earmark_resolve::{At, Item, Track};
+    let items: Vec<Item> = items
+        .into_iter()
+        .map(|i| Item {
+            path: i.path,
+            start: i.start,
+            end: i.end,
+            at: i.at.map(|a| match a {
+                ResolveAt::Timecode { timecode } => At::Timecode(timecode),
+                ResolveAt::Seconds { seconds } => At::Seconds(seconds),
+            }),
+            track: match i.track {
+                ResolveTrack::Free => Track::Free,
+                ResolveTrack::Earmark => Track::Earmark,
+                ResolveTrack::Index { index } => Track::Index(index),
+            },
+            length: i.length,
+            channels: i.channels,
+        })
+        .collect();
+    let added = earmark_resolve::add(&items, preview, move_playhead).map_err(|e| match e {
+        earmark_resolve::Failure::NotInstalled => ResolveError::NotInstalled,
+        earmark_resolve::Failure::NotConnected => ResolveError::NotConnected,
+        earmark_resolve::Failure::NoProject => ResolveError::NoProject,
+        earmark_resolve::Failure::NoTimeline => ResolveError::NoTimeline,
+        earmark_resolve::Failure::Other(detail) => ResolveError::Other { detail },
+    })?;
+    Ok(ResolveAdded {
+        project: added.project,
+        timeline: added.timeline,
+        items: added
+            .items
+            .into_iter()
+            .map(|p| ResolvePlacement {
+                ok: p.ok,
+                error: p.error,
+                track: p.track,
+                track_name: p.track_name,
+                start: p.start,
+                end: p.end,
+                new_track: p.new_track,
+            })
+            .collect(),
+    })
+}
+
 /// The engine's version, so the app can say which engine it runs.
 #[uniffi::export]
 pub fn engine_version() -> String {

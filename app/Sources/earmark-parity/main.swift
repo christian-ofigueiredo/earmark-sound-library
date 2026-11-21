@@ -408,6 +408,48 @@ if args.count >= 3, args[1] == "enginetimeline" {
     exit(same == total ? 0 : 1)
 }
 
+// Adding to DaVinci Resolve through Swift's ResolveBridge and through the Rust engine
+// (EngineResolve), as previews only: Resolve works out where each sound would go, and nothing
+// is imported or placed. Without Resolve both must fail alike.
+//   earmark-parity engineresolve <library.sqlite>
+if args.count >= 3, args[1] == "engineresolve" {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    let sounds = try db.sounds().filter { $0.duration != nil && FileManager.default.fileExists(atPath: $0.path) }
+    var seed: UInt64 = 5
+    func next(_ n: Int) -> Int { seed = seed &* 6_364_136_223_846_793_005 &+ 1; return Int((seed >> 33) % UInt64(max(1, n))) }
+    func describe(_ r: Result<ResolveBridge.Added, Error>) -> String {
+        switch r {
+        case .success(let a): "\(a.project) | \(a.timeline) | " + a.items.map { "\($0)" }.joined(separator: "; ")
+        case .failure(let e): "failure: \(e.localizedDescription)"
+        }
+    }
+    var same = 0, total = 0
+    let tracks: [ResolveBridge.Track] = [.free, .earmark, .index(1), .index(2), .index(99)]
+    for round in 0 ..< 40 {
+        let items = (0 ..< next(4) + 1).map { _ -> ResolveBridge.Item in
+            let s = sounds[next(sounds.count)], length = s.duration!
+            let part = next(2) == 0
+            let start = part ? Double(next(100)) / 100 * length / 2 : nil
+            let at: ResolveBridge.At? = [nil, .seconds(Double(next(300)) / 10), .timecode("01:00:0\(next(9)):00"), .timecode("junk")][next(4)]
+            return ResolveBridge.Item(path: s.path, start: start, end: part ? (start ?? 0) + Double(next(100) + 1) / 100 * (length - (start ?? 0)) : nil,
+                                      at: at, track: tracks[next(tracks.count)], length: length, channels: s.channels)
+        }
+        let a = await Result { try await ResolveBridge.add(items, preview: true) }
+        let b = await Result { try await EngineResolve.add(items, preview: true) }
+        total += 1
+        if describe(a) == describe(b) { same += 1 } else if total - same <= 3 { print("differs (round \(round)):\n   \(describe(a).prefix(400))\n   \(describe(b).prefix(400))") }
+        if round == 0 { print("first answer: \(describe(a).prefix(200))") }
+    }
+    print("Resolve previews: \(same) of \(total) identical")
+    exit(same == total ? 0 : 1)
+}
+
+extension Result where Failure == Error {
+    init(_ body: () async throws -> Success) async {
+        do { self = .success(try await body()) } catch { self = .failure(error) }
+    }
+}
+
 if args.count >= 2, args[1] == "metadata" {
     struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
     let encoder = JSONEncoder()

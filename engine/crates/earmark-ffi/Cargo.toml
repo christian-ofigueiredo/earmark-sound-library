@@ -13,5 +13,6 @@ crate-type = ["staticlib", "cdylib", "lib"]
 
 [dependencies]
 earmark-core.workspace = true
+earmark-resolve.workspace = true
 serde_json.workspace = true
 uniffi.workspace = true

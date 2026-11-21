@@ -736,7 +736,9 @@ final class AppModel {
                                       length: known?.duration, channels: known?.channels)
         Task {
             do {
-                let added = try await ResolveBridge.add([item], movePlayhead: true)
+                // Through the Rust engine unless the owner turned it off (Engine.isOn).
+                let added = Engine.isOn ? try await EngineResolve.add([item], movePlayhead: true)
+                                        : try await ResolveBridge.add([item], movePlayhead: true)
                 guard let placed = added.items.first, placed.ok == true, let track = placed.track else {
                     throw ResolveBridge.Failure.other(added.items.first?.problem ?? "no answer")
                 }

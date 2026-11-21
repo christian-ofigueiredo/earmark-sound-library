@@ -89,6 +89,12 @@ public enum ResolveBridge {
         /// A track was (or would be) added for it.
         public var newTrack: Bool?
 
+        public init(ok: Bool? = nil, error: String? = nil, track: Int? = nil, trackName: String? = nil, start: String? = nil,
+                    end: String? = nil, newTrack: Bool? = nil) {
+            self.ok = ok; self.error = error; self.track = track; self.trackName = trackName
+            self.start = start; self.end = end; self.newTrack = newTrack
+        }
+
         /// What went wrong, for people.
         public var problem: String? {
             switch error {
@@ -109,6 +115,10 @@ public enum ResolveBridge {
         public var project: String
         public var timeline: String
         public var items: [Placement]
+
+        public init(project: String, timeline: String, items: [Placement]) {
+            self.project = project; self.timeline = timeline; self.items = items
+        }
     }
 
     public struct Status: Codable, Sendable {

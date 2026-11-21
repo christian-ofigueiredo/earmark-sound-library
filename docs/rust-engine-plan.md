@@ -274,9 +274,16 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      timecodes (one not a timecode), whole sounds and parts, placed at times, none, and a part
      shorter than a frame: all identical, text and placements, and the 171 failures with the
      same message.
+   - **8i, the app's Resolve bridge (2026-11-21):** ⌘T (Add to DaVinci Resolve Timeline) goes
+     through the engine's bridge (`EngineResolve`), the same script and answers as
+     `ResolveBridge.add`, as agents' `add_to_resolve` already did since 8c. `earmark-parity
+     engineresolve` asks both for 40 previews of the owner's sounds (tracks free, new, 1, 2 and
+     99; at the playhead, seconds, timecodes and a bad one; whole sounds and parts). Resolve
+     wasn't open when it ran, so what it showed is that both fail alike, with the same message;
+     previews with Resolve open, and placing for real, aren't checked for this piece (the
+     script and the engine's side were checked in Resolve Studio in step 6).
    - Still in Swift: the database (with analysis-file export and import, and applying the
-     owner's rules and choices to the sounds), the Resolve bridge (the app's; agents already use
-     the engine's), and the models (Core ML stays on the Mac).
+     owner's rules and choices to the sounds), and the models (Core ML stays on the Mac).
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
 

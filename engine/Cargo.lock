@@ -303,6 +303,7 @@ name = "earmark-ffi"
 version = "0.1.0"
 dependencies = [
  "earmark-core",
+ "earmark-resolve",
  "serde_json",
  "uniffi",
 ]
