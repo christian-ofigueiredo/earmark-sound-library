@@ -20,3 +20,8 @@ local/
 # The engine built for the app by scripts/build-engine.sh
 app/Engine/
 app/Sources/EarmarkEngine/Generated/
+
+# The Windows and Linux app (desktop/)
+desktop/node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
