@@ -1,5 +1,6 @@
 import EarmarkCore
 import EarmarkEngine
+import EarmarkML
 import Foundation
 import Testing
 
@@ -55,6 +56,22 @@ struct EngineScannerTests {
             #expect(await EngineScanner().scan(root: folder) == swift, "\(folder.path)")
         }
         #expect(await LibraryScanner().scan(root: real).count == 2)
+    }
+
+    /// Music folders: the engine lists the songs and the app's AVFoundation reader tags them, giving
+    /// what MusicFiles.read gives, through a link above the folder too.
+    @Test func musicSameAsSwift() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("earmark-engine-\(UUID().uuidString)")
+        let album = root.appendingPathComponent("Álbum")
+        try FileManager.default.createDirectory(at: album, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try wav(seconds: 0.75, description: "One").write(to: album.appendingPathComponent("01 One.wav"))
+        try wav(seconds: 2, description: "Two").write(to: root.appendingPathComponent("02 Two.wav"))
+        let swift = await MusicFiles.read(root: root)
+        let engine = await EngineMusicReader(tags: MusicFiles.songFile).read(root: root)
+        #expect(swift.count == 2)
+        #expect(engine == swift)
+        #expect(engine.map { URL(fileURLWithPath: $0.path).lastPathComponent } == ["02 Two.wav", "01 One.wav"])
     }
 
     @Test func emptyFolder() async throws {
