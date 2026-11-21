@@ -303,6 +303,11 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
        dropped and regrouped, songs rescanned with accented names, Phase 0's analysis, Earmark's,
        and corrections): the same answers, and all 16 tables, 145,549 rows, identical except the
        times each side stamps itself (a library added, a choice made, a set grouped, an import).
+     - **First real rescan, then a fix:** the database stayed intact, but 2,709 sounds' and 115
+       songs' lengths (AVFoundation's, for MP3 and AAC) changed in their last bit:
+       `serde_json` without its `float_roundtrip` feature can read a decimal number one unit
+       off. The feature is on now (a test checks such numbers), the write comparison scans with
+       AVFoundation's lengths as the app does, and a second rescan restores the exact values.
    - Still in Swift on the Mac: decoding (AVFoundation) and the models (Core ML), by design, and
      applying the owner's rules and choices to the sounds in memory (`FolderRules.apply`,
      `SoundCategories.apply`), which the engine has but the app doesn't call through it yet.
