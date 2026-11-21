@@ -9,11 +9,13 @@ struct EngineDatabaseTests {
     let empty = try! JSONDecoder().decode(NormalizedMetadata.self, from: Data(#"{"fields":{},"sources":{}}"#.utf8))
 
     func scanned(_ n: Int) -> [ScannedSound] {
-        (0 ..< n).map { i in
-            ScannedSound(path: "/Lib/Folder \(i % 3)/Sound é \(i).wav", fileSize: Int64(1000 + i),
-                         modified: Date(timeIntervalSince1970: 1_700_000_000.123456 + Double(i)), fingerprint: "fp\(i)",
-                         technical: AudioTechnical(sampleRate: 48_000, channels: 2, bitsPerSample: 24, duration: Double(i) + 0.5),
-                         metadata: empty, warnings: i == 2 ? ["odd chunk"] : [])
+        (0 ..< n).map { (i: Int) -> ScannedSound in
+            let path: String = "/Lib/Folder \(i % 3)/Sound é \(i).wav"
+            let modified = Date(timeIntervalSince1970: 1_700_000_000.123456 + Double(i))
+            let technical = AudioTechnical(sampleRate: 48_000, channels: 2, bitsPerSample: 24, duration: Double(i) + 0.5)
+            let warnings: [String] = i == 2 ? ["odd chunk"] : []
+            return ScannedSound(path: path, fileSize: Int64(1000 + i), modified: modified, fingerprint: "fp\(i)",
+                                technical: technical, metadata: empty, warnings: warnings)
         }
     }
 
