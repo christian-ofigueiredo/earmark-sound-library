@@ -165,6 +165,77 @@ if args.count >= 3, args[1] == "engineanalysis" {
     exit(bad == 0 ? 0 : 1)
 }
 
+// Find Similar, the neighbour search behind Earmark's guesses, and duplicates, by Swift and
+// through the Rust engine (EngineSimilarityIndex, EngineDuplicates). Only reads.
+//   earmark-parity engineneighbours <library.sqlite>
+if args.count >= 3, args[1] == "engineneighbours" {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    var bad = 0
+    // Find Similar: every sound's 100 nearest, with a few sounds left out each time.
+    let clap = try db.vectors(model: "clap-general")
+    var clock = ContinuousClock.now
+    let swiftIndex = SimilarityIndex(vectors: clap)
+    let rustIndex = EngineSimilarityIndex(vectors: clap)
+    print("index of \(swiftIndex.count) / \(rustIndex.count) sounds built in \(ContinuousClock.now - clock)")
+    var same = 0, swiftTime = Duration.zero, rustTime = Duration.zero
+    for (i, v) in clap.enumerated() {
+        let skip = Set(clap[(i * 7919) % clap.count ..< min(clap.count, (i * 7919) % clap.count + 3)].map(\.id))
+        clock = ContinuousClock.now
+        let a = swiftIndex.nearest(to: v.id, count: 100, excluding: skip)
+        swiftTime += ContinuousClock.now - clock
+        clock = ContinuousClock.now
+        let b = rustIndex.nearest(to: v.id, count: 100, excluding: skip)
+        rustTime += ContinuousClock.now - clock
+        if a.map(\.id) == b.map(\.id) && a.map(\.score) == b.map(\.score) { same += 1 } else {
+            bad += 1
+            if bad <= 3 { print("nearest differs for \(v.id): \(a.prefix(3)) / \(b.prefix(3))") }
+        }
+    }
+    print("Find Similar: \(same) of \(clap.count) sounds' 100 nearest identical; Swift \(swiftTime), engine \(rustTime)")
+    // The neighbour search for guesses and near duplicates, as SoundGuesser makes it.
+    let sounds = try db.sounds()
+    let hidden = FormatTwins.group(sounds).hidden
+    let byId = Dictionary(uniqueKeysWithValues: sounds.compactMap { s in s.id.map { ($0, s) } })
+    let d = 1536
+    var rows: [SoundRecord] = []
+    var buffer = PageBuffer(count: 0)
+    try db.forEachVectors(models: ["pe-av-large", "clap-general"], count: { buffer = PageBuffer(count: $0 * d) }) { id, blocks in
+        guard let s = byId[id], !hidden.contains(id), (rows.count + 1) * d <= buffer.count else { return }
+        let r = rows.count
+        buffer.withFloats { x in for (c, v) in SoundMap.combine(blocks).enumerated() { x[r * d + c] = v } }
+        rows.append(s)
+    }
+    let k = min(60, rows.count)
+    clock = ContinuousClock.now
+    let a = buffer.withFloats { SoundMap.nearestNeighbours(UnsafeBufferPointer(rebasing: $0[0 ..< rows.count * d]), n: rows.count, d: d, k: k) }
+    swiftTime = ContinuousClock.now - clock
+    clock = ContinuousClock.now
+    let b = buffer.withFloats { EngineDuplicates.nearestNeighbours(UnsafeBufferPointer(rebasing: $0[0 ..< rows.count * d]), n: rows.count, d: d, k: k) }
+    rustTime = ContinuousClock.now - clock
+    let rowsSame = (0 ..< rows.count).filter { r in
+        a.indices[r * k ..< (r + 1) * k] == b.indices[r * k ..< (r + 1) * k] && a.distances[r * k ..< (r + 1) * k] == b.distances[r * k ..< (r + 1) * k]
+    }.count
+    if rowsSame != rows.count { bad += 1 }
+    print("neighbours (k \(k)) of \(rows.count) sounds: \(rowsSame) rows identical; Swift \(swiftTime), engine \(rustTime)")
+    // Duplicates: near pairs from that search, byte-identical pairs, and the sets.
+    let ids = rows.map { $0.id! }, durations = rows.map(\.duration)
+    let nearA = Duplicates.nearPairs(ids: ids, durations: durations, indices: a.indices, distances: a.distances, k: k)
+    let nearB = EngineDuplicates.nearPairs(ids: ids, durations: durations, indices: a.indices, distances: a.distances, k: k)
+    if nearA != nearB { bad += 1 }
+    // Swift's identical pairs come in its dictionary's order, which changes from run to run: compared as sets.
+    func key(_ p: Duplicates.Pair) -> String { "\(p.a) \(p.b) \(p.identical) \(p.similarity)" }
+    let sameA = Duplicates.identicalPairs(sounds, hidden: hidden), sameB = EngineDuplicates.identicalPairs(sounds, hidden: hidden)
+    if Set(sameA.map(key)) != Set(sameB.map(key)) || sameA.count != sameB.count { bad += 1 }
+    let setsA = Duplicates.sets(sameA + nearA), setsB = EngineDuplicates.sets(sameA + nearA)
+    func others(_ s: Duplicates.Sets) -> [String] {
+        s.others.sorted { $0.key < $1.key }.map { "\($0.key): " + $0.value.map { "\($0.id) \($0.identical) \($0.similarity)" }.joined(separator: ", ") }
+    }
+    let setsSame = setsA == setsB && others(setsA) == others(setsB)
+    if !setsSame { bad += 1 }
+    print("duplicates: near pairs \(nearA == nearB ? "identical" : "differ") (\(nearA.count)), identical pairs \(Set(sameA.map(key)) == Set(sameB.map(key)) ? "the same" : "differ") (\(sameA.count)), sets \(setsSame ? "identical" : "differ") (\(setsA.members.count))")
+    exit(bad == 0 ? 0 : 1)
+}
+
 if args.count >= 2, args[1] == "metadata" {
     struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
     let encoder = JSONEncoder()

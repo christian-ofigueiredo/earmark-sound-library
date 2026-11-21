@@ -244,9 +244,19 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      bit. `earmark-parity engineanalysis` on the owner's library: the whole map identical
      (28,827 points, 65,064 links; Swift 12 s, engine 14 s), and all 238 subcategories' groups
      and names identical (33 s and 32 s). `EarmarkEngineTests` check small sets and cancelling.
-   - Still in Swift: the database, Find Similar's index and the guesses' neighbours, loudness,
-     duplicates, categories and folder rules, analysis and timeline files, the Resolve bridge
-     (the app's; agents already use the engine's), and the models (Core ML stays on the Mac).
+   - **8e, Find Similar, the guesses' neighbours and duplicates (2026-11-21):**
+     `EngineSimilarityIndex` (the engine's index behind a `SoundNeighbourIndex` protocol that
+     Swift's `SimilarityIndex` also meets, so the folder suggestions take either) and
+     `EngineDuplicates` (the neighbour search behind Earmark's guesses, read in place as in 8d;
+     near and byte-identical pairs; the sets). `earmark-parity engineneighbours` on the owner's
+     library: every sound's 100 nearest identical, scores to the bit (28,827 sounds; Swift 92 s,
+     engine 74 s), the 60 nearest of every sound identical (4 s each), and the same 508 near
+     pairs, 209 byte-identical pairs and 470 sets. Swift lists byte-identical pairs in its
+     dictionary's order, which changes from run to run; the engine lists them in the order the
+     fingerprints first appear, the same pairs.
+   - Still in Swift: the database, loudness, categories and folder rules (with the votes from
+     the neighbours), analysis and timeline files, the Resolve bridge (the app's; agents
+     already use the engine's), and the models (Core ML stays on the Mac).
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
 

@@ -1,4 +1,5 @@
 import EarmarkCore
+import EarmarkEngine
 import EarmarkML
 import Foundation
 
@@ -62,13 +63,18 @@ final class SoundGuesser {
         }
         guard rows.count > 1 else { return (try db.replaceSoundGuesses([]), []) }
         let k = min(60, rows.count)
+        // The Rust engine searches and finds the duplicates unless the owner turned it off (Engine.isOn).
+        let engine = Engine.isOn
         let (indices, distances) = buffer.withFloats { x in
-            SoundMap.nearestNeighbours(UnsafeBufferPointer(rebasing: x[0 ..< rows.count * d]), n: rows.count, d: d, k: k)
+            let x = UnsafeBufferPointer(rebasing: x[0 ..< rows.count * d])
+            return engine ? EngineDuplicates.nearestNeighbours(x, n: rows.count, d: d, k: k)
+                          : SoundMap.nearestNeighbours(x, n: rows.count, d: d, k: k)
         }
         let votes = CategoryVotes.votes(indices: indices, distances: distances, k: k, labels: rows.map(\.catID),
                                         folders: rows.map { "\($0.libraryId)/\($0.folder)" })
-        let duplicates = Duplicates.nearPairs(ids: rows.map { $0.id! }, durations: rows.map(\.duration), indices: indices,
-                                              distances: distances, k: k)
+        let ids = rows.map { $0.id! }, durations = rows.map(\.duration)
+        let duplicates = engine ? EngineDuplicates.nearPairs(ids: ids, durations: durations, indices: indices, distances: distances, k: k)
+                                : Duplicates.nearPairs(ids: ids, durations: durations, indices: indices, distances: distances, k: k)
         // The runners-up of the guess for each sound's folder (or the folder above it that has one).
         let folders = Dictionary(grouping: guesses, by: \.libraryId).mapValues { Set($0.map(\.folder)) }
         let byFolder = Dictionary(guesses.map { ("\($0.libraryId)/\($0.folder)", $0) }, uniquingKeysWith: { a, _ in a })
