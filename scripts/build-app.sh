@@ -115,10 +115,12 @@ echo "Built $APP ($VERSION, build $BUILD_NUMBER)"
 if [ "${1:-}" != "--no-install" ]; then
     DEST="/Applications/Earmark.app"
     RUNNING=0
-    if pgrep -f "$DEST/Contents/MacOS/Earmark\$" >/dev/null; then
+    # The app's own binary, with or without arguments (not earmark-mcp beside it).
+    APP_PROCESS="$DEST/Contents/MacOS/Earmark( |\$)"
+    if pgrep -f "$APP_PROCESS" >/dev/null; then
         RUNNING=1
         osascript -e 'tell application id "'"$BUNDLE_ID"'" to quit' >/dev/null 2>&1 || true
-        while pgrep -f "$DEST/Contents/MacOS/Earmark\$" >/dev/null; do sleep 0.2; done
+        while pgrep -f "$APP_PROCESS" >/dev/null; do sleep 0.2; done
     fi
     rm -rf "$DEST"
     ditto "$APP" "$DEST"
