@@ -228,6 +228,14 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      the owner's music folder (814 songs) `earmark-parity enginemusic` finds the two readings
      identical. The engine has no tag reader of its own yet; Windows and Linux will need one
      (Symphonia reads ID3, MP4 and Vorbis tags) before step 9.
+   - **8c, the MCP server (2026-11-20):** the app ships the engine's `earmark-mcp` (built by
+     `scripts/build-engine.sh`) as `Contents/MacOS/earmark-mcp`, where agents already start it;
+     the Swift server stays beside it as `earmark-mcp-swift`, for an agent pointed there if the
+     Rust one misbehaves. `compare.py mcp` on the owner's library again, read-only: all 9
+     tools and 4,941 calls with no differences (4,931 identical to the byte, the rest only
+     spelling a tiny number `e-6` instead of `e-06`), the same 7 timeline files, and the Resolve
+     previews; all calls took Swift 231 s and Rust 15 s. Neither server's code changed since
+     step 6.
    - Everything else still goes through Swift.
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.

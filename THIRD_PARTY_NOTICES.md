@@ -47,7 +47,7 @@ scikit-learn's (BSD-3-Clause); no scikit-learn code is included.
 | swift-nio, swift-log, swift-system, swift-atomics, swift-collections (Apple) | Used by the MCP Swift SDK | Apache-2.0 |
 | eventsource (Mattt) | Used by the MCP Swift SDK | MIT |
 
-## Rust crates (the engine in `engine/`; no released app uses it yet)
+## Rust crates (the engine in `engine/`, in the Mac app since step 8; not yet in a release)
 
 | Crate | Used for | License |
 |---|---|---|

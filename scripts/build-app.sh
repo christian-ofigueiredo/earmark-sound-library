@@ -33,8 +33,11 @@ BIN="$(swift build -c release --show-bin-path)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/Earmark" "$APP/Contents/MacOS/Earmark"
-# The MCP server agents start (docs/mcp-plan.md), beside the app.
-cp "$BIN/earmark-mcp" "$APP/Contents/MacOS/earmark-mcp"
+# The MCP server agents start (docs/mcp-plan.md), beside the app: the Rust engine's since step 8c
+# (docs/rust-engine-plan.md). The Swift one stays beside it as earmark-mcp-swift, for an agent
+# pointed there if the Rust one misbehaves.
+cp "$ROOT/engine/target/release/earmark-mcp" "$APP/Contents/MacOS/earmark-mcp"
+cp "$BIN/earmark-mcp" "$APP/Contents/MacOS/earmark-mcp-swift"
 # SwiftPM records the deployment target as the SDK the binary was built with
 # (LC_BUILD_VERSION "sdk 14.0"), and macOS draws apps built for an old SDK in the
 # old design: old window buttons and controls, no Liquid Glass. Record the SDK
