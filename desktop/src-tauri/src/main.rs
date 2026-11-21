@@ -7,6 +7,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod analysis;
+
 use earmark_core::analysis::linalg::Floats;
 use earmark_core::analysis::sound_map;
 use earmark_core::analysis_file::AnalysisFile;
@@ -36,6 +38,9 @@ struct App {
     /// The catalog the list is drawn from, made again after each change.
     catalog: Mutex<Option<Arc<SoundCatalog>>>,
     scanning: AtomicBool,
+    analysing: AtomicBool,
+    /// Asks the analysis to stop after the file it's on.
+    stop: AtomicBool,
     /// The last map made, by its scope.
     map: Mutex<Option<(String, Value)>>,
 }
@@ -490,6 +495,53 @@ fn song_file(path: &Path) -> SongFile {
     }
 }
 
+// MARK: analysing
+
+/// Measures loudness, listens with the two models (if installed in the data folder's Models) and
+/// groups similar sounds, in the background. "analysis" events say how far it is; "analysed" when
+/// it ends.
+#[tauri::command]
+fn analyse(handle: AppHandle) {
+    let app = handle.state::<App>();
+    if app.analysing.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    app.stop.store(false, Ordering::SeqCst);
+    std::thread::spawn(move || {
+        let app = handle.state::<App>();
+        let report = |what: &str, done: usize, total: usize| {
+            let _ = handle.emit(
+                "analysis",
+                json!({ "what": what, "done": done, "total": total }),
+            );
+        };
+        let progress = analysis::Progress {
+            report: &report,
+            stop: &app.stop,
+        };
+        let result = analysis::run(&app.db, &app.path, &progress);
+        app.analysing.store(false, Ordering::SeqCst);
+        app.changed();
+        let _ = handle.emit(
+            "analysed",
+            result.unwrap_or_else(|e| format!("Analysis stopped: {e}")),
+        );
+    });
+}
+
+#[tauri::command]
+fn stop_analysis(app: State<'_, App>) {
+    app.stop.store(true, Ordering::SeqCst);
+}
+
+/// Where the models go, for the window to say.
+#[tauri::command]
+fn models_folder(app: State<'_, App>) -> String {
+    analysis::models_folder(&app.path)
+        .to_string_lossy()
+        .into_owned()
+}
+
 // MARK: analysis files
 
 /// Brings in an analysis file exported by Earmark on another computer (a Mac's included).
@@ -649,6 +701,8 @@ fn check() -> Result<(), String> {
         path,
         catalog: Mutex::new(None),
         scanning: AtomicBool::new(false),
+        analysing: AtomicBool::new(false),
+        stop: AtomicBool::new(false),
         map: Mutex::new(None),
     };
     let started = std::time::Instant::now();
@@ -731,6 +785,35 @@ fn check() -> Result<(), String> {
 }
 
 fn main() {
+    if std::env::args().any(|a| a == "--analyse") {
+        // The analysis without the window, on the database EARMARK_DATABASE names (a copy).
+        let path = earmark_mcp::default_database_path();
+        let db = match LibraryDatabase::open(Some(&path), false) {
+            Ok(db) => Mutex::new(db),
+            Err(e) => {
+                eprintln!("earmark-desktop --analyse: {e}");
+                std::process::exit(1);
+            }
+        };
+        let stop = AtomicBool::new(false);
+        let report = |what: &str, done: usize, total: usize| {
+            if done == total || done.is_multiple_of(10) {
+                println!("{what}: {done} of {total}");
+            }
+        };
+        let progress = analysis::Progress {
+            report: &report,
+            stop: &stop,
+        };
+        match analysis::run(&db, &path, &progress) {
+            Ok(said) => println!("{said}"),
+            Err(e) => {
+                eprintln!("earmark-desktop --analyse: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if std::env::args().any(|a| a == "--check") {
         if let Err(e) = check() {
             eprintln!("earmark-desktop --check: {e}");
@@ -756,6 +839,8 @@ fn main() {
                 db: Mutex::new(db),
                 catalog: Mutex::new(None),
                 scanning: AtomicBool::new(false),
+                analysing: AtomicBool::new(false),
+                stop: AtomicBool::new(false),
                 map: Mutex::new(None),
             });
             if let Some(window) = app.get_webview_window("main") {
@@ -774,6 +859,9 @@ fn main() {
             remove_library,
             rescan,
             import_analysis,
+            analyse,
+            stop_analysis,
+            models_folder,
             sound_map,
             save_timeline,
             add_to_resolve,

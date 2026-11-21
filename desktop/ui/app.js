@@ -522,6 +522,36 @@ async function importAnalysis() {
   }
 }
 $("import").onclick = importAnalysis;
+
+// Analysing: loudness, the models' vectors (when installed), the groups. The key stops it.
+let analysing = false;
+$("analyse").onclick = async () => {
+  if (analysing) {
+    invoke("stop_analysis");
+    $("analyse").textContent = "Stopping…";
+    return;
+  }
+  analysing = true;
+  $("analyse").textContent = "Stop Analysis";
+  activity("Analysing…");
+  invoke("analyse");
+};
+tauri.event.listen("analysis", (e) => {
+  const p = e.payload;
+  activity(`${p.what}: ${number(p.done)} of ${number(p.total)}`);
+});
+tauri.event.listen("analysed", async (e) => {
+  analysing = false;
+  $("analyse").textContent = "Analyse";
+  let said = e.payload;
+  if (said.includes("no models in")) {
+    const folder = await invoke("models_folder");
+    said += ` To add them, put CLAPAudio.onnx and the PEAV folder in ${folder}.`;
+  }
+  activity(said, 15000);
+  state.map = null;
+  refresh();
+});
 $("empty-import").onclick = importAnalysis;
 
 tauri.event.listen("progress", (e) => {
