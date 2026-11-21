@@ -3,6 +3,7 @@
 #
 #   app/Engine/EarmarkFFI.xcframework                   the engine as a static library, with its C header
 #   app/Sources/EarmarkEngine/Generated/earmark_ffi.swift  the Swift side, written by UniFFI
+#   engine/target/release/earmark-mcp                   the MCP server agents start (build-app.sh ships it)
 #
 # Both are made from engine/crates/earmark-ffi and aren't in the repository. Run this before
 # `swift build` in app/ (scripts/build-app.sh does).
@@ -17,7 +18,7 @@ export MACOSX_DEPLOYMENT_TARGET="14.0"
 command -v cargo > /dev/null || export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 
 cd "$ENGINE"
-cargo build --locked --release -p earmark-ffi -p uniffi-bindgen
+cargo build --locked --release -p earmark-ffi -p uniffi-bindgen -p earmark-mcp
 LIB="$ENGINE/target/release"
 
 WORK="$(mktemp -d -t earmark-engine)"
