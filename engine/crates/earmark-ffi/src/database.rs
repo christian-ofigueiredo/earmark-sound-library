@@ -415,3 +415,27 @@ pub struct StoredVectors {
 fn floats_to_bytes<'a>(values: impl Iterator<Item = &'a f32>) -> Vec<u8> {
     values.flat_map(|v| v.to_le_bytes()).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    /// Numbers from the app's JSON read back to the same bits (serde_json's float_roundtrip): a
+    /// length off in its last bit rewrote 2,709 sounds on the first real rescan.
+    #[test]
+    fn doubles_read_exactly() {
+        let values: [f64; 6] = [
+            28.554666666666666,
+            125.36453514739229,
+            0.1,
+            1.0 / 3.0,
+            1e-300,
+            207.67927437641723,
+        ];
+        for x in values {
+            let text = serde_json::to_string(&x).unwrap();
+            let back: f64 = serde_json::from_str(&text).unwrap();
+            assert_eq!(back.to_bits(), x.to_bits(), "{text}");
+        }
+        let swift: f64 = serde_json::from_str("28.554666666666666").unwrap();
+        assert_eq!(swift.to_bits(), 28.554666666666666f64.to_bits());
+    }
+}

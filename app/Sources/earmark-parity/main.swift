@@ -535,7 +535,8 @@ if args.count >= 8, args[1] == "enginedbwrite" {
     let soundsRoot = URL(fileURLWithPath: args[4]), musicRoot = URL(fileURLWithPath: args[5])
     let phase0 = try Phase0MusicImport.read(try Data(contentsOf: URL(fileURLWithPath: args[6])))
     let analysisFile = try AnalysisFile.read(try Data(contentsOf: URL(fileURLWithPath: args[7])))
-    let scanned = await LibraryScanner().scan(root: soundsRoot)
+    // As the app scans: AVFoundation gives MP3 and AAC lengths (decimal numbers the JSON must keep exactly).
+    let scanned = await LibraryScanner(fallback: SoundFiles.technical).scan(root: soundsRoot)
     let when = Date(timeIntervalSinceReferenceDate: 785_000_000.25)
     var answers: [[String]] = [[], []]
     for (side, db) in stores.enumerated() {
