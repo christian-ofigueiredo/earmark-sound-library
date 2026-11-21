@@ -21,10 +21,10 @@ targets.append(.target(name: "EarmarkML", dependencies: ["EarmarkCore"]))
 // EarmarkEngine: the Rust engine (engine/crates/earmark-ffi) behind the app's types. Its library
 // and Swift bindings are made by scripts/build-engine.sh, which must run before `swift build`.
 targets.append(.binaryTarget(name: "EarmarkFFI", path: "Engine/EarmarkFFI.xcframework"))
-targets.append(.target(name: "EarmarkEngine", dependencies: ["EarmarkCore", "EarmarkFFI"],
+targets.append(.target(name: "EarmarkEngine", dependencies: ["EarmarkCore", "EarmarkFFI", .product(name: "GRDB", package: "GRDB.swift")],
                        // UniFFI's generated code predates Swift 6's checks.
                        swiftSettings: [.swiftLanguageMode(.v5)],
-                       linkerSettings: [.linkedFramework("Accelerate")]))
+                       linkerSettings: [.linkedFramework("Accelerate"), .linkedLibrary("sqlite3")]))
 targets.append(.executableTarget(name: "Earmark", dependencies: ["EarmarkCore", "EarmarkML", "EarmarkEngine"]))
 targets.append(.testTarget(name: "EarmarkEngineTests", dependencies: ["EarmarkEngine", "EarmarkCore", "EarmarkML"]))
 products.append(.executable(name: "Earmark", targets: ["Earmark"]))

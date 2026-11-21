@@ -61,7 +61,7 @@ final class SoundMapState {
     func fit() { fitRequest += 1 }
 
     /// The map for these sounds (the sidebar's choice): from the cache, or worked out in the background.
-    func update(scoped sounds: [SoundRecord], database: LibraryDatabase?) {
+    func update(scoped sounds: [SoundRecord], database: (any LibraryStore)?) {
         scoped = sounds
         let ids = sounds.compactMap(\.id).sorted()
         let key = ids.hashValue
@@ -147,7 +147,7 @@ final class SoundMapState {
     /// the map's spread; grown from the old map (new dots among their neighbours, then UMAP
     /// again briefly) 0.20–0.33, no steadier. Every map made before is dropped (their sounds'
     /// vectors may have changed too).
-    func addNewSounds(database: LibraryDatabase?) {
+    func addNewSounds(database: (any LibraryStore)?) {
         vectors = nil
         cache = [:]
         recent = []
@@ -164,7 +164,7 @@ final class SoundMapState {
         progress = nil
     }
 
-    nonisolated private static func loadVectors(_ db: LibraryDatabase) -> Vectors {
+    nonisolated private static func loadVectors(_ db: any LibraryStore) -> Vectors {
         var ids: [Int64] = [], row: [Int64: Int] = [:], flat: PageBuffer?, d = 0, capacity = 0
         try? db.forEachVectors(models: ["pe-av-large", "clap-general"], count: { capacity = $0 }) { id, blocks in
             let combined = SoundMap.combine(blocks)

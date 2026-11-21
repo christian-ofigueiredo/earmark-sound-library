@@ -47,7 +47,7 @@ final class GroupBuilder {
         return out
     }
 
-    private func run(_ work: [SoundGroupWork], model: AppModel, db: LibraryDatabase) async {
+    private func run(_ work: [SoundGroupWork], model: AppModel, db: any LibraryStore) async {
         model.groupProgress = (0, work.count)
         defer { model.groupProgress = nil }
         let sounds = Dictionary(model.sounds.compactMap { s in s.id.map { ($0, s) } }, uniquingKeysWith: { a, _ in a })
@@ -92,7 +92,7 @@ final class GroupBuilder {
 
     /// Every analysed sound's vector, averaged (the words that fit the whole library count less
     /// in names). Read one sound at a time.
-    nonisolated static func mean(_ db: LibraryDatabase) throws -> [Float] {
+    nonisolated static func mean(_ db: any LibraryStore) throws -> [Float] {
         var sum = [Double](repeating: 0, count: dimensions), n = 0
         try db.forEachVectors(models: models) { _, blocks in
             for (c, v) in SoundMap.combine(blocks).enumerated() { sum[c] += Double(v) }
@@ -103,7 +103,7 @@ final class GroupBuilder {
 
     /// The sounds' combined vectors, row after row by sound id (sounds without both are left
     /// out), straight into a `PageBuffer`.
-    nonisolated static func vectors(_ db: LibraryDatabase, ids: [Int64]) throws -> (ids: [Int64], buffer: PageBuffer) {
+    nonisolated static func vectors(_ db: any LibraryStore, ids: [Int64]) throws -> (ids: [Int64], buffer: PageBuffer) {
         var buffer = PageBuffer(count: 0)
         var found: [Int64] = []
         try db.forEachVectors(models: models, ids: ids, count: { buffer = PageBuffer(count: $0 * dimensions) }) { id, blocks in
@@ -115,7 +115,7 @@ final class GroupBuilder {
         return (found, buffer)
     }
 
-    nonisolated static func regroup(catID: String, sounds: [SoundRecord], mean: [Float], db: LibraryDatabase) throws {
+    nonisolated static func regroup(catID: String, sounds: [SoundRecord], mean: [Float], db: any LibraryStore) throws {
         let (ids, buffer) = try vectors(db, ids: sounds.compactMap(\.id))
         let byId = Dictionary(uniqueKeysWithValues: sounds.compactMap { s in s.id.map { ($0, s) } })
         let n = ids.count, d = dimensions
@@ -141,7 +141,7 @@ final class GroupBuilder {
 
     /// New sounds join the group whose centre is nearest; sounds that left are taken out.
     nonisolated static func join(catID: String, sounds: [SoundRecord], remove: [Int64], stored: SoundGroupSnapshot,
-                                 db: LibraryDatabase) throws {
+                                 db: any LibraryStore) throws {
         let groups = Set((stored.groups[catID] ?? []).compactMap(\.id))
         let removing = Set(remove)
         let members = stored.membership.filter { groups.contains($0.value) && !removing.contains($0.key) }

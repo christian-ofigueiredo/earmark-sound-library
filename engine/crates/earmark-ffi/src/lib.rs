@@ -18,6 +18,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::UNIX_EPOCH;
 
+mod database;
+pub use database::*;
+
 uniffi::setup_scaffolding!();
 
 /// A file's length and format, for the files the engine's reader can't parse (MP3, AAC…).

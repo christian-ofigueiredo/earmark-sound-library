@@ -18,7 +18,11 @@ export MACOSX_DEPLOYMENT_TARGET="14.0"
 command -v cargo > /dev/null || export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 
 cd "$ENGINE"
-cargo build --locked --release -p earmark-ffi -p uniffi-bindgen -p earmark-mcp
+# Two builds: the app's engine with the system's SQLite (the one GRDB uses: two copies of SQLite
+# in one process can lose each other's locks on the same file), the MCP server, its own process,
+# with SQLite built in. Built together, Cargo would give both the built-in one.
+cargo build --locked --release -p earmark-ffi -p uniffi-bindgen
+cargo build --locked --release -p earmark-mcp
 LIB="$ENGINE/target/release"
 
 WORK="$(mktemp -d -t earmark-engine)"

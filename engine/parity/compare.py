@@ -18,6 +18,7 @@
     python3 engine/parity/compare.py decode <library.sqlite> [--count N]
     python3 engine/parity/compare.py embed <library.sqlite> <onnx folder> clap|peav [--count N]
     python3 engine/parity/compare.py tempo <library.sqlite> <onnx folder> [--count N]
+    python3 engine/parity/compare.py enginedb <library.sqlite> <sounds folder> <music folder> <music_analysis.json>
     python3 engine/parity/compare.py names <library.sqlite> [--count N]
     python3 engine/parity/compare.py mcp <library.sqlite> [--count N]
 
@@ -511,6 +512,43 @@ def db_mode(source, sounds_root, music_root, phase0_file):
         shutil.rmtree(work)
 
 
+def enginedb_mode(source, sounds_root, music_root, phase0_file):
+    """The app's database writes in-process (`earmark-parity enginedbwrite`): Swift's
+    LibraryDatabase on one copy, the Rust engine's EngineLibraryDatabase on another, the same
+    operations in the same order, after both were cleared of analysis and given it back from an
+    analysis file. Only copies are written."""
+    work = tempfile.mkdtemp(prefix="earmark-enginedb-")
+    try:
+        original = f"{work}/original.sqlite"
+        subprocess.run(["sqlite3", f"file:{source}?mode=ro", f".backup {original}"], check=True)
+        files = f"{work}/files"
+        os.makedirs(files)
+        run([SWIFT, "anafile-export", original, files])
+        sounds_file = next(f for f in os.listdir(files) if f.startswith(os.path.basename(sounds_root.rstrip("/"))))
+        for name in ("swift", "engine"):
+            target = f"{work}/{name}.sqlite"
+            subprocess.run(["sqlite3", original, f".backup {target}"], check=True)
+            con = sqlite3.connect(target)
+            for table in ("soundFacts", "soundEmbedding", "folderRule", "soundCategory"):
+                con.execute(f"DELETE FROM {table}")
+            con.commit()
+            con.close()
+        out = subprocess.run([SWIFT, "enginedbwrite", f"{work}/swift.sqlite", f"{work}/engine.sqlite", sounds_root, music_root,
+                              phase0_file, f"{files}/{sounds_file}"], capture_output=True, text=True)
+        print(out.stdout.strip())
+        if out.returncode != 0:
+            print(out.stderr[-2000:])
+            return 1
+        # The times each side stamps itself: when a library was added, an owner's choice made, a set
+        # grouped, and analysis brought in from a file (Swift stamps each row, the engine the import).
+        now = {("library", "addedAt"), ("soundCategory", "createdAt"), ("soundGroupSet", "groupedAt"),
+               ("soundFacts", "analyzedAt"), ("soundEmbedding", "analyzedAt")}
+        return compare_dbs(f"{work}/swift.sqlite", f"{work}/engine.sqlite", "after the operations",
+                           skip=lambda t, c: (t, c) in now)
+    finally:
+        shutil.rmtree(work)
+
+
 class McpServer:
     """A server over stdin/stdout, as an MCP client starts it."""
 
@@ -920,6 +958,8 @@ def main():
         bad = decode_mode(arg, int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 200)
     elif mode == "embed":
         bad = embed_mode(arg, sys.argv[3], sys.argv[4], int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 300)
+    elif mode == "enginedb":
+        bad = enginedb_mode(arg, sys.argv[3], sys.argv[4], sys.argv[5])
     elif mode == "tempo":
         bad = tempo_mode(arg, sys.argv[3], int(sys.argv[sys.argv.index("--count") + 1]) if "--count" in sys.argv else 100)
     elif mode == "names":
