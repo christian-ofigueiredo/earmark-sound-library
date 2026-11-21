@@ -10,6 +10,7 @@ use earmark_core::analysis::{
 use earmark_core::metadata::AudioTechnical;
 use earmark_core::records::SoundRecord;
 use earmark_core::scan;
+use earmark_core::timeline_file;
 use earmark_core::ucs::UcsCatalog;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -727,6 +728,106 @@ impl LoudnessMeasure {
             peak: r.peak,
         }
     }
+}
+
+/// One sound to place in a timeline file, as Swift's `TimelineFile.Clip`.
+#[derive(uniffi::Record)]
+pub struct TimelineClip {
+    pub path: String,
+    pub name: String,
+    pub length: f64,
+    pub sample_rate: i64,
+    pub channels: i64,
+    pub time_reference: i64,
+    pub start: Option<f64>,
+    pub end: Option<f64>,
+    pub at: Option<f64>,
+}
+
+/// Where a clip went: its lane and its timeline timecodes.
+#[derive(uniffi::Record)]
+pub struct TimelinePlacement {
+    pub lane: i64,
+    pub start: String,
+    pub end: String,
+}
+
+/// A timeline file's text and where each clip went.
+#[derive(uniffi::Record)]
+pub struct TimelineText {
+    pub xml: String,
+    pub placements: Vec<TimelinePlacement>,
+}
+
+/// Why a timeline file couldn't be made, as Swift's `TimelineFile.Failure`.
+#[derive(Debug, uniffi::Error)]
+pub enum TimelineError {
+    BadTimecode { timecode: String },
+    TooShort { name: String },
+    Nothing,
+    UnknownRate { rate: String },
+}
+
+impl std::fmt::Display for TimelineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimelineError::BadTimecode { timecode } => {
+                timeline_file::Failure::BadTimecode(timecode.clone()).fmt(f)
+            }
+            TimelineError::TooShort { name } => {
+                timeline_file::Failure::TooShort(name.clone()).fmt(f)
+            }
+            TimelineError::Nothing => timeline_file::Failure::Nothing.fmt(f),
+            TimelineError::UnknownRate { rate } => {
+                write!(f, "“{rate}” isn't a frame rate Earmark knows.")
+            }
+        }
+    }
+}
+
+/// The FCPXML timeline file for `clips` at the frame rate named `rate` ("25", "29.97 DF"…), as
+/// Swift's `TimelineFile.fcpxml`.
+#[uniffi::export]
+pub fn timeline_fcpxml(
+    clips: Vec<TimelineClip>,
+    rate: String,
+    start_timecode: String,
+    name: String,
+) -> Result<TimelineText, TimelineError> {
+    let found = timeline_file::Rate::named(&rate).ok_or(TimelineError::UnknownRate { rate })?;
+    let clips: Vec<timeline_file::Clip> = clips
+        .into_iter()
+        .map(|c| timeline_file::Clip {
+            path: c.path,
+            name: c.name,
+            length: c.length,
+            sample_rate: c.sample_rate,
+            channels: c.channels,
+            time_reference: c.time_reference,
+            start: c.start,
+            end: c.end,
+            at: c.at,
+        })
+        .collect();
+    let (xml, placements) =
+        timeline_file::fcpxml(&clips, &found, &start_timecode, &name).map_err(|e| match e {
+            timeline_file::Failure::BadTimecode(timecode) => {
+                TimelineError::BadTimecode { timecode }
+            }
+            timeline_file::Failure::TooShort(name) => TimelineError::TooShort { name },
+            timeline_file::Failure::Nothing => TimelineError::Nothing,
+        })?;
+    Ok(TimelineText {
+        xml,
+        placements: placements
+            .into_iter()
+            .map(|p| TimelinePlacement {
+                lane: p.lane,
+                start: p.start,
+                end: p.end,
+            })
+            .collect(),
+    })
 }
 
 /// The engine's version, so the app can say which engine it runs.

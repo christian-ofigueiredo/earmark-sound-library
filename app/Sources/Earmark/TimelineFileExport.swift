@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import EarmarkCore
+import EarmarkEngine
 import SwiftUI
 
 // MARK: File ▸ Save as Timeline File… (docs/timeline-file-plan.md)
@@ -40,7 +41,9 @@ extension AppModel {
             do {
                 let placed = try await Task.detached(priority: .userInitiated) {
                     let clips = try urls.map { try Self.timelineClip($0, range: range) }
-                    let file = try TimelineFile.fcpxml(clips, rate: rate, startTimecode: startTimecode, name: name)
+                    // The Rust engine writes the file unless the owner turned it off (Engine.isOn).
+                    let file = Engine.isOn ? try EngineTimeline.fcpxml(clips, rate: rate, startTimecode: startTimecode, name: name)
+                                           : try TimelineFile.fcpxml(clips, rate: rate, startTimecode: startTimecode, name: name)
                     try Data(file.xml.utf8).write(to: url, options: .atomic)
                     return file.placements
                 }.value

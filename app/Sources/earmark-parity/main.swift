@@ -356,6 +356,58 @@ if args.count >= 3, args[1] == "engineloudness" {
     exit(bad == 0 ? 0 : 1)
 }
 
+// Timeline files by Swift and through the Rust engine (EngineTimeline): every frame rate, start
+// timecodes, real sounds whole and in parts, placed at times, and the failures. Only reads.
+//   earmark-parity enginetimeline <library.sqlite>
+if args.count >= 3, args[1] == "enginetimeline" {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    let sounds = try db.sounds().filter { $0.duration != nil && $0.sampleRate != nil }
+    var rng = SystemRandomNumberGenerator()
+    _ = rng
+    var seed: UInt64 = 11
+    func next(_ n: Int) -> Int { seed = seed &* 6_364_136_223_846_793_005 &+ 1; return Int((seed >> 33) % UInt64(max(1, n))) }
+    func clip(_ s: SoundRecord, part: Bool, at: Double?) -> TimelineFile.Clip {
+        let length = s.duration!
+        let start = part ? Double(next(1000)) / 1000 * length * 0.5 : nil
+        let end = part ? (start ?? 0) + Double(next(1000) + 1) / 1000 * (length - (start ?? 0)) : nil
+        return TimelineFile.Clip(path: s.path, name: s.displayName, length: length, sampleRate: Int(s.sampleRate!),
+                                 channels: s.channels ?? 2, timeReference: Int64(next(3)) * 48_000 * Int64(next(4000)),
+                                 start: start, end: end, at: at)
+    }
+    var same = 0, total = 0, failures = 0
+    func describe(_ r: Result<(xml: String, placements: [TimelineFile.Placement]), Error>) -> String {
+        switch r {
+        case .success(let made): made.xml + "\n" + made.placements.map { "\($0.lane) \($0.start) \($0.end)" }.joined(separator: "\n")
+        case .failure(let e): "failure: \(e)"
+        }
+    }
+    for rate in TimelineFile.Rate.all {
+        for start in ["01:00:00:00", "00:59:59:00", "10:00:00;02", "23:59:50:00", "1:00:00:00", "nonsense"] {
+            for set in 0 ..< 12 {
+                let count = set == 0 ? 0 : next(8) + 1
+                let clips = (0 ..< count).map { i in
+                    clip(sounds[next(sounds.count)], part: next(2) == 0, at: next(3) == 0 ? Double(next(600)) / 10 : (i == 0 && set % 4 == 1 ? 0.0001 : nil))
+                }
+                let a = Result { try TimelineFile.fcpxml(clips, rate: rate, startTimecode: start, name: "Test \(set) ⟨é⟩ & <x>") }
+                let b = Result { try EngineTimeline.fcpxml(clips, rate: rate, startTimecode: start, name: "Test \(set) ⟨é⟩ & <x>") }
+                total += 1
+                if case .failure = a { failures += 1 }
+                if describe(a) == describe(b) { same += 1 } else if total - same <= 3 {
+                    print("differs: \(rate.name) \(start) set \(set):\n   \(describe(a).prefix(300))\n   \(describe(b).prefix(300))")
+                }
+            }
+        }
+    }
+    // A part shorter than a frame.
+    let tiny = TimelineFile.Clip(path: sounds[0].path, name: "Tiny", length: 1, sampleRate: 48_000, channels: 2, start: 0.5, end: 0.5001)
+    let a = Result { try TimelineFile.fcpxml([tiny], rate: TimelineFile.Rate.all[2], name: "T") }
+    let b = Result { try EngineTimeline.fcpxml([tiny], rate: TimelineFile.Rate.all[2], name: "T") }
+    total += 1; failures += 1
+    if describe(a) == describe(b) { same += 1 }
+    print("timeline files: \(same) of \(total) identical (\(failures) of them failures, same message), \(TimelineFile.Rate.all.count) frame rates")
+    exit(same == total ? 0 : 1)
+}
+
 if args.count >= 2, args[1] == "metadata" {
     struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
     let encoder = JSONEncoder()

@@ -69,6 +69,10 @@ public enum TimelineFile {
         public var lane: Int
         public var start: String
         public var end: String
+
+        public init(lane: Int, start: String, end: String) {
+            self.lane = lane; self.start = start; self.end = end
+        }
     }
 
     public enum Failure: Error, LocalizedError, Equatable {

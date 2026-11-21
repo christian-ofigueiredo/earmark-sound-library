@@ -109,3 +109,33 @@ private extension Array where Element == [Float] {
         return go(0, [])
     }
 }
+
+/// Timeline files through the Rust engine give Swift's, failures included.
+/// (On real sounds: `earmark-parity enginetimeline <library.sqlite>`.)
+struct EngineTimelineTests {
+    func both(_ clips: [TimelineFile.Clip], _ rate: TimelineFile.Rate, _ start: String) -> (String, String) {
+        func text(_ r: Result<(xml: String, placements: [TimelineFile.Placement]), Error>) -> String {
+            switch r {
+            case .success(let m): m.xml + m.placements.map { "\($0.lane) \($0.start) \($0.end)" }.joined()
+            case .failure(let e): "\(e)"
+            }
+        }
+        return (text(Result { try TimelineFile.fcpxml(clips, rate: rate, startTimecode: start, name: "Ação & <x>") }),
+                text(Result { try EngineTimeline.fcpxml(clips, rate: rate, startTimecode: start, name: "Ação & <x>") }))
+    }
+
+    @Test(arguments: TimelineFile.Rate.all)
+    func rates(rate: TimelineFile.Rate) {
+        let clips = [
+            TimelineFile.Clip(path: "/Sounds/Door Slam.wav", name: "Door Slam", length: 2.5, sampleRate: 48_000, channels: 2),
+            TimelineFile.Clip(path: "/Sounds/Café/Bell.wav", name: "Bell", length: 7, sampleRate: 96_000, channels: 1,
+                              timeReference: 172_800_000, start: 1.2, end: 3.9, at: 0.5),
+        ]
+        for start in ["01:00:00:00", "00:59:59;29", "bad"] {
+            let (a, b) = both(clips, rate, start)
+            #expect(a == b, "\(rate.name) \(start)")
+        }
+        let (a, b) = both([], rate, "01:00:00:00")
+        #expect(a == b)
+    }
+}
