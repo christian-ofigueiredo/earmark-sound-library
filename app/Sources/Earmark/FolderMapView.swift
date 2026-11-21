@@ -1,5 +1,6 @@
 import AppKit
 import EarmarkCore
+import EarmarkEngine
 import SwiftUI
 
 /// Folder Categories: Earmark's guesses for folders whose sounds have no category (made by
@@ -198,16 +199,22 @@ final class FolderMapper {
         suggesting?.cancel()
         guard pending > 0 else { return }
         // Only categories that came with the files teach the suggestions.
-        let known = FolderSuggester.labels(model.sounds)
+        let known = Engine.isOn ? EngineCategories.labels(model.sounds) : FolderSuggester.labels(model.sounds)
         let all = model.sounds
         suggesting = Task { [weak self] in
             let index = try? await model.similarityIndex()
-            let shared = await Task.detached(priority: .userInitiated) { FolderSuggester.sharedDescriptions(all) }.value
+            let shared = await Task.detached(priority: .userInitiated) {
+                Engine.isOn ? EngineCategories.sharedDescriptions(all) : FolderSuggester.sharedDescriptions(all)
+            }.value
             while !Task.isCancelled, let row = self?.nextToSuggest() {
                 let sounds = row.soundIds.compactMap { model.sound(id: $0) }
                 let options = await Task.detached(priority: .userInitiated) {
-                    FolderSuggester.suggest(folder: row.id.folder, sounds: sounds, index: index, labels: known,
-                                            sharedDescriptions: shared)
+                    // The Rust engine suggests unless the owner turned it off (Engine.isOn).
+                    Engine.isOn
+                        ? EngineCategories.suggest(folder: row.id.folder, sounds: sounds, index: index, labels: known,
+                                                   sharedDescriptions: shared)
+                        : FolderSuggester.suggest(folder: row.id.folder, sounds: sounds, index: index, labels: known,
+                                                  sharedDescriptions: shared)
                 }.value
                 guard let self, !Task.isCancelled else { return }
                 self.suggestions[row.id] = options

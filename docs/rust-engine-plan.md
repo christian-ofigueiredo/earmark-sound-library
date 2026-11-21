@@ -254,9 +254,18 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      pairs, 209 byte-identical pairs and 470 sets. Swift lists byte-identical pairs in its
      dictionary's order, which changes from run to run; the engine lists them in the order the
      fingerprints first appear, the same pairs.
-   - Still in Swift: the database, loudness, categories and folder rules (with the votes from
-     the neighbours), analysis and timeline files, the Resolve bridge (the app's; agents
-     already use the engine's), and the models (Core ML stays on the Mac).
+   - **8f, Earmark's category guesses (2026-11-21):** `EngineCategories` gives the
+     neighbours' votes, the per-sound guesses and every folder's suggestions (with the
+     engine's Find Similar index), and `SoundGuesser`, `FolderGuesser` and the folder map use
+     it. `earmark-parity enginecategories` on the owner's library: all 28,827 sounds' votes,
+     the 755 guesses, the 4,948 labels and the 7 shared descriptions identical; the
+     suggestions for all 291 folders the same categories, order, words and shares, with about
+     10 differing only in a score's last digit. That last digit isn't the engine's: Swift adds
+     a folder's scores in its dictionaries' order, which changes from run to run, and two Swift
+     runs differ the same way on about 9 folders. The engine gives the same answer every time.
+   - Still in Swift: the database, with applying the owner's rules and choices to the sounds;
+     loudness; analysis and timeline files; the Resolve bridge (the app's; agents already use
+     the engine's); and the models (Core ML stays on the Mac).
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
 

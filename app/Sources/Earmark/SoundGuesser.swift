@@ -70,19 +70,22 @@ final class SoundGuesser {
             return engine ? EngineDuplicates.nearestNeighbours(x, n: rows.count, d: d, k: k)
                           : SoundMap.nearestNeighbours(x, n: rows.count, d: d, k: k)
         }
-        let votes = CategoryVotes.votes(indices: indices, distances: distances, k: k, labels: rows.map(\.catID),
-                                        folders: rows.map { "\($0.libraryId)/\($0.folder)" })
+        let labels = rows.map(\.catID), folderKeys = rows.map { "\($0.libraryId)/\($0.folder)" }
+        let votes = engine ? EngineCategories.votes(indices: indices, distances: distances, k: k, labels: labels, folders: folderKeys)
+                           : CategoryVotes.votes(indices: indices, distances: distances, k: k, labels: labels, folders: folderKeys)
         let ids = rows.map { $0.id! }, durations = rows.map(\.duration)
         let duplicates = engine ? EngineDuplicates.nearPairs(ids: ids, durations: durations, indices: indices, distances: distances, k: k)
                                 : Duplicates.nearPairs(ids: ids, durations: durations, indices: indices, distances: distances, k: k)
         // The runners-up of the guess for each sound's folder (or the folder above it that has one).
         let folders = Dictionary(grouping: guesses, by: \.libraryId).mapValues { Set($0.map(\.folder)) }
         let byFolder = Dictionary(guesses.map { ("\($0.libraryId)/\($0.folder)", $0) }, uniquingKeysWith: { a, _ in a })
-        let made = SoundCategories.guesses(sounds: rows, votes: votes) { s in
+        let alternatives: (SoundRecord) -> Set<String> = { s in
             guard let f = FolderRules.ruleFolder(for: s.folder, in: folders[s.libraryId] ?? []),
                   let g = byFolder["\(s.libraryId)/\(f)"] else { return [] }
             return Set(g.alternativeIDs)
         }
+        let made = engine ? EngineCategories.guesses(sounds: rows, votes: votes, alternatives: alternatives)
+                          : SoundCategories.guesses(sounds: rows, votes: votes, alternatives: alternatives)
         try db.saveNearDuplicates(duplicates)
         return (try db.replaceSoundGuesses(made), duplicates)
     }

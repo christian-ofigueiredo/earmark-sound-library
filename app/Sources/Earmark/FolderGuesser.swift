@@ -1,4 +1,5 @@
 import EarmarkCore
+import EarmarkEngine
 import Foundation
 
 /// Gives every folder whose sounds have no category one of Earmark's own: the folder's best
@@ -56,7 +57,8 @@ final class FolderGuesser {
         let index = try? await model.similarityIndex()
         let all = model.sounds
         let (labels, shared) = await Task.detached(priority: .utility) {
-            (FolderSuggester.labels(all), FolderSuggester.sharedDescriptions(all))
+            Engine.isOn ? (EngineCategories.labels(all), EngineCategories.sharedDescriptions(all))
+                        : (FolderSuggester.labels(all), FolderSuggester.sharedDescriptions(all))
         }.value
         var batch: [FolderGuess] = []
         var stale = work.stale.map { (libraryId: $0.libraryId, folder: $0.folder) }
@@ -72,8 +74,12 @@ final class FolderGuesser {
         }
         for (i, folder) in work.folders.enumerated() {
             let options = await Task.detached(priority: .utility) {
-                FolderSuggester.suggest(folder: folder.key.folder, sounds: folder.sounds, index: index, labels: labels,
-                                        sharedDescriptions: shared)
+                // The Rust engine suggests unless the owner turned it off (Engine.isOn).
+                Engine.isOn
+                    ? EngineCategories.suggest(folder: folder.key.folder, sounds: folder.sounds, index: index, labels: labels,
+                                               sharedDescriptions: shared)
+                    : FolderSuggester.suggest(folder: folder.key.folder, sounds: folder.sounds, index: index, labels: labels,
+                                              sharedDescriptions: shared)
             }.value
             if let top = options.first {
                 batch.append(FolderGuess(libraryId: folder.key.libraryId, folder: folder.key.folder, catID: top.entry.catID,
