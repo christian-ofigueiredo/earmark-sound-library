@@ -193,6 +193,10 @@ public enum SoundGroups {
         public var shapeWords: [String]
         /// Words most of the group's files share (names, descriptions, keywords).
         public var keywords: [String]
+
+        public init(name: String, aiWords: [String], shapeWords: [String], keywords: [String]) {
+            self.name = name; self.aiWords = aiWords; self.shapeWords = shapeWords; self.keywords = keywords
+        }
     }
 
     /// One sound, for naming.

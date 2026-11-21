@@ -4,9 +4,11 @@
 //! Records with many fields cross as JSON in the shape Swift's `Codable` types already read
 //! (the parity checks compare exactly that JSON), so the app keeps its own types.
 
+use earmark_core::analysis::{groups, sound_map};
 use earmark_core::metadata::AudioTechnical;
 use earmark_core::scan;
 use earmark_core::ucs::UcsCatalog;
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -153,6 +155,139 @@ fn song_file(path: &Path, listener: &dyn SongListener) -> FoundSong {
         tags: listener.tags(path.clone()),
         path,
     }
+}
+
+/// What the app gives a long piece of maths: progress (0…1) and whether to stop. Called from the
+/// engine's threads.
+#[uniffi::export(with_foreign)]
+pub trait WorkListener: Send + Sync {
+    fn progress(&self, fraction: f64);
+    fn is_cancelled(&self) -> bool;
+}
+
+/// A sound map: `points` as x, y pairs (0…1), `links` as pairs of row numbers.
+#[derive(uniffi::Record)]
+pub struct SoundMapLayout {
+    pub points: Vec<f32>,
+    pub links: Vec<i32>,
+}
+
+/// The app's rows of floats where they are in its memory: `address` of `count` rows of
+/// `dimensions` floats, which the app keeps alive and unchanged until the call returns.
+///
+/// The engine reads them in place rather than copied, for two reasons: a library's map is about
+/// 29,000 × 1,536 floats (177 MB), and the Mac's sums (vDSP) depend on where the matrix sits in
+/// memory, so the same page-aligned buffer the app made gives the same results to the bit.
+///
+/// # Safety
+/// `address` must point to `count × dimensions` readable floats for the whole call.
+unsafe fn rows<'a>(address: u64, count: u32, dimensions: u32) -> &'a [f32] {
+    let len = count as usize * dimensions as usize;
+    if len == 0 || address == 0 {
+        return &[];
+    }
+    unsafe { std::slice::from_raw_parts(address as usize as *const f32, len) }
+}
+
+/// The sound map of `count` unit-length rows (as Swift's `SoundMap.map` with its defaults, three
+/// links per sound). None if cancelled. The rows are read in place (see `rows`).
+#[uniffi::export]
+pub fn sound_map(
+    address: u64,
+    count: u32,
+    dimensions: u32,
+    listener: Arc<dyn WorkListener>,
+) -> Option<SoundMapLayout> {
+    let x = unsafe { rows(address, count, dimensions) };
+    let map = sound_map::map(
+        x,
+        count as usize,
+        dimensions as usize,
+        &sound_map::Settings::default(),
+        3,
+        &|f| listener.progress(f),
+        &|| listener.is_cancelled(),
+    )?;
+    Some(SoundMapLayout {
+        points: map.points.iter().flat_map(|p| *p).collect(),
+        links: map.links.iter().flat_map(|l| *l).collect(),
+    })
+}
+
+/// A group per row (0 for the largest), as Swift's `SoundGroups.cluster`. None if cancelled.
+/// The rows are read in place (see `rows`).
+#[uniffi::export]
+pub fn cluster_sounds(
+    address: u64,
+    count: u32,
+    dimensions: u32,
+    listener: Arc<dyn WorkListener>,
+) -> Option<Vec<u32>> {
+    let x = unsafe { rows(address, count, dimensions) };
+    let labels = groups::cluster(x, count as usize, dimensions as usize, &|| {
+        listener.is_cancelled()
+    })?;
+    Some(labels.into_iter().map(|g| g as u32).collect())
+}
+
+/// One sound, for naming groups: its length and its words (file name, FX name, description,
+/// keywords), as Swift's `SoundGroups.Member`.
+#[derive(uniffi::Record)]
+pub struct GroupMember {
+    pub duration: Option<f64>,
+    pub text: String,
+}
+
+/// What a group is called and the words behind it, as Swift's `SoundGroups.Name`.
+#[derive(uniffi::Record)]
+pub struct GroupName {
+    pub name: String,
+    pub ai_words: Vec<String>,
+    pub shape_words: Vec<String>,
+    pub keywords: Vec<String>,
+}
+
+/// Names for a set's groups, as Swift's `SoundGroups.names`: `groups` are each group's rows of
+/// the `count` rows read in place (see `rows`).
+#[uniffi::export]
+pub fn group_names(
+    groups: Vec<Vec<u32>>,
+    address: u64,
+    count: u32,
+    dimensions: u32,
+    members: Vec<GroupMember>,
+    library_mean: Vec<f32>,
+    exclude: Vec<String>,
+) -> Vec<GroupName> {
+    let x = unsafe { rows(address, count, dimensions) };
+    let groups: Vec<Vec<usize>> = groups
+        .into_iter()
+        .map(|g| g.into_iter().map(|r| r as usize).collect())
+        .collect();
+    let members: Vec<groups::Member> = members
+        .into_iter()
+        .map(|m| groups::Member {
+            duration: m.duration,
+            text: m.text,
+        })
+        .collect();
+    let exclude: HashSet<String> = exclude.into_iter().collect();
+    groups::names(
+        &groups,
+        x,
+        dimensions as usize,
+        &members,
+        &library_mean,
+        &exclude,
+    )
+    .into_iter()
+    .map(|n| GroupName {
+        name: n.name,
+        ai_words: n.ai_words,
+        shape_words: n.shape_words,
+        keywords: n.keywords,
+    })
+    .collect()
 }
 
 /// The engine's version, so the app can say which engine it runs.

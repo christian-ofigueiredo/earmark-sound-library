@@ -67,6 +67,11 @@ public enum SoundMap {
         /// Each sound with its `linksPerSound` nearest in the embedding space, every pair once
         /// (lower index first), in order.
         public var links: [SIMD2<Int32>]
+
+        public init(points: [SIMD2<Float>], links: [SIMD2<Int32>]) {
+            self.points = points
+            self.links = links
+        }
     }
 
     /// `layout(flat:…)` with the links between neighbours (none under 20 sounds: no neighbour search).

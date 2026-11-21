@@ -236,7 +236,17 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      spelling a tiny number `e-6` instead of `e-06`), the same 7 timeline files, and the Resolve
      previews; all calls took Swift 231 s and Rust 15 s. Neither server's code changed since
      step 6.
-   - Everything else still goes through Swift.
+   - **8d, the sound map and similarity groups (2026-11-20):** `EngineAnalysis` gives
+     `SoundMap.map`, `SoundGroups.cluster` and `SoundGroups.names` through the engine, and the
+     map view and `GroupBuilder` use it. The engine reads the app's rows where they are (their
+     address) instead of a copy: a library's map is 177 MB of floats, and vDSP's sums depend on
+     where a matrix sits, so the app's own page-aligned buffer gives the same results to the
+     bit. `earmark-parity engineanalysis` on the owner's library: the whole map identical
+     (28,827 points, 65,064 links; Swift 12 s, engine 14 s), and all 238 subcategories' groups
+     and names identical (33 s and 32 s). `EarmarkEngineTests` check small sets and cancelling.
+   - Still in Swift: the database, Find Similar's index and the guesses' neighbours, loudness,
+     duplicates, categories and folder rules, analysis and timeline files, the Resolve bridge
+     (the app's; agents already use the engine's), and the models (Core ML stays on the Mac).
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
 

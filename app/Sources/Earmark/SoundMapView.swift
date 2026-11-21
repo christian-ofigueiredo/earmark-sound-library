@@ -1,6 +1,7 @@
 import Accelerate
 import AppKit
 import EarmarkCore
+import EarmarkEngine
 import SwiftUI
 
 // MARK: state
@@ -103,8 +104,13 @@ final class SoundMapState {
                         }
                     }
                     return x.withFloats { f in
-                        SoundMap.map(flat: UnsafeBufferPointer(rebasing: f[0 ..< rows.count * d]), count: rows.count, dimensions: d,
-                                     progress: { ticker.send($0) }, isCancelled: { flag.isSet })
+                        let rowsFlat = UnsafeBufferPointer(rebasing: f[0 ..< rows.count * d])
+                        // The Rust engine makes the map unless the owner turned it off (Engine.isOn).
+                        return Engine.isOn
+                            ? EngineAnalysis.map(flat: rowsFlat, count: rows.count, dimensions: d,
+                                                 progress: { ticker.send($0) }, isCancelled: { flag.isSet })
+                            : SoundMap.map(flat: rowsFlat, count: rows.count, dimensions: d,
+                                           progress: { ticker.send($0) }, isCancelled: { flag.isSet })
                     }
                 }.value
             } onCancel: {
