@@ -14,7 +14,7 @@ path = "src/main.rs"
 [dependencies]
 earmark-audio.workspace = true
 earmark-core.workspace = true
-earmark-db.workspace = true
+earmark-db = { workspace = true, features = ["bundled"] }
 earmark-models.workspace = true
 serde.workspace = true
 serde_json.workspace = true

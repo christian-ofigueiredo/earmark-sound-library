@@ -362,8 +362,6 @@ if args.count >= 3, args[1] == "engineloudness" {
 if args.count >= 3, args[1] == "enginetimeline" {
     let db = try LibraryDatabase(path: args[2], readOnly: true)
     let sounds = try db.sounds().filter { $0.duration != nil && $0.sampleRate != nil }
-    var rng = SystemRandomNumberGenerator()
-    _ = rng
     var seed: UInt64 = 11
     func next(_ n: Int) -> Int { seed = seed &* 6_364_136_223_846_793_005 &+ 1; return Int((seed >> 33) % UInt64(max(1, n))) }
     func clip(_ s: SoundRecord, part: Bool, at: Double?) -> TimelineFile.Clip {
@@ -448,6 +446,203 @@ extension Result where Failure == Error {
     init(_ body: () async throws -> Success) async {
         do { self = .success(try await body()) } catch { self = .failure(error) }
     }
+}
+
+// Every read the app makes of its database, through Swift's LibraryDatabase and through the Rust
+// engine (EngineLibraryDatabase), both opening the file read-only.
+//   earmark-parity enginedbread <library.sqlite>
+if args.count >= 3, args[1] == "enginedbread" {
+    let swift = try LibraryDatabase(path: args[2], readOnly: true)
+    let rust = try EngineLibraryDatabase(path: args[2], readOnly: true)
+    var bad = 0
+    func check(_ what: String, _ same: Bool, _ detail: @autoclosure () -> String = "") {
+        print("\(same ? "same   " : "DIFFERS") \(what) \(same ? "" : detail())")
+        if !same { bad += 1 }
+    }
+    func timed<T>(_ body: () throws -> T) rethrows -> (T, Duration) {
+        let clock = ContinuousClock.now
+        let v = try body()
+        return (v, ContinuousClock.now - clock)
+    }
+    let (libsA, _) = try timed { try swift.libraries() }, (libsB, _) = try timed { try rust.libraries() }
+    check("libraries (\(libsA.count))", libsA == libsB)
+    let (soundsA, ta) = try timed { try swift.sounds() }, (soundsB, tb) = try timed { try rust.sounds() }
+    check("sounds (\(soundsA.count); Swift \(ta), engine \(tb))", soundsA == soundsB,
+          "\(zip(soundsA, soundsB).first { $0 != $1 }.map { "\($0)\n vs \($1)" } ?? "count \(soundsB.count)")")
+    for lib in libsA { check("sounds of library \(lib.id!)", try swift.sounds(libraryId: lib.id) == rust.sounds(libraryId: lib.id)) }
+    check("sound facts", try swift.soundFacts() == rust.soundFacts())
+    for model in ["clap-general", "pe-av-large"] {
+        check("embedding status \(model)", try swift.embeddingStatus(model: model) == rust.embeddingStatus(model: model))
+        let (va, ta) = try timed { try swift.vectors(model: model) }, (vb, tb) = try timed { try rust.vectors(model: model) }
+        check("vectors \(model) (\(va.count); Swift \(ta), engine \(tb))", va.map(\.id) == vb.map(\.id) && va.map(\.vector) == vb.map(\.vector))
+        for id in va.prefix(40).map(\.id) + [-1] {
+            if try swift.embedding(soundId: id, model: model) != rust.embedding(soundId: id, model: model) {
+                check("embedding \(id) \(model)", false)
+            }
+        }
+    }
+    func stream(_ db: any LibraryStore, ids: [Int64]?) throws -> (Int, [Int64], [[[Float]]]) {
+        var count = 0, seen: [Int64] = [], blocks: [[[Float]]] = []
+        try db.forEachVectors(models: ["pe-av-large", "clap-general"], ids: ids, count: { count = $0 }) { id, v in
+            seen.append(id)
+            if seen.count <= 300 || seen.count % 97 == 0 { blocks.append(v) }
+        }
+        return (count, seen, blocks)
+    }
+    let (sa, tsa) = try timed { try stream(swift, ids: nil) }, (sb, tsb) = try timed { try stream(rust, ids: nil) }
+    check("each sound's vectors (\(sa.1.count); Swift \(tsa), engine \(tsb))", sa.0 == sb.0 && sa.1 == sb.1 && sa.2 == sb.2)
+    let some = Array(soundsA.compactMap(\.id).prefix(500)) + [-5]
+    let (pa, pb) = (try stream(swift, ids: some), try stream(rust, ids: some))
+    check("each sound's vectors, 500 asked for", pa.0 == pb.0 && pa.1 == pb.1 && pa.2 == pb.2)
+    check("near duplicates", try swift.nearDuplicates() == rust.nearDuplicates())
+    let songsA = try swift.songs(), songsB = try rust.songs()
+    check("songs (\(songsA.count))", songsA == songsB)
+    check("song corrections", Set(try swift.songCorrections()) == Set(try rust.songCorrections()))
+    check("category choices", try swift.soundCategoryChoices() == rust.soundCategoryChoices())
+    check("folder rules", try swift.folderRules() == rust.folderRules())
+    check("folder guesses", try swift.folderGuesses() == rust.folderGuesses())
+    let ga = try swift.soundGroupSnapshot(), gb = try rust.soundGroupSnapshot()
+    check("group snapshot (\(ga.byId.count) groups)", ga.sets == gb.sets && ga.groups == gb.groups && ga.byId == gb.byId
+          && ga.membership == gb.membership && ga.memberFingerprints == gb.memberFingerprints)
+    let when = Date(timeIntervalSinceReferenceDate: 785_000_000.123)
+    for lib in libsA {
+        for embeddings in [false, true] {
+            let a = try swift.analysisFile(for: lib, includeEmbeddings: embeddings, exportedAt: when)
+            let b = try rust.analysisFile(for: lib, includeEmbeddings: embeddings, exportedAt: when)
+            // Sorted keys: Swift writes a dictionary's keys in an order that changes from run to run.
+            let sorted = JSONEncoder()
+            sorted.dateEncodingStrategy = .iso8601
+            sorted.outputFormatting = [.sortedKeys]
+            let (ea, eb) = (try sorted.encode(a), try sorted.encode(b))
+            check("analysis file of \(lib.name)\(embeddings ? " with vectors" : "")", ea == eb, {
+                let x = [UInt8](ea), y = [UInt8](eb)
+                let at = (0 ..< min(x.count, y.count)).first { x[$0] != y[$0] } ?? min(x.count, y.count)
+                let lo = max(0, at - 150)
+                return "at byte \(at) of \(x.count)/\(y.count):\n   \(String(decoding: x[lo ..< min(x.count, at + 150)], as: UTF8.self))\n   \(String(decoding: y[lo ..< min(y.count, at + 150)], as: UTF8.self))"
+            }())
+        }
+    }
+    print(bad == 0 ? "every read the same" : "\(bad) differ")
+    exit(bad == 0 ? 0 : 1)
+}
+
+// The app's database writes through Swift's LibraryDatabase on one copy and through the Rust
+// engine (EngineLibraryDatabase) on another, the same operations in the same order; then
+// engine/parity/compare.py compares the two files table by table. Only the copies are written.
+//   earmark-parity enginedbwrite <swift copy> <engine copy> <sounds folder> <music folder> <music_analysis.json> <analysis file>
+if args.count >= 8, args[1] == "enginedbwrite" {
+    let stores: [any LibraryStore] = [try LibraryDatabase(path: args[2]), try EngineLibraryDatabase(path: args[3])]
+    let soundsRoot = URL(fileURLWithPath: args[4]), musicRoot = URL(fileURLWithPath: args[5])
+    let phase0 = try Phase0MusicImport.read(try Data(contentsOf: URL(fileURLWithPath: args[6])))
+    let analysisFile = try AnalysisFile.read(try Data(contentsOf: URL(fileURLWithPath: args[7])))
+    let scanned = await LibraryScanner().scan(root: soundsRoot)
+    let when = Date(timeIntervalSinceReferenceDate: 785_000_000.25)
+    var answers: [[String]] = [[], []]
+    for (side, db) in stores.enumerated() {
+        func say(_ text: String) { answers[side].append(text) }
+        // Analysis brought in from a file first (the copies were cleared of it).
+        let report = try db.importAnalysis(analysisFile)
+        say("import \(report)")
+        // Sound libraries: rescans with moved and removed files, a copy, then removed and added again.
+        let lib = try db.libraries(kind: .sounds).first { $0.path == soundsRoot.path }!
+        try db.replaceSounds(libraryId: lib.id!, root: soundsRoot, scanned: scanned)
+        var moved = scanned
+        for i in stride(from: 0, to: moved.count, by: 97) {
+            moved[i].path = soundsRoot.path + "/Moved Here/" + URL(fileURLWithPath: moved[i].path).lastPathComponent
+        }
+        moved = moved.enumerated().filter { $0.offset % 53 != 1 }.map(\.element).sorted { $0.path < $1.path }
+        try db.replaceSounds(libraryId: lib.id!, root: soundsRoot, scanned: moved)
+        var copy = scanned[5]
+        copy.path = soundsRoot.path + "/Copies/" + URL(fileURLWithPath: copy.path).lastPathComponent
+        try db.replaceSounds(libraryId: lib.id!, root: soundsRoot, scanned: (scanned + [copy]).sorted { $0.path < $1.path })
+        try db.removeLibrary(id: lib.id!)
+        let again = try db.addLibrary(kind: .sounds, path: soundsRoot.path, bookmark: Data([1, 2, 3, 250]))
+        say("library \(again.id!) \(again.kind) \(again.path) \(again.bookmark.map { [UInt8]($0) } ?? [])")
+        try db.replaceSounds(libraryId: again.id!, root: soundsRoot, scanned: scanned)
+        let sounds = try db.sounds()
+        say("sounds \(sounds.count)")
+        // Facts, embeddings, near duplicates.
+        try db.save(sounds.prefix(60).enumerated().map { i, s in
+            SoundFacts(soundId: s.id!, fingerprint: s.fingerprint,
+                       loudness: i % 7 == 0 ? nil : LoudnessMeter.Result(integrated: -23.5 + Double(i) / 7, peak: -1.25),
+                       error: i % 11 == 0 ? "unsupported format" : nil, analyzedAt: when)
+        })
+        try db.save(sounds.prefix(30).enumerated().map { i, s in
+            SoundEmbedding(soundId: s.id!, model: i % 2 == 0 ? "clap-general" : "pe-av-large", fingerprint: s.fingerprint,
+                           vector: i % 5 == 0 ? nil : (0 ..< 512).map { Float($0) / 511 - 0.5 + Float(i) / 1000 },
+                           error: i % 5 == 0 ? "silent" : nil, analyzedAt: when)
+        })
+        try db.saveNearDuplicates([Duplicates.Pair(a: sounds[3].id!, b: sounds[9].id!, identical: false, similarity: 0.9991),
+                                   Duplicates.Pair(a: sounds[12].id!, b: sounds[4].id!, identical: false, similarity: 0.999)])
+        say("near \(try db.nearDuplicates())")
+        // Categories: the owner's, Earmark's guesses, folder rules and guesses.
+        let pick = sounds.enumerated().filter { $0.offset % 211 == 0 }.map { (id: $0.element.id!, fingerprint: $0.element.fingerprint) }
+        try db.setSoundCategory(Array(pick.prefix(20)), catID: "DOORWood")
+        try db.setSoundCategory(Array(pick.prefix(5)), catID: nil)
+        let guesses = sounds.enumerated().filter { $0.offset % 389 == 0 }.map { i, s in
+            SoundCategoryChoice(soundId: s.id!, fingerprint: s.fingerprint, catID: i % 2 == 0 ? "METLImpt" : "DSGNWhsh", byOwner: false,
+                                share: 0.75, replaced: s.catID, createdAt: when)
+        }
+        say("guesses \(try db.replaceSoundGuesses(guesses)) \(try db.replaceSoundGuesses(guesses))")
+        let folders = Array(Set(sounds.map(\.folder))).sorted().prefix(12)
+        try db.save(folders.prefix(6).map { FolderRule(libraryId: again.id!, folder: $0, catID: "AMBForst", createdAt: when) })
+        try db.removeFolderRule(libraryId: again.id!, folder: folders.first!)
+        try db.updateGuesses(saving: folders.map {
+            FolderGuess(libraryId: again.id!, folder: $0, catID: "DSGNMisc", alternatives: ["SCIWeap", "DSGNImpt"], reason: "name “\($0)”",
+                        isUnsure: $0.count % 2 == 0, analysed: 7, createdAt: when)
+        }, removing: [(libraryId: again.id!, folder: folders.last!)])
+        // Similarity groups and the owner's changes to them.
+        // The subcategory with the most sounds, so both groups fill.
+        let catID = Dictionary(grouping: sounds.compactMap(\.catID), by: { $0 }).max { a, b in
+            a.value.count != b.value.count ? a.value.count < b.value.count : a.key > b.key
+        }!.key
+        let inCat = sounds.filter { $0.catID == catID }.prefix(40).map { (id: $0.id!, fingerprint: $0.fingerprint) }
+        try db.replaceGroups(catID: catID, groups: [Array(inCat.prefix(15)), Array(inCat.dropFirst(15).prefix(15))],
+                             names: [SoundGroups.Name(name: "Short · Wooden", aiWords: ["wooden"], shapeWords: ["short"], keywords: ["door"]),
+                                     SoundGroups.Name(name: "Long", aiWords: [], shapeWords: ["long"], keywords: [])])
+        var snap = try db.soundGroupSnapshot()
+        let ids = (snap.groups[catID] ?? []).compactMap(\.id)
+        try db.updateGroups(catID: catID, add: inCat.dropFirst(30).prefix(5).map { ($0.id, $0.fingerprint, ids[0]) }, remove: [inCat[0].id])
+        try db.renameGroup(ids[0], to: "Doors I Like")
+        try db.renameGroup(ids[1], to: nil)
+        try db.moveSounds(Array(inCat.dropFirst(16).prefix(3)), toGroup: ids[0])
+        let made = try db.newGroup(catID: catID, name: "Mine", sounds: Array(inCat.dropFirst(20).prefix(4)))
+        say("new group \(made - ids[0])")
+        try db.mergeGroups([made], into: ids[1])
+        snap = try db.soundGroupSnapshot()
+        say("groups \(snap.groups[catID]?.map { "\($0.name)|\($0.userName ?? "-")|\($0.position)" } ?? [])")
+        let other = sounds.compactMap(\.catID).first { $0 != catID } ?? "AMBForst"
+        try db.replaceGroups(catID: other, groups: [Array(sounds.filter { $0.catID == other }.prefix(4).map { (id: $0.id!, fingerprint: $0.fingerprint) })],
+                             names: [SoundGroups.Name(name: "One", aiWords: [], shapeWords: [], keywords: [])])
+        try db.dropGroups(catID: other)
+        try db.regroup(catID: catID)
+        // Songs: a rescan, Phase 0's analysis, Earmark's own, the owner's corrections.
+        let music = try db.libraries(kind: .music).first!
+        let songs = try db.songs(libraryId: music.id)
+        var files = songs.enumerated().filter { $0.offset % 41 != 0 }.map { _, s in
+            SongFile(path: s.path, fileSize: s.fileSize, modified: s.modifiedAt, title: s.title, artist: s.artist, album: s.album, duration: s.duration)
+        }
+        files.append(SongFile(path: musicRoot.path + "/Nova/Canção é Ótima.mp3", fileSize: 1234,
+                              modified: Date(timeIntervalSince1970: 1_700_000_000.123456), title: "Canção", duration: 201.5))
+        files.append(SongFile(path: (musicRoot.path + "/Nova/Ação.mp3").decomposedStringWithCanonicalMapping, fileSize: 99,
+                              modified: Date(timeIntervalSince1970: 1_600_000_000.9999), artist: "Ü"))
+        try db.replaceSongs(libraryId: music.id!, root: musicRoot, files: files)
+        say("phase 0 \(try db.applySongAnalysis(phase0))")
+        let fresh = try db.songs(libraryId: music.id)
+        let saved = try db.saveSongAnalysis(fresh.enumerated().filter { $0.offset % 50 == 0 }.map {
+            (songId: $0.element.id!, analysis: SongAnalysis(bpm: 120.5, beatsPerBar: 4, key: MusicKey(pitchClass: 9, minor: true),
+                                                           keyConfidence: 0.7, source: "Earmark"))
+        })
+        say("analysed \(saved.map { "\($0.id!) \($0.bpm ?? 0) \($0.analysisSource ?? "-")" })")
+        try db.setSongCorrections([(path: fresh[1].path, correction: SongCorrection(path: fresh[1].path, bpm: 90, key: MusicKey(pitchClass: 2, minor: false),
+                                                                                  beatsPerBar: 3, correctedAt: when)),
+                                   (path: fresh[2].path, correction: nil)])
+        say("corrections \(try db.songCorrections().count)")
+    }
+    let same = answers[0] == answers[1]
+    print("answers \(same ? "identical" : "DIFFER") (\(answers[0].count))")
+    if !same { for (a, b) in zip(answers[0], answers[1]) where a != b { print("   swift:  \(a.prefix(300))\n   engine: \(b.prefix(300))") } }
+    exit(same ? 0 : 1)
 }
 
 if args.count >= 2, args[1] == "metadata" {

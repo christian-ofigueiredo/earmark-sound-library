@@ -282,8 +282,30 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      wasn't open when it ran, so what it showed is that both fail alike, with the same message;
      previews with Resolve open, and placing for real, aren't checked for this piece (the
      script and the engine's side were checked in Resolve Studio in step 6).
-   - Still in Swift: the database (with analysis-file export and import, and applying the
-     owner's rules and choices to the sounds), and the models (Core ML stays on the Mac).
+   - **8j, the database (2026-11-21):** the app opens its library database through the engine
+     (`EngineLibraryDatabase`, over `earmark_db`) behind a `LibraryStore` protocol that Swift's
+     `LibraryDatabase` also meets; analysis-file export and import come with it. Records cross as
+     JSON in the engine's shape, dates converted with GRDB's own code so they're the same to the
+     bit; vectors cross as bytes (a list of floats crossed one number at a time, 40 times
+     slower). The app's engine uses the system's SQLite, the one GRDB uses (earmark-db's
+     `bundled` feature is off for earmark-ffi, built on its own by `build-engine.sh`): two copies
+     of SQLite in one process opening the same file can lose each other's locks. The MCP server,
+     its own process, keeps SQLite built in.
+     - `earmark-parity enginedbread`, on the owner's database opened read-only by both: every
+       read the app makes identical (libraries, 29,177 sounds, facts, both models' statuses and
+       vectors, each sound's vectors, near duplicates, 814 songs, corrections, choices, rules,
+       guesses, 597 groups, and both libraries' analysis files with and without vectors, whose
+       keys Swift writes in a changing order, so compared sorted).
+     - `compare.py enginedb`, on two copies of it cleared of analysis: the same operations
+       through each (an analysis file imported, rescans with moved, removed and copied files, the
+       library removed and added, facts, embeddings, near duplicates, the owner's categories and
+       Earmark's guesses, folder rules and guesses, groups made, changed, renamed, merged,
+       dropped and regrouped, songs rescanned with accented names, Phase 0's analysis, Earmark's,
+       and corrections): the same answers, and all 16 tables, 145,549 rows, identical except the
+       times each side stamps itself (a library added, a choice made, a set grouped, an import).
+   - Still in Swift on the Mac: decoding (AVFoundation) and the models (Core ML), by design, and
+     applying the owner's rules and choices to the sounds in memory (`FolderRules.apply`,
+     `SoundCategories.apply`), which the engine has but the app doesn't call through it yet.
 9. The Windows and Linux app (Tauri), as ROADMAP.md describes. The Linux package is
    marked untested: CI builds and tests it, but no one tries it on a Linux desktop.
 

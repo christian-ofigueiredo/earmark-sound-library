@@ -45,7 +45,7 @@ final class SoundGuesser {
 
     /// Votes on every analysed sound and saves Earmark's guesses (`changed`: whether they did).
     /// The same neighbour search finds sounds that are one recording (`Duplicates.nearPairs`).
-    nonisolated static func run(_ db: LibraryDatabase) throws -> (changed: Bool, duplicates: [Duplicates.Pair]) {
+    nonisolated static func run(_ db: any LibraryStore) throws -> (changed: Bool, duplicates: [Duplicates.Pair]) {
         // The categories without Earmark's per-sound guesses: they'd otherwise vote for themselves.
         let rules = try db.folderRules(), guesses = try db.folderGuesses()
         let owners = try db.soundCategoryChoices().filter { $0.value.byOwner }

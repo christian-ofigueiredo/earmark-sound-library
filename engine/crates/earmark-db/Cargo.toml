@@ -11,3 +11,10 @@ earmark-core.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[features]
+# SQLite built into the engine (Windows, Linux, the MCP server). The Mac app's engine
+# (earmark-ffi) turns it off and uses the system's SQLite, the one GRDB uses: two copies of
+# SQLite in one process opening the same file can lose each other's locks.
+default = ["bundled"]
+bundled = ["rusqlite/bundled"]

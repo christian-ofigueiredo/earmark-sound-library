@@ -40,7 +40,7 @@ struct LibrarySnapshot: Sendable {
     var groups: SoundGroupSnapshot
     var nearDuplicates: [Duplicates.Pair]
 
-    init(_ db: LibraryDatabase) throws {
+    init(_ db: any LibraryStore) throws {
         libraries = try db.libraries()
         folderRules = try db.folderRules()
         folderGuesses = try db.folderGuesses()
@@ -63,7 +63,7 @@ struct LibrarySnapshot: Sendable {
 /// own database; sound and music files are opened read-only.
 @MainActor @Observable
 final class AppModel {
-    let database: LibraryDatabase?
+    let database: (any LibraryStore)?
     let startupError: String?
     let player = AudioPlayer()
     let soundBrowser = SoundBrowser()
@@ -148,7 +148,9 @@ final class AppModel {
         switchSection = savedSection
         showWelcome = !defaults.bool(forKey: "welcomeSeen")
         do {
-            database = try LibraryDatabase(path: Self.supportFolder.appendingPathComponent("library.sqlite").path)
+            let path = Self.supportFolder.appendingPathComponent("library.sqlite").path
+            // The Rust engine's database unless the owner turned it off (Engine.isOn): the same file.
+            database = Engine.isOn ? try EngineLibraryDatabase(path: path) : try LibraryDatabase(path: path)
             startupError = nil
         } catch {
             database = nil
@@ -643,7 +645,7 @@ final class AppModel {
     }
 
     /// Runs one of the owner's changes to the groups, then shows the result.
-    private func changeGroups(_ title: String, _ change: @escaping @Sendable (LibraryDatabase) throws -> Void) {
+    private func changeGroups(_ title: String, _ change: @escaping @Sendable (any LibraryStore) throws -> Void) {
         guard let db = database else { return }
         Task {
             do {

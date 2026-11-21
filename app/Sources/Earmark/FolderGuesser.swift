@@ -51,7 +51,7 @@ final class FolderGuesser {
         return Work(folders: folders, stale: guesses.keys.filter { open[$0] == nil })
     }
 
-    private func run(_ work: Work, model: AppModel, db: LibraryDatabase) async {
+    private func run(_ work: Work, model: AppModel, db: any LibraryStore) async {
         model.guessProgress = (0, work.folders.count)
         defer { model.guessProgress = nil }
         let index = try? await model.similarityIndex()
