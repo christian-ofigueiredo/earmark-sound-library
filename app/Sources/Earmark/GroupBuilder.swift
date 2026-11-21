@@ -1,4 +1,5 @@
 import EarmarkCore
+import EarmarkEngine
 import EarmarkML
 import Foundation
 
@@ -123,11 +124,16 @@ final class GroupBuilder {
         guard ordered.count == n else { return }
         let made: (rows: [[Int]], names: [SoundGroups.Name])? = buffer.withFloats { x in
             let x = UnsafeBufferPointer(x)
-            guard let labels = SoundGroups.cluster(x, count: n, dimensions: d) else { return nil }
+            // The Rust engine groups and names the sounds unless the owner turned it off (Engine.isOn).
+            let engine = Engine.isOn
+            guard let labels = engine ? EngineAnalysis.cluster(x, count: n, dimensions: d)
+                                      : SoundGroups.cluster(x, count: n, dimensions: d) else { return nil }
             let k = (labels.max() ?? -1) + 1
             let rows = (0 ..< k).map { g in labels.indices.filter { labels[$0] == g } }
-            return (rows, SoundGroups.names(groups: rows, x: x, dimensions: d, members: ordered.map(SoundGroups.Member.init),
-                                            libraryMean: mean, exclude: SoundGroups.excludedWords(for: ordered)))
+            let members = ordered.map(SoundGroups.Member.init), exclude = SoundGroups.excludedWords(for: ordered)
+            return (rows, engine
+                ? EngineAnalysis.names(groups: rows, x: x, dimensions: d, members: members, libraryMean: mean, exclude: exclude)
+                : SoundGroups.names(groups: rows, x: x, dimensions: d, members: members, libraryMean: mean, exclude: exclude))
         }
         guard let (rows, names) = made else { return }
         try db.replaceGroups(catID: catID, groups: rows.map { $0.map { (ids[$0], ordered[$0].fingerprint) } }, names: names)

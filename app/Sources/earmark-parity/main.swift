@@ -90,6 +90,81 @@ if args.count >= 3, args[1] == "enginemusic" {
     exit(swift.count == rust.count && differ == 0 ? 0 : 1)
 }
 
+// The sound map and every subcategory's groups and names, by Swift and through the Rust engine
+// (EngineAnalysis), on the same page-aligned buffers as the app's. Only reads.
+//   earmark-parity engineanalysis <library.sqlite> [Category]   (the map of that category only)
+if args.count >= 3, args[1] == "engineanalysis" {
+    let db = try LibraryDatabase(path: args[2], readOnly: true)
+    let category = args.count > 3 ? args[3] : nil
+    let d = 1536
+    let peav = Dictionary(uniqueKeysWithValues: try db.vectors(model: "pe-av-large").map { ($0.id, $0.vector) })
+    let clap = Dictionary(uniqueKeysWithValues: try db.vectors(model: "clap-general").map { ($0.id, $0.vector) })
+    func buffer(_ sounds: [SoundRecord]) -> PageBuffer {
+        let flat = PageBuffer(count: sounds.count * d)
+        flat.withFloats { f in
+            for (i, s) in sounds.enumerated() { for (c, v) in SoundMap.combine([peav[s.id!]!, clap[s.id!]!]).enumerated() { f[i * d + c] = v } }
+        }
+        return flat
+    }
+    var bad = 0
+    // The map.
+    let mapped = try db.sounds().filter { s in
+        guard let id = s.id, peav[id] != nil, clap[id] != nil else { return false }
+        return category == nil || s.category == category
+    }.sorted { $0.id! < $1.id! }
+    let flat = buffer(mapped)
+    var clock = ContinuousClock.now
+    let swiftMap = flat.withFloats { SoundMap.map(flat: UnsafeBufferPointer($0), count: mapped.count, dimensions: d) }!
+    let swiftTime = ContinuousClock.now - clock
+    clock = ContinuousClock.now
+    let rustMap = flat.withFloats { EngineAnalysis.map(flat: UnsafeBufferPointer($0), count: mapped.count, dimensions: d) }!
+    let rustTime = ContinuousClock.now - clock
+    let samePoints = zip(swiftMap.points, rustMap.points).filter { $0 == $1 }.count
+    if swiftMap.points != rustMap.points || swiftMap.links != rustMap.links { bad += 1 }
+    print("map of \(mapped.count) sounds: \(samePoints) points identical, links \(swiftMap.links == rustMap.links ? "identical" : "differ") (\(swiftMap.links.count)); Swift \(swiftTime), engine \(rustTime)")
+    // Groups and their names, every subcategory as the app groups it.
+    let all = FolderRules.apply(try db.folderRules(), guesses: try db.folderGuesses(), to: try db.sounds())
+    let hidden = FormatTwins.group(all).hidden
+    var buckets: [String: [SoundRecord]] = [:]
+    for s in all {
+        guard let id = s.id, let catID = s.catID, !hidden.contains(id), peav[id] != nil, clap[id] != nil else { continue }
+        buckets[catID, default: []].append(s)
+    }
+    var mean = [Float](repeating: 0, count: d), counted = 0
+    for (id, v) in peav { if let c = clap[id] { for (k, x) in SoundMap.combine([v, c]).enumerated() { mean[k] += x }; counted += 1 } }
+    mean = mean.map { $0 / Float(max(1, counted)) }
+    var groupsSame = 0, namesSame = 0, groupCount = 0
+    var swiftGroups = Duration.zero, rustGroups = Duration.zero
+    for (catID, sounds) in buckets.sorted(by: { $0.key < $1.key }) {
+        let ordered = sounds.sorted { $0.id! < $1.id! }
+        let x = buffer(ordered)
+        let members = ordered.map(SoundGroups.Member.init), exclude = SoundGroups.excludedWords(for: ordered)
+        func run(_ cluster: (UnsafeBufferPointer<Float>) -> [Int]?,
+                 _ names: (UnsafeBufferPointer<Float>, [[Int]]) -> [SoundGroups.Name]) -> ([Int], [SoundGroups.Name]) {
+            x.withFloats { f in
+                let f = UnsafeBufferPointer(f)
+                let labels = cluster(f)!
+                let k = (labels.max() ?? -1) + 1
+                let rows = (0 ..< k).map { g in labels.indices.filter { labels[$0] == g } }
+                return (labels, names(f, rows))
+            }
+        }
+        clock = ContinuousClock.now
+        let a = run({ SoundGroups.cluster($0, count: ordered.count, dimensions: d) },
+                    { SoundGroups.names(groups: $1, x: $0, dimensions: d, members: members, libraryMean: mean, exclude: exclude) })
+        swiftGroups += ContinuousClock.now - clock
+        clock = ContinuousClock.now
+        let b = run({ EngineAnalysis.cluster($0, count: ordered.count, dimensions: d) },
+                    { EngineAnalysis.names(groups: $1, x: $0, dimensions: d, members: members, libraryMean: mean, exclude: exclude) })
+        rustGroups += ContinuousClock.now - clock
+        groupCount += 1
+        if a.0 == b.0 { groupsSame += 1 } else { bad += 1; print("groups differ: \(catID) (\(ordered.count) sounds)") }
+        if a.1 == b.1 { namesSame += 1 } else { bad += 1; print("names differ: \(catID): \(a.1.map(\.name)) / \(b.1.map(\.name))") }
+    }
+    print("\(groupCount) subcategories: groups identical in \(groupsSame), names in \(namesSame); Swift \(swiftGroups), engine \(rustGroups)")
+    exit(bad == 0 ? 0 : 1)
+}
+
 if args.count >= 2, args[1] == "metadata" {
     struct Row: Encodable { var path: String; var raw: RawMetadata; var normalized: NormalizedMetadata; var timeReference: Int64 }
     let encoder = JSONEncoder()
