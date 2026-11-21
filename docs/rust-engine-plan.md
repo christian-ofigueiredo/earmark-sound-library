@@ -197,8 +197,10 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      the library sample didn't have; PE-AV on more than 40 sounds.
    - Licences: Symphonia is MPL-2.0 (used unchanged), `ort` MIT or Apache-2.0, ONNX Runtime
      MIT; see `THIRD_PARTY_NOTICES.md`.
-8. **The Mac app switches to the engine**, piece by piece, behind the same Swift types.
-   It ships as an alpha, so Mac users test the new engine before Windows exists.
+8. **Done 2026-11-21: the Mac app runs on the engine**, piece by piece, behind the same Swift
+   types. It ships as an alpha, so Mac users test the new engine before Windows exists. After
+   the last piece, the owner's database rescanned through the engine (build 118) is identical,
+   every row of every table, to a backup taken before the switch.
    - **How it's built:** `engine/crates/earmark-ffi` is the engine as the app calls it;
      UniFFI writes its Swift side. `scripts/build-engine.sh` builds it into
      `app/Engine/EarmarkFFI.xcframework` (a static library) and
