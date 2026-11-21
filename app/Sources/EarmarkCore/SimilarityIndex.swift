@@ -3,6 +3,18 @@ import Foundation
 import Accelerate
 #endif
 
+/// What Find Similar and the folder suggestions ask of an index of sounds: Swift's
+/// `SimilarityIndex`, or the Rust engine's (`EngineSimilarityIndex`).
+public protocol SoundNeighbourIndex: Sendable {
+    var count: Int { get }
+    func contains(_ id: Int64) -> Bool
+    /// The `count` most similar sounds to `id` (best first, the sound itself excluded), skipping
+    /// `excluding`. Scores are cosine similarities, -1…1.
+    func nearest(to id: Int64, count: Int, excluding: Set<Int64>) -> [(id: Int64, score: Float)]
+}
+
+extension SimilarityIndex: SoundNeighbourIndex {}
+
 /// Nearest neighbours by cosine similarity over L2-normalised embeddings (CLAP now):
 /// one contiguous matrix, a dot product against every row per query.
 public struct SimilarityIndex: Sendable {

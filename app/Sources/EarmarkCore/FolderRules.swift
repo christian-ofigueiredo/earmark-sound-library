@@ -399,7 +399,7 @@ public enum FolderSuggester {
 
     /// `suggest` for a folder's sounds as the library has them: with their files' words and
     /// designer. `sharedDescriptions`: from `sharedDescriptions(_:)` over the whole library.
-    public static func suggest(folder: String, sounds: [SoundRecord], index: SimilarityIndex?, labels: [Int64: String],
+    public static func suggest(folder: String, sounds: [SoundRecord], index: (any SoundNeighbourIndex)?, labels: [Int64: String],
                                sharedDescriptions: Set<String>, count: Int = 3, tuning: Tuning = .standard) -> [Option] {
         suggest(folder: folder, soundIds: sounds.compactMap(\.id), index: index, labels: labels,
                 fileWords: fileWords(of: sounds, sharedDescriptions: sharedDescriptions, tuning: tuning),
@@ -420,7 +420,7 @@ public enum FolderSuggester {
     /// the `k` nearest sounds that have a category (`labels`, among the 4k nearest), weighted
     /// by similarity. When fewer than `fullAt` of those k places are found, the shares shrink
     /// in proportion: three neighbours that happen to be swords aren't "100% swords".
-    public static func soundShares(soundIds: [Int64], index: SimilarityIndex, labels: [Int64: String],
+    public static func soundShares(soundIds: [Int64], index: any SoundNeighbourIndex, labels: [Int64: String],
                                    k: Int = 10, sample: Int = 40, fullAt: Double = 0.25) -> [String: Double] {
         let picked = soundIds.count <= sample ? soundIds
             : stride(from: 0, to: soundIds.count, by: max(1, soundIds.count / sample)).map { soundIds[$0] }
@@ -443,7 +443,7 @@ public enum FolderSuggester {
     /// Up to `count` options, best first. Name, files and sound are combined; a name that only
     /// gives the category (e.g. "Footsteps") lets the sound pick the subcategory.
     /// `fileWords`: from `fileWords(of:)`; `packWords`: from `packWords(of:)`.
-    public static func suggest(folder: String, soundIds: [Int64], index: SimilarityIndex?, labels: [Int64: String],
+    public static func suggest(folder: String, soundIds: [Int64], index: (any SoundNeighbourIndex)?, labels: [Int64: String],
                                fileWords: [String: Double] = [:], packWords: Set<String> = [],
                                catalog: UCSCatalog = .shared, count: Int = 3, tuning: Tuning = .standard) -> [Option] {
         let lexicon = Lexicon.of(catalog)

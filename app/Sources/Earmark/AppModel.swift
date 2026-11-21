@@ -223,9 +223,11 @@ final class AppModel {
             soundChoices = snap.soundChoices
             groups = snap.groups
             rebuildCategoryTree()
-            identicalPairs = Duplicates.identicalPairs(sounds, hidden: soundIndex.twins.hidden)
+            // The Rust engine finds the duplicates unless the owner turned it off (Engine.isOn).
+            identicalPairs = Engine.isOn ? EngineDuplicates.identicalPairs(sounds, hidden: soundIndex.twins.hidden)
+                                         : Duplicates.identicalPairs(sounds, hidden: soundIndex.twins.hidden)
             nearPairs = snap.nearDuplicates
-            duplicates = Duplicates.sets(identicalPairs + nearPairs)
+            duplicates = Engine.isOn ? EngineDuplicates.sets(identicalPairs + nearPairs) : Duplicates.sets(identicalPairs + nearPairs)
             version += 1
             songsVersion += 1
             groupsVersion += 1
@@ -547,17 +549,18 @@ final class AppModel {
     // MARK: find similar
 
     /// CLAP vectors of every analysed sound, loaded on first use.
-    private var similarity: SimilarityIndex?
+    private var similarity: (any SoundNeighbourIndex)?
     /// How many CLAP results existed when `similarity` was built (rebuilt when more arrive).
     private var similarityBuiltFor = -1
 
     /// The CLAP index, built on first use and again when more sounds have been analysed.
-    func similarityIndex() async throws -> SimilarityIndex? {
+    func similarityIndex() async throws -> (any SoundNeighbourIndex)? {
         guard let db = database else { return nil }
         let analysed = analysis.clapStatus.count
         if similarity == nil || similarityBuiltFor != analysed {
             let vectors = try await Task.detached(priority: .userInitiated) { try db.vectors(model: ClapEmbedder.modelName) }.value
-            similarity = SimilarityIndex(vectors: vectors)
+            // The Rust engine's index unless the owner turned it off (Engine.isOn).
+            similarity = Engine.isOn ? EngineSimilarityIndex(vectors: vectors) : SimilarityIndex(vectors: vectors)
             similarityBuiltFor = analysed
         }
         return similarity
@@ -709,7 +712,7 @@ final class AppModel {
 
     func setNearDuplicates(_ pairs: [Duplicates.Pair]) {
         nearPairs = pairs
-        let sets = Duplicates.sets(identicalPairs + nearPairs)
+        let sets = Engine.isOn ? EngineDuplicates.sets(identicalPairs + nearPairs) : Duplicates.sets(identicalPairs + nearPairs)
         if sets != duplicates {
             duplicates = sets
             if soundBrowser.scope == .duplicates { version += 1 }

@@ -4,11 +4,11 @@
 //! Records with many fields cross as JSON in the shape Swift's `Codable` types already read
 //! (the parity checks compare exactly that JSON), so the app keeps its own types.
 
-use earmark_core::analysis::{groups, sound_map};
+use earmark_core::analysis::{duplicates, groups, similarity, sound_map};
 use earmark_core::metadata::AudioTechnical;
 use earmark_core::scan;
 use earmark_core::ucs::UcsCatalog;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -288,6 +288,191 @@ pub fn group_names(
         keywords: n.keywords,
     })
     .collect()
+}
+
+/// A sound near another and how near (cosine similarity, -1…1).
+#[derive(uniffi::Record)]
+pub struct Neighbour {
+    pub id: i64,
+    pub score: f32,
+}
+
+/// Find Similar's index, as Swift's `SimilarityIndex`: one vector per sound (unit length), a
+/// dot product against every row per question.
+#[derive(uniffi::Object)]
+pub struct SoundIndex {
+    index: similarity::SimilarityIndex,
+}
+
+#[uniffi::export]
+impl SoundIndex {
+    /// `flat`: the sounds' vectors one after another, `dimensions` floats each, in `ids` order.
+    #[uniffi::constructor]
+    pub fn new(ids: Vec<i64>, flat: Vec<f32>, dimensions: u32) -> Arc<SoundIndex> {
+        let d = dimensions as usize;
+        let vectors: Vec<(i64, Vec<f32>)> = if d == 0 {
+            vec![]
+        } else {
+            ids.into_iter()
+                .zip(flat.chunks_exact(d))
+                .map(|(id, v)| (id, v.to_vec()))
+                .collect()
+        };
+        Arc::new(SoundIndex {
+            index: similarity::SimilarityIndex::new(&vectors),
+        })
+    }
+
+    pub fn count(&self) -> u64 {
+        self.index.len() as u64
+    }
+
+    pub fn contains(&self, id: i64) -> bool {
+        self.index.contains(id)
+    }
+
+    /// The `count` most similar sounds to `id`, best first, without it and `excluding`.
+    pub fn nearest(&self, id: i64, count: u32, excluding: Vec<i64>) -> Vec<Neighbour> {
+        let excluding: HashSet<i64> = excluding.into_iter().collect();
+        self.index
+            .nearest(id, count as usize, &excluding)
+            .into_iter()
+            .map(|(id, score)| Neighbour { id, score })
+            .collect()
+    }
+}
+
+/// Each row's `k` nearest rows (itself included, nearest first) and their cosine distances,
+/// flat (count × k), as Swift's `SoundMap.nearestNeighbours`.
+#[derive(uniffi::Record)]
+pub struct NearestRows {
+    pub indices: Vec<u32>,
+    pub distances: Vec<f32>,
+}
+
+/// The neighbour search behind Earmark's guesses and near duplicates. The rows are read in
+/// place (see `rows`).
+#[uniffi::export]
+pub fn nearest_rows(address: u64, count: u32, dimensions: u32, k: u32) -> NearestRows {
+    let x = unsafe { rows(address, count, dimensions) };
+    let (indices, distances) = sound_map::neighbours(
+        x,
+        count as usize,
+        dimensions as usize,
+        k as usize,
+        &|_| {},
+        &|| false,
+    )
+    .unwrap_or_default();
+    NearestRows {
+        indices: indices.into_iter().map(|i| i as u32).collect(),
+        distances,
+    }
+}
+
+/// Two sounds that are one recording, as Swift's `Duplicates.Pair` (`a` the lower id).
+#[derive(uniffi::Record)]
+pub struct DuplicatePair {
+    pub a: i64,
+    pub b: i64,
+    pub identical: bool,
+    pub similarity: f32,
+}
+
+impl From<duplicates::Pair> for DuplicatePair {
+    fn from(p: duplicates::Pair) -> DuplicatePair {
+        DuplicatePair {
+            a: p.a,
+            b: p.b,
+            identical: p.identical,
+            similarity: p.similarity,
+        }
+    }
+}
+
+/// A sound's id and file fingerprint, for byte-identical copies.
+#[derive(uniffi::Record)]
+pub struct SoundPrint {
+    pub id: i64,
+    pub fingerprint: Option<String>,
+}
+
+/// Byte-identical copies (the same fingerprint), hidden format twins left out, as Swift's
+/// `Duplicates.identicalPairs` (the pairs in the order the fingerprints first appear).
+#[uniffi::export]
+pub fn identical_pairs(sounds: Vec<SoundPrint>, hidden: Vec<i64>) -> Vec<DuplicatePair> {
+    let sounds: Vec<(i64, Option<String>)> =
+        sounds.into_iter().map(|s| (s.id, s.fingerprint)).collect();
+    let hidden: HashSet<i64> = hidden.into_iter().collect();
+    duplicates::identical_pairs(&sounds, &hidden)
+        .into_iter()
+        .map(DuplicatePair::from)
+        .collect()
+}
+
+/// The same recording from a neighbour search (`nearest_rows`, k per row), as Swift's
+/// `Duplicates.nearPairs`.
+#[uniffi::export]
+pub fn near_duplicate_pairs(
+    ids: Vec<i64>,
+    durations: Vec<Option<f64>>,
+    indices: Vec<u32>,
+    distances: Vec<f32>,
+    k: u32,
+) -> Vec<DuplicatePair> {
+    let indices: Vec<usize> = indices.into_iter().map(|i| i as usize).collect();
+    duplicates::near_pairs(&ids, &durations, &indices, &distances, k as usize)
+        .into_iter()
+        .map(DuplicatePair::from)
+        .collect()
+}
+
+/// One sound another is the same as, and how.
+#[derive(uniffi::Record)]
+pub struct DuplicateOther {
+    pub id: i64,
+    pub identical: bool,
+    pub similarity: f32,
+}
+
+/// Sounds joined into sets, as Swift's `Duplicates.Sets`.
+#[derive(uniffi::Record)]
+pub struct DuplicateSets {
+    pub set_of: HashMap<i64, u32>,
+    pub members: Vec<Vec<i64>>,
+    pub others: HashMap<i64, Vec<DuplicateOther>>,
+}
+
+#[uniffi::export]
+pub fn duplicate_sets(pairs: Vec<DuplicatePair>) -> DuplicateSets {
+    let pairs: Vec<duplicates::Pair> = pairs
+        .into_iter()
+        .map(|p| duplicates::Pair::new(p.a, p.b, p.identical, p.similarity))
+        .collect();
+    let sets = duplicates::sets(&pairs);
+    DuplicateSets {
+        set_of: sets
+            .set_of
+            .into_iter()
+            .map(|(id, s)| (id, s as u32))
+            .collect(),
+        members: sets.members,
+        others: sets
+            .others
+            .into_iter()
+            .map(|(id, list)| {
+                let list = list
+                    .into_iter()
+                    .map(|(id, identical, similarity)| DuplicateOther {
+                        id,
+                        identical,
+                        similarity,
+                    })
+                    .collect();
+                (id, list)
+            })
+            .collect(),
+    }
 }
 
 /// The engine's version, so the app can say which engine it runs.
