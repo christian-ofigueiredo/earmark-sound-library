@@ -320,8 +320,15 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      timeline files, Resolve and importing an analysis file from the Mac. The `Desktop` workflow
      builds the Windows installer and the Linux AppImage and .deb at every push. Checked on a
      Mac against a copy of the owner's database (`earmark-desktop --check`: the same counts as
-     the Mac app, search, details, Find Similar, a category's map). Not yet: analysing on
-     Windows and Linux (the ONNX models), song tags, and anyone opening it there.
+     the Mac app, search, details, Find Similar, a category's map). Not yet: song tags, and
+     anyone opening it there.
+   - **9b, analysing (2026-11-21):** Analyse measures loudness (the engine's decoder), makes
+     both models' vectors through ONNX Runtime when their files are in the data folder's
+     `Models`, and groups similar sounds as GroupBuilder does (new subcategories regrouped, new
+     sounds joining the nearest group, emptied ones dropped). Checked headless on 16 generated
+     sounds (`earmark-desktop --analyse`). Not yet: Earmark's category guesses, the models
+     downloaded by the app (they'd come from a release), and ONNX Runtime on Windows and Linux
+     run for real (it's linked in statically, as on the Mac).
 
 Until step 8 the Mac app doesn't use Rust at all, so nothing changes for testers.
 Features added to Swift meanwhile (such as timeline files) are ported in their step.

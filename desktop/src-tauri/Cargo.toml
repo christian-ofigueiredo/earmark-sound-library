@@ -15,6 +15,7 @@ earmark-core = { path = "../../engine/crates/earmark-core" }
 earmark-db = { path = "../../engine/crates/earmark-db" }
 earmark-audio = { path = "../../engine/crates/earmark-audio" }
 earmark-mcp = { path = "../../engine/crates/earmark-mcp" }
+earmark-models = { path = "../../engine/crates/earmark-models" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 tauri = { version = "2", features = ["protocol-asset"] }

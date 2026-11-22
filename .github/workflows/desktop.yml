@@ -32,8 +32,10 @@ jobs:
             bundles: nsis
             files: desktop/src-tauri/target/release/bundle/nsis/*.exe
           - name: Linux
-            # The oldest supported Ubuntu, so the AppImage runs on more distributions.
-            os: ubuntu-22.04
+            # Ubuntu 24.04: the ONNX Runtime the engine links in (ort's prebuilt library) needs
+            # glibc 2.38 and a newer libstdc++ than 22.04 has. The AppImage then runs on 2024
+            # distributions and later (Ubuntu 24.04, Debian 13, Fedora 39…).
+            os: ubuntu-24.04
             bundles: appimage,deb
             files: |
               desktop/src-tauri/target/release/bundle/appimage/*.AppImage
