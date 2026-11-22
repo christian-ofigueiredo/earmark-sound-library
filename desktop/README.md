@@ -53,7 +53,8 @@ run's **Artifacts** on GitHub (Actions → Desktop → the latest run):
 
 - **Earmark-Windows**: `Earmark_0.1.0_x64-setup.exe`, an installer for the current user (no admin).
 - **Earmark-Linux**: `Earmark_0.1.0_amd64.AppImage` (runs as is) and `Earmark_0.1.0_amd64.deb`
-  (Debian, Ubuntu). Not tested.
+  (Debian, Ubuntu). Built on Ubuntu 24.04, as the ONNX Runtime linked in needs glibc 2.38: it
+  needs a 2024 distribution or later (Ubuntu 24.04, Debian 13, Fedora 39). Not tested.
 
 ## Building
 
