@@ -5,6 +5,10 @@ on:
   push:
   pull_request:
 
+# the token these jobs get can read the repository and nothing else
+permissions:
+  contents: read
+
 jobs:
   checks:
     runs-on: ubuntu-latest

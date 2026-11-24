@@ -8,6 +8,10 @@ name: Mac install test
 on:
   workflow_dispatch:
 
+# the token these jobs get can read the repository and nothing else
+permissions:
+  contents: read
+
 jobs:
   selftest:
     runs-on: macos-14
