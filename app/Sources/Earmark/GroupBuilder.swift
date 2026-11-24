@@ -95,7 +95,9 @@ final class GroupBuilder {
     nonisolated static func mean(_ db: any LibraryStore) throws -> [Float] {
         var sum = [Double](repeating: 0, count: dimensions), n = 0
         try db.forEachVectors(models: models) { _, blocks in
-            for (c, v) in SoundMap.combine(blocks).enumerated() { sum[c] += Double(v) }
+            let row = SoundMap.combine(blocks)
+            guard row.count == dimensions else { return }
+            for (c, v) in row.enumerated() { sum[c] += Double(v) }
             n += 1
         }
         return sum.map { Float($0 / Double(max(1, n))) }
@@ -108,8 +110,10 @@ final class GroupBuilder {
         var found: [Int64] = []
         try db.forEachVectors(models: models, ids: ids, count: { buffer = PageBuffer(count: $0 * dimensions) }) { id, blocks in
             let r = found.count
-            guard (r + 1) * dimensions <= buffer.count else { return }
-            buffer.withFloats { x in for (c, v) in SoundMap.combine(blocks).enumerated() { x[r * dimensions + c] = v } }
+            // A stored vector of the wrong size would write past its row: leave that sound out.
+            let row = SoundMap.combine(blocks)
+            guard row.count == dimensions, (r + 1) * dimensions <= buffer.count else { return }
+            buffer.withFloats { x in for (c, v) in row.enumerated() { x[r * dimensions + c] = v } }
             found.append(id)
         }
         return (found, buffer)

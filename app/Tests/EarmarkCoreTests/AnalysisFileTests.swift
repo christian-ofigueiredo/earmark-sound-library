@@ -173,4 +173,17 @@ import Testing
         #expect(AnalysisFile.library(containing: URL(fileURLWithPath: "/Volumes/Banana 01/SoundFX Exports"), in: [lib]) == nil)
         #expect(AnalysisFile.fileName(for: lib) == "SoundFX.earmark-analysis.json")
     }
+
+    /// A vector from a file is only taken at exactly its model's size: the grouping code copies
+    /// vectors into fixed-size rows.
+    @Test func vectorsOfTheWrongSizeAreRefused() {
+        let floats = MemoryLayout<Float32>.size
+        #expect(SoundEmbedding.isValid(vector: nil, model: "clap-general"))
+        #expect(SoundEmbedding.isValid(vector: Data(count: 512 * floats), model: "clap-general"))
+        #expect(SoundEmbedding.isValid(vector: Data(count: 1024 * floats), model: "pe-av-large"))
+        #expect(!SoundEmbedding.isValid(vector: Data(count: 513 * floats), model: "clap-general"))
+        #expect(!SoundEmbedding.isValid(vector: Data(count: 4096 * floats), model: "pe-av-large"))
+        #expect(!SoundEmbedding.isValid(vector: Data(count: 3), model: "clap-general"))
+        #expect(!SoundEmbedding.isValid(vector: Data(count: 512 * floats), model: "unknown-model"))
+    }
 }

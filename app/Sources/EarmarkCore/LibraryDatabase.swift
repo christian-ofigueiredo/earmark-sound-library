@@ -666,6 +666,16 @@ public struct SoundFacts: Codable, FetchableRecord, PersistableRecord, Sendable,
 public struct SoundEmbedding: Codable, FetchableRecord, PersistableRecord, Sendable, Equatable {
     /// Bump a model's version when its pipeline changes, so every sound is embedded again.
     public static let versions: [String: Int] = ["clap-general": 1, "pe-av-large": 1]
+    /// How many floats each model's vector has. Code that copies vectors into fixed-size rows relies on it.
+    public static let dimensions: [String: Int] = ["clap-general": 512, "pe-av-large": 1024]
+
+    /// Whether `vector` can be a vector of `model`: nil (a silent sound), or exactly the model's size.
+    /// Vectors from outside (an analysis file) are checked with this before they are stored.
+    public static func isValid(vector: Data?, model: String) -> Bool {
+        guard let vector else { return true }
+        guard let d = dimensions[model] else { return false }
+        return vector.count == d * MemoryLayout<Float32>.size
+    }
 
     public struct Status: Sendable, Equatable {
         public var fingerprint: String?

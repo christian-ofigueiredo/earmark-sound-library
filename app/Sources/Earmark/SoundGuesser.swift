@@ -56,9 +56,11 @@ final class SoundGuesser {
         var rows: [SoundRecord] = []
         var buffer = PageBuffer(count: 0)
         try db.forEachVectors(models: GroupBuilder.models, count: { buffer = PageBuffer(count: $0 * d) }) { id, blocks in
-            guard let s = byId[id], !hidden.contains(id), (rows.count + 1) * d <= buffer.count else { return }
+            // A stored vector of the wrong size would write past its row: leave that sound out.
+            let row = SoundMap.combine(blocks)
+            guard let s = byId[id], !hidden.contains(id), row.count == d, (rows.count + 1) * d <= buffer.count else { return }
             let r = rows.count
-            buffer.withFloats { x in for (c, v) in SoundMap.combine(blocks).enumerated() { x[r * d + c] = v } }
+            buffer.withFloats { x in for (c, v) in row.enumerated() { x[r * d + c] = v } }
             rows.append(s)
         }
         guard rows.count > 1 else { return (try db.replaceSoundGuesses([]), []) }

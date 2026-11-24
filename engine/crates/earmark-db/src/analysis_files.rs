@@ -359,8 +359,10 @@ impl LibraryDatabase {
                 }
                 for (model, e) in entry.embeddings.iter().flatten() {
                     // Only models this Earmark knows, at its version or newer.
+                    // A vector of the wrong size is left out: the file is someone else's data.
                     if !EMBEDDING_MODELS.contains(&model.as_str())
                         || e.version < SoundEmbedding::version_of(model)
+                        || !SoundEmbedding::is_valid_vector(e.vector.as_deref(), model)
                         || EmbeddingStatus::is_current(
                             status.get(model.as_str()).and_then(|m| m.get(&id)),
                             model,

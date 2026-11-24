@@ -291,6 +291,25 @@ impl SoundEmbedding {
         }
     }
 
+    /// How many floats a model's vector has; `None` for a model this Earmark does not know.
+    pub fn dimensions_of(model: &str) -> Option<usize> {
+        match model {
+            "clap-general" => Some(512),
+            "pe-av-large" => Some(1024),
+            _ => None,
+        }
+    }
+
+    /// Whether `vector` can be a vector of `model`: none (a silent sound), or exactly the model's
+    /// size. Vectors from outside (an analysis file) are checked with this before they are stored.
+    pub fn is_valid_vector(vector: Option<&[u8]>, model: &str) -> bool {
+        match (vector, Self::dimensions_of(model)) {
+            (None, _) => true,
+            (Some(v), Some(d)) => v.len() == d * 4,
+            (Some(_), None) => false,
+        }
+    }
+
     pub fn floats(bytes: &[u8]) -> Vec<f32> {
         bytes
             .as_chunks::<4>()
@@ -321,5 +340,39 @@ impl EmbeddingStatus {
         status.is_some_and(|s| {
             s.version >= SoundEmbedding::version_of(model) && s.fingerprint == sound.fingerprint
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SoundEmbedding;
+
+    #[test]
+    fn vectors_of_the_wrong_size_are_refused() {
+        assert!(SoundEmbedding::is_valid_vector(None, "clap-general"));
+        assert!(SoundEmbedding::is_valid_vector(
+            Some(&[0; 512 * 4]),
+            "clap-general"
+        ));
+        assert!(SoundEmbedding::is_valid_vector(
+            Some(&[0; 1024 * 4]),
+            "pe-av-large"
+        ));
+        assert!(!SoundEmbedding::is_valid_vector(
+            Some(&[0; 513 * 4]),
+            "clap-general"
+        ));
+        assert!(!SoundEmbedding::is_valid_vector(
+            Some(&[0; 4096 * 4]),
+            "pe-av-large"
+        ));
+        assert!(!SoundEmbedding::is_valid_vector(
+            Some(&[0; 3]),
+            "clap-general"
+        ));
+        assert!(!SoundEmbedding::is_valid_vector(
+            Some(&[0; 512 * 4]),
+            "unknown-model"
+        ));
     }
 }

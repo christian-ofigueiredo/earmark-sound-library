@@ -307,7 +307,9 @@ extension LibraryDatabase {
                     newCategories[id] = SoundCategoryChoice(soundId: id, fingerprint: s.fingerprint, catID: c, byOwner: true)
                 }
                 for (model, e) in entry.embeddings ?? [:] {
+                    // A vector of the wrong size is left out: the file is someone else's data.
                     guard let current = SoundEmbedding.versions[model], e.version >= current,
+                          SoundEmbedding.isValid(vector: e.vector, model: model),
                           !SoundEmbedding.isCurrent(status[model]?[id], model: model, for: s) else { continue }
                     var new = SoundEmbedding(soundId: id, model: model, fingerprint: s.fingerprint, vector: nil)
                     new.version = e.version
