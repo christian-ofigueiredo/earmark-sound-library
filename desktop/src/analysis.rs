@@ -69,7 +69,8 @@ fn facts(sound: &SoundRecord, stop: &AtomicBool) -> Option<SoundFacts> {
             Err(e) => return Some(made(None, None, Some(e.to_string()))),
         }
         let channels = reader.channels.max(1);
-        let m = meter.get_or_insert_with(|| LoudnessMeter::new(reader.sample_rate as f64, channels));
+        let m =
+            meter.get_or_insert_with(|| LoudnessMeter::new(reader.sample_rate as f64, channels));
         let frames = block.len() / channels;
         planes.resize(channels, Vec::new());
         for (c, plane) in planes.iter_mut().enumerate() {
@@ -83,7 +84,12 @@ fn facts(sound: &SoundRecord, stop: &AtomicBool) -> Option<SoundFacts> {
     Some(made(result.integrated, result.peak, None))
 }
 
-fn embedding(sound: &SoundRecord, model: &str, vector: Option<Vec<f32>>, error: Option<String>) -> SoundEmbedding {
+fn embedding(
+    sound: &SoundRecord,
+    model: &str,
+    vector: Option<Vec<f32>>,
+    error: Option<String>,
+) -> SoundEmbedding {
     SoundEmbedding {
         sound_id: sound.id.unwrap_or_default(),
         model: model.into(),
@@ -97,7 +103,11 @@ fn embedding(sound: &SoundRecord, model: &str, vector: Option<Vec<f32>>, error: 
 
 /// Everything not analysed yet: loudness, then the vectors (if the models are installed), then
 /// the groups. Returns what it did, in words.
-pub fn run(db: &Mutex<LibraryDatabase>, database: &Path, progress: &Progress) -> Result<String, String> {
+pub fn run(
+    db: &Mutex<LibraryDatabase>,
+    database: &Path,
+    progress: &Progress,
+) -> Result<String, String> {
     let catalog = {
         let db = db.lock().map_err(error)?;
         SoundCatalog::new(&db).map_err(error)?
@@ -182,9 +192,12 @@ pub fn run(db: &Mutex<LibraryDatabase>, database: &Path, progress: &Progress) ->
                     });
                 }
             }
-            let need: Vec<&(&SoundRecord, Vec<f32>)> =
-                audio.iter().filter(|(s, _)| !current(&peav_status, PEAV, s)).collect();
-            let windows: Vec<Vec<Vec<f32>>> = need.iter().map(|(_, a)| PeavEmbedder::windows(a)).collect();
+            let need: Vec<&(&SoundRecord, Vec<f32>)> = audio
+                .iter()
+                .filter(|(s, _)| !current(&peav_status, PEAV, s))
+                .collect();
+            let windows: Vec<Vec<Vec<f32>>> =
+                need.iter().map(|(_, a)| PeavEmbedder::windows(a)).collect();
             let stop = || progress.stop.load(Ordering::Relaxed);
             match peav.embed(&windows, &stop).map_err(error)? {
                 Some(results) => {
@@ -198,7 +211,10 @@ pub fn run(db: &Mutex<LibraryDatabase>, database: &Path, progress: &Progress) ->
                 }
                 None => return Ok("Stopped.".into()),
             }
-            db.lock().map_err(error)?.save_embeddings(&saved).map_err(error)?;
+            db.lock()
+                .map_err(error)?
+                .save_embeddings(&saved)
+                .map_err(error)?;
             done += chunk.len();
             (progress.report)("Listening to the sounds", done, todo.len());
             if progress.stop.load(Ordering::Relaxed) {
@@ -272,7 +288,11 @@ fn group(db: &Mutex<LibraryDatabase>, progress: &Progress) -> Result<usize, Stri
     if work.is_empty() {
         return Ok(0);
     }
-    let by_id: HashMap<i64, &SoundRecord> = catalog.sounds.iter().filter_map(|s| s.id.map(|id| (id, s))).collect();
+    let by_id: HashMap<i64, &SoundRecord> = catalog
+        .sounds
+        .iter()
+        .filter_map(|s| s.id.map(|id| (id, s)))
+        .collect();
     let mut mean: Option<Vec<f32>> = None;
     let mut regrouped = 0;
     for (i, item) in work.iter().enumerate() {
@@ -297,16 +317,21 @@ fn group(db: &Mutex<LibraryDatabase>, progress: &Progress) -> Result<usize, Stri
                     mean = Some(sum.iter().map(|s| (s / n.max(1) as f64) as f32).collect());
                 }
                 let (ids, x) = vectors(&db, sounds)?;
-                let records: Vec<&SoundRecord> = ids.iter().filter_map(|id| by_id.get(id).copied()).collect();
+                let records: Vec<&SoundRecord> =
+                    ids.iter().filter_map(|id| by_id.get(id).copied()).collect();
                 if records.len() != ids.len() || ids.is_empty() {
                     continue;
                 }
                 let n = ids.len();
-                let Some(labels) = groups::cluster(&x, n, D, &|| progress.stop.load(Ordering::Relaxed)) else {
+                let Some(labels) =
+                    groups::cluster(&x, n, D, &|| progress.stop.load(Ordering::Relaxed))
+                else {
                     break;
                 };
                 let k = labels.iter().max().map_or(0, |m| m + 1);
-                let rows: Vec<Vec<usize>> = (0..k).map(|g| (0..n).filter(|&r| labels[r] == g).collect()).collect();
+                let rows: Vec<Vec<usize>> = (0..k)
+                    .map(|g| (0..n).filter(|&r| labels[r] == g).collect())
+                    .collect();
                 let members: Vec<Member> = records
                     .iter()
                     .map(|s| {
@@ -332,15 +357,30 @@ fn group(db: &Mutex<LibraryDatabase>, progress: &Progress) -> Result<usize, Stri
                         })
                         .collect::<Vec<_>>(),
                 );
-                let names = groups::names(&rows, &x, D, &members, mean.as_deref().unwrap_or(&[]), &exclude);
+                let names = groups::names(
+                    &rows,
+                    &x,
+                    D,
+                    &members,
+                    mean.as_deref().unwrap_or(&[]),
+                    &exclude,
+                );
                 let made: Vec<Vec<(i64, Option<String>)>> = rows
                     .iter()
-                    .map(|g| g.iter().map(|&r| (ids[r], records[r].fingerprint.clone())).collect())
+                    .map(|g| {
+                        g.iter()
+                            .map(|&r| (ids[r], records[r].fingerprint.clone()))
+                            .collect()
+                    })
                     .collect();
                 db.replace_groups(cat_id, &made, &names).map_err(error)?;
                 regrouped += 1;
             }
-            Work::Update { cat_id, add, remove } => {
+            Work::Update {
+                cat_id,
+                add,
+                remove,
+            } => {
                 let snapshot = &catalog.groups.plan;
                 let in_cat: HashSet<i64> = snapshot
                     .groups
@@ -357,7 +397,8 @@ fn group(db: &Mutex<LibraryDatabase>, progress: &Progress) -> Result<usize, Stri
                 let mut wanted: Vec<i64> = members.iter().map(|m| m.0).collect();
                 wanted.extend(add);
                 let (ids, x) = vectors(&db, &wanted)?;
-                let row: HashMap<i64, usize> = ids.iter().enumerate().map(|(r, &id)| (id, r)).collect();
+                let row: HashMap<i64, usize> =
+                    ids.iter().enumerate().map(|(r, &id)| (id, r)).collect();
                 let mut by_group: BTreeMap<i64, Vec<usize>> = BTreeMap::new();
                 for (s, g) in &members {
                     if let Some(&r) = row.get(s) {

@@ -14,15 +14,15 @@ server (`earmark_mcp`), so they answer as there.
 
 - `src/backend.rs`: what the window shows and does, scanning and analysing in the background.
 - `src/analysis.rs`: loudness, both models' vectors (ONNX Runtime), the similarity groups.
-- `src/ui.rs`: the window. `src/look.rs`: Earmark's own pieces (segments, keys of a set width).
-- `src/theme.rs`, `src/frame.rs`: the family's design system and the dark frame (on Windows the
-  caption, border and caption text are set through DWM). **Shared as they are with Aspect**:
-  change them there first and copy them over, so the apps keep one look. `theme.rs` leaves out
-  Aspect's `advice`, the one piece tied to that app. Formatting at width 120 (`rustfmt.toml`)
-  keeps the copies identical.
+- `src/ui.rs`: the window.
+- `src/theme.rs`: the family's common design system, **shared as it is by the four apps**
+  (Aspect, Earmark, Graticule, Offload). Offload keeps the original
+  (`~/Documents/Offload/desktop/src/theme.rs`): change it there and copy it over unchanged, so
+  the apps keep one look. Earmark uses its default measures (`Style::EARMARK`).
+- `src/frame.rs`: the dark frame (on Windows the caption, border and caption text are set
+  through DWM), the same file as Aspect's.
 - `src/player.rs`: playing a sound (rodio).
-- `assets/fonts`: Tessel 400/500/600 and Brakwell 600/700, static weights cut from the variable
-  fonts, since egui can't pick a weight from a variable font.
+- `assets/fonts`: Tessel and Brakwell, the variable fonts; the theme picks each weight.
 
 ## What it does
 

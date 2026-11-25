@@ -1,16 +1,26 @@
-//! Christian Figueiredo's design system in egui: the family look the Mac apps have
-//! (Aspect/Views/DesignSystem.swift), drawn by hand since egui has none of it built in.
+//! Christian Figueiredo's design system in egui: the family look the Mac apps have, drawn by hand
+//! since egui has none of it built in. One file for every app of the family (Aspect, Earmark,
+//! Graticule, Offload): copy it as it is; nothing here belongs to one app.
 //!
 //! Dark only, as the window frame must be the app's own dark grey (#131314) and never the system
 //! accent. Six colours exist; everything else is one of them at an opacity. The ground and the
 //! panels are one colour: depth comes from light and shadow. Red is one signal per view. Brakwell
-//! for titles and numbers (24 pt and up), Tessel for the rest; both ship as static weights cut from
-//! the variable fonts (assets/fonts), since egui cannot pick a weight from a variable font.
+//! for titles and numbers (24 pt and up), Tessel for the rest: the variable fonts, each weight
+//! picked through the `wght` axis (`FontTweak::coords`).
 //!
-//! This file has no Aspect in it, so the other apps of the family can take it as it is.
+//! What is shared: colours, type, materials (`raised`, `sunken`, `rim`), the tag outline, icons.
+//! What differs between the Mac apps (how tall a chip is, the colour of its lamp, the size of a
+//! key, the shadow under it) is a [`Style`]: each app sets its own once with [`set_style`]; without
+//! it, [`Style::ASPECT`] applies.
+
+// Each app uses part of this shared file; the rest stays for the others.
+#![allow(dead_code)]
 
 use egui::epaint::{CornerRadius, Shadow, Stroke};
-use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Pos2, Rect, Response, Sense, Ui, Vec2, pos2, vec2};
+use egui::{
+    Color32, FontData, FontDefinitions, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense,
+    Ui, Vec2, pos2, vec2,
+};
 use std::sync::Arc;
 
 // MARK: colour
@@ -21,7 +31,8 @@ pub const SEASHELL: Color32 = Color32::from_rgb(0xF1, 0xF1, 0xF1);
 pub const RUBY: Color32 = Color32::from_rgb(0xA0, 0x0A, 0x00);
 pub const MILANO: Color32 = Color32::from_rgb(0xD4, 0x11, 0x01);
 
-const fn alpha(c: Color32, a: f32) -> Color32 {
+/// A colour at an opacity: the only way the family makes new colours.
+pub const fn alpha(c: Color32, a: f32) -> Color32 {
     Color32::from_rgba_unmultiplied_const(c.r(), c.g(), c.b(), (a * 255.0) as u8)
 }
 
@@ -37,6 +48,8 @@ pub const INK: Color32 = SEASHELL;
 /// Labels printed on the body.
 pub const INK_PRINT: Color32 = alpha(SEASHELL, 0.78);
 pub const INK_MUTED: Color32 = alpha(SEASHELL, 0.62);
+/// Notes and counts: quieter than `INK_MUTED`.
+pub const INK_NOTE: Color32 = alpha(SEASHELL, 0.46);
 /// The one red: Milano on the dark ground. What sits on it is always light.
 pub const ACCENT: Color32 = MILANO;
 /// A selected row: Ruby Red as a tint, the text staying ink.
@@ -46,9 +59,9 @@ pub const ALERT: Color32 = alpha(RUBY, 0.16);
 /// Hover: ink, faint.
 pub const HOVER: Color32 = alpha(SEASHELL, 0.08);
 /// The light from the top left that raises keys and panels.
-const LIGHT: Color32 = alpha(Color32::WHITE, 0.06);
-const SHADE: Color32 = alpha(Color32::BLACK, 0.55);
-const RIM: Color32 = alpha(Color32::WHITE, 0.20);
+pub const LIGHT: Color32 = alpha(Color32::WHITE, 0.06);
+pub const SHADE: Color32 = alpha(Color32::BLACK, 0.55);
+pub const RIM: Color32 = alpha(Color32::WHITE, 0.20);
 
 // MARK: spacing
 
@@ -60,30 +73,236 @@ pub const S6: f32 = 24.0;
 pub const S8: f32 = 32.0;
 pub const S12: f32 = 48.0;
 pub const RADIUS_SM: f32 = 12.0;
+pub const RADIUS_MD: f32 = 20.0;
 pub const RADIUS_LG: f32 = 24.0;
+
+// MARK: each app's measures
+
+/// A key's height, side padding and type.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct KeySize {
+    pub height: f32,
+    pub pad: f32,
+    pub font_size: f32,
+    pub font_weight: u16,
+}
+
+/// A shadow cast by a raised key, at strength 1.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct KeyShadow {
+    pub light_offset: f32,
+    pub light_blur: f32,
+    pub dark_offset: [f32; 2],
+    pub dark_blur: f32,
+    pub dark: Color32,
+}
+
+/// What differs between the Mac apps of the family: sizes, the chip's lamp, the key's shadow.
+/// Everything else (colours, type, materials, outlines) is shared.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Style {
+    pub chip_height: f32,
+    pub chip_pad: f32,
+    /// The chip's lamp when lit: Milano in Aspect, ink in Offload.
+    pub led: Color32,
+    pub led_glow: Color32,
+    /// How strongly a chip that is not chosen stands up.
+    pub chip_raise: f32,
+    pub primary: KeySize,
+    pub raised: KeySize,
+    pub ghost: KeySize,
+    /// `small` keys, for table rows.
+    pub small: KeySize,
+    /// How strongly a raised key stands up.
+    pub key_raise: f32,
+    pub primary_shadow: KeyShadow,
+    pub shadow: KeyShadow,
+    pub switch: Vec2,
+    pub knob: f32,
+    pub field_height: f32,
+    pub field_font: (f32, u16),
+    pub field_margin: f32,
+    pub tag_height: f32,
+    pub tag_font: (f32, u16),
+    pub tag_tracking: f32,
+    pub overline_weight: u16,
+    pub overline_tracking: f32,
+}
+
+const ASPECT_SHADOW: KeyShadow = KeyShadow {
+    light_offset: -2.0,
+    light_blur: 6.0,
+    dark_offset: [3.0, 4.0],
+    dark_blur: 8.0,
+    dark: SHADE,
+};
+
+impl Style {
+    /// Aspect's measures (Aspect/Views/DesignSystem.swift); Earmark uses the same.
+    pub const ASPECT: Style = Style {
+        chip_height: 28.0,
+        chip_pad: S3,
+        led: ACCENT,
+        led_glow: alpha(ACCENT, 0.25),
+        chip_raise: 0.45,
+        primary: KeySize {
+            height: 30.0,
+            pad: S4,
+            font_size: 14.0,
+            font_weight: 500,
+        },
+        raised: KeySize {
+            height: 30.0,
+            pad: S4,
+            font_size: 14.0,
+            font_weight: 500,
+        },
+        ghost: KeySize {
+            height: 30.0,
+            pad: S4,
+            font_size: 14.0,
+            font_weight: 500,
+        },
+        small: KeySize {
+            height: 24.0,
+            pad: S3,
+            font_size: 14.0,
+            font_weight: 500,
+        },
+        key_raise: 0.6,
+        primary_shadow: KeyShadow {
+            light_offset: 0.0,
+            light_blur: 0.0,
+            dark_offset: [3.0, 4.0],
+            dark_blur: 8.0,
+            dark: alpha(Color32::BLACK, 0.3),
+        },
+        shadow: ASPECT_SHADOW,
+        switch: Vec2::new(40.0, 24.0),
+        knob: 9.0,
+        field_height: 28.0,
+        field_font: (14.0, 500),
+        field_margin: S3,
+        tag_height: 20.0,
+        tag_font: (11.0, 600),
+        tag_tracking: 1.0,
+        overline_weight: 500,
+        overline_tracking: 1.9,
+    };
+
+    /// Earmark: Aspect's measures.
+    pub const EARMARK: Style = Style::ASPECT;
+
+    /// Offload's measures (Sources/Offload/Theme.swift): larger keys and chips, a white lamp.
+    pub const OFFLOAD: Style = Style {
+        chip_height: 36.0,
+        chip_pad: S4,
+        led: INK,
+        led_glow: alpha(SEASHELL, 0.12),
+        chip_raise: 0.6,
+        primary: KeySize {
+            height: 48.0,
+            pad: 28.0,
+            font_size: 15.0,
+            font_weight: 500,
+        },
+        raised: KeySize {
+            height: 40.0,
+            pad: 20.0,
+            font_size: 14.0,
+            font_weight: 500,
+        },
+        ghost: KeySize {
+            height: 32.0,
+            pad: S4,
+            font_size: 14.0,
+            font_weight: 500,
+        },
+        small: KeySize {
+            height: 32.0,
+            pad: S4,
+            font_size: 14.0,
+            font_weight: 500,
+        },
+        key_raise: 0.7,
+        primary_shadow: KeyShadow {
+            light_offset: 0.0,
+            light_blur: 0.0,
+            dark_offset: [4.0, 6.0],
+            dark_blur: 10.0,
+            dark: alpha(Color32::BLACK, 0.3),
+        },
+        shadow: KeyShadow {
+            light_offset: -3.0,
+            light_blur: 8.0,
+            dark_offset: [4.0, 5.0],
+            dark_blur: 12.0,
+            dark: alpha(Color32::BLACK, 0.6),
+        },
+        switch: Vec2::new(44.0, 26.0),
+        knob: 10.0,
+        field_height: 48.0,
+        field_font: (16.0, 400),
+        field_margin: S6,
+        tag_height: 19.0,
+        tag_font: (9.0, 600),
+        tag_tracking: 1.1,
+        overline_weight: 600,
+        overline_tracking: 1.44,
+    };
+}
+
+fn style_id() -> egui::Id {
+    egui::Id::unique("family-theme-style")
+}
+
+/// Sets the app's measures; call once, after [`install`].
+pub fn set_style(ctx: &egui::Context, style: Style) {
+    ctx.data_mut(|d| d.insert_temp(style_id(), style));
+}
+
+/// The app's measures ([`Style::ASPECT`] until [`set_style`] is called).
+pub fn style(ui: &Ui) -> Style {
+    ui.ctx()
+        .data(|d| d.get_temp::<Style>(style_id()))
+        .unwrap_or(Style::ASPECT)
+}
 
 // MARK: type
 
-const FONTS: [(&str, &[u8]); 5] = [
-    ("tessel-400", include_bytes!("../assets/fonts/Tessel-400.ttf")),
-    ("tessel-500", include_bytes!("../assets/fonts/Tessel-500.ttf")),
-    ("tessel-600", include_bytes!("../assets/fonts/Tessel-600.ttf")),
-    ("brakwell-600", include_bytes!("../assets/fonts/Brakwell-600.ttf")),
-    ("brakwell-700", include_bytes!("../assets/fonts/Brakwell-700.ttf")),
+const TESSEL: &[u8] = include_bytes!("../assets/fonts/Tessel.ttf");
+const BRAKWELL: &[u8] = include_bytes!("../assets/fonts/Brakwell.ttf");
+
+/// The weights in use, each one the variable font at that `wght`.
+const FONTS: [(&str, &[u8], f32); 7] = [
+    ("tessel-300", TESSEL, 300.0),
+    ("tessel-400", TESSEL, 400.0),
+    ("tessel-500", TESSEL, 500.0),
+    ("tessel-600", TESSEL, 600.0),
+    ("tessel-700", TESSEL, 700.0),
+    ("brakwell-600", BRAKWELL, 600.0),
+    ("brakwell-700", BRAKWELL, 700.0),
 ];
 
-/// Tessel at 400, 500 or 600; Brakwell at 600 or 700.
+/// Tessel at 300 to 700.
 pub fn text(size: f32, weight: u16) -> FontId {
     let name = match weight {
-        0..=449 => "tessel-400",
+        0..=349 => "tessel-300",
+        350..=449 => "tessel-400",
         450..=549 => "tessel-500",
-        _ => "tessel-600",
+        550..=649 => "tessel-600",
+        _ => "tessel-700",
     };
     FontId::new(size, FontFamily::Name(name.into()))
 }
 
+/// Brakwell at 600 or 700.
 pub fn display(size: f32, weight: u16) -> FontId {
-    let name = if weight >= 650 { "brakwell-700" } else { "brakwell-600" };
+    let name = if weight >= 650 {
+        "brakwell-700"
+    } else {
+        "brakwell-600"
+    };
     FontId::new(size, FontFamily::Name(name.into()))
 }
 
@@ -111,6 +330,10 @@ pub fn heading() -> FontId {
 pub fn caption() -> FontId {
     text(12.0, 400)
 }
+/// Helper text under an option: lighter than a caption, so the option's name leads.
+pub fn note() -> FontId {
+    text(12.0, 300)
+}
 /// `overline`: eyebrows, uppercase with wide tracking (see `overline`).
 pub fn overline_font() -> FontId {
     text(12.0, 500)
@@ -120,10 +343,15 @@ pub fn overline_font() -> FontId {
 /// colours, so nothing on screen falls back to egui's default blue or grey.
 pub fn install(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
-    for (name, bytes) in FONTS {
-        fonts
-            .font_data
-            .insert(name.into(), Arc::new(FontData::from_static(bytes)));
+    for (name, bytes, weight) in FONTS {
+        let tweak = egui::FontTweak {
+            coords: egui::epaint::text::VariationCoords::new([(b"wght", weight)]),
+            ..Default::default()
+        };
+        fonts.font_data.insert(
+            name.into(),
+            Arc::new(FontData::from_static(bytes).tweak(tweak)),
+        );
         let mut family = vec![name.to_string()];
         // Arrows, ÷ and ≈ that the family's fonts may lack come from egui's own.
         family.extend(fonts.families[&FontFamily::Proportional].iter().cloned());
@@ -141,7 +369,9 @@ pub fn install(ctx: &egui::Context) {
     style.text_styles.insert(egui::TextStyle::Body, body());
     style.text_styles.insert(egui::TextStyle::Button, label());
     style.text_styles.insert(egui::TextStyle::Small, caption());
-    style.text_styles.insert(egui::TextStyle::Monospace, text(14.0, 500));
+    style
+        .text_styles
+        .insert(egui::TextStyle::Monospace, text(14.0, 500));
     style.spacing.item_spacing = vec2(S2, S2);
     style.spacing.button_padding = vec2(S3, S1);
     style.spacing.interact_size.y = 28.0;
@@ -199,31 +429,46 @@ pub fn install(ctx: &egui::Context) {
 
 // MARK: material
 
+fn shadow_shapes(rect: Rect, r: CornerRadius, s: &KeyShadow, strength: f32) -> [egui::Shape; 2] {
+    let o = |v: f32| (v * strength).round() as i8;
+    [
+        Shadow {
+            offset: [o(s.light_offset), o(s.light_offset)],
+            blur: (s.light_blur * strength) as u8,
+            spread: 0,
+            color: if s.light_blur > 0.0 {
+                LIGHT
+            } else {
+                Color32::TRANSPARENT
+            },
+        }
+        .as_shape(rect, r)
+        .into(),
+        Shadow {
+            offset: [o(s.dark_offset[0]), o(s.dark_offset[1])],
+            blur: (s.dark_blur * strength) as u8,
+            spread: 0,
+            color: s.dark,
+        }
+        .as_shape(rect, r)
+        .into(),
+    ]
+}
+
 /// Raised like a key on a flat surface: a soft light from the top left, a shadow below, a rim
-/// light on the top edge.
+/// light on the top edge. The shadow is the app's (`Style::shadow`).
 pub fn raised(ui: &Ui, rect: Rect, radius: f32, strength: f32) {
+    raise(ui, rect, radius, strength, GROUND);
+}
+
+/// Raised in a given fill (red for what's chosen in a segmented switch).
+pub fn raise(ui: &Ui, rect: Rect, radius: f32, strength: f32, fill: Color32) {
     let p = ui.painter();
     let r = CornerRadius::same(radius.min(255.0) as u8);
-    let s = |o: f32| (o * strength).round() as i8;
-    p.add(
-        Shadow {
-            offset: [s(-2.0), s(-2.0)],
-            blur: (6.0 * strength) as u8,
-            spread: 0,
-            color: LIGHT,
-        }
-        .as_shape(rect, r),
-    );
-    p.add(
-        Shadow {
-            offset: [s(3.0), s(4.0)],
-            blur: (8.0 * strength) as u8,
-            spread: 0,
-            color: SHADE,
-        }
-        .as_shape(rect, r),
-    );
-    p.rect_filled(rect, r, GROUND);
+    for shape in shadow_shapes(rect, r, &style(ui).shadow, strength) {
+        p.add(shape);
+    }
+    p.rect_filled(rect, r, fill);
     rim(ui, rect, radius);
 }
 
@@ -251,19 +496,24 @@ pub fn sunken(ui: &Ui, rect: Rect, radius: f32) {
         rect.min + vec2(radius * 0.5, 0.5),
         pos2(rect.max.x - radius * 0.5, rect.min.y + 1.5),
     );
-    ui.painter().rect_filled(top, 0.0, alpha(Color32::BLACK, 0.35));
+    ui.painter()
+        .rect_filled(top, 0.0, alpha(Color32::BLACK, 0.35));
 }
 
 /// A panel: the ground's own colour, lifted by light and a soft shadow, radius 24.
 pub fn panel<R>(ui: &mut Ui, padding: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let width = ui.available_width();
     let where_ = ui.painter().add(egui::Shape::Noop);
-    let inner = ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-        egui::Frame::NONE.inner_margin(padding).show(ui, |ui| {
-            ui.set_width(width - 2.0 * padding);
-            add(ui)
-        })
-    });
+    let inner = ui.allocate_ui_with_layout(
+        vec2(width, 0.0),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            egui::Frame::NONE.inner_margin(padding).show(ui, |ui| {
+                ui.set_width(width - 2.0 * padding);
+                add(ui)
+            })
+        },
+    );
     let rect = inner.response.rect;
     // Drawn behind the content after it is laid out, since its height is known only then.
     let mut shapes = Vec::new();
@@ -291,12 +541,22 @@ pub fn panel<R>(ui: &mut Ui, padding: f32, add: impl FnOnce(&mut Ui) -> R) -> R 
 // MARK: text
 
 /// Text in a given font and colour, laid out without wrapping.
-pub fn paint_text(ui: &Ui, pos: Pos2, anchor: egui::Align2, text: &str, font: FontId, color: Color32) -> Rect {
+pub fn paint_text(
+    ui: &Ui,
+    pos: Pos2,
+    anchor: egui::Align2,
+    text: &str,
+    font: FontId,
+    color: Color32,
+) -> Rect {
     ui.painter().text(pos, anchor, text, font, color)
 }
 
 pub fn label_in(ui: &mut Ui, text: impl Into<String>, font: FontId, color: Color32) -> Response {
-    ui.add(egui::Label::new(egui::RichText::new(text.into()).font(font).color(color)).selectable(false))
+    ui.add(
+        egui::Label::new(egui::RichText::new(text.into()).font(font).color(color))
+            .selectable(false),
+    )
 }
 
 /// Wrapping text, for notes and verdicts.
@@ -308,20 +568,60 @@ pub fn wrapped(ui: &mut Ui, text: impl Into<String>, font: FontId, color: Color3
     )
 }
 
-/// A printed label: uppercase, tracked wide (0.16 em).
-pub fn overline(ui: &mut Ui, text: &str, color: Color32) -> Response {
+/// Text cut to one line of `width`, ending in "…" when it doesn't fit.
+pub fn elided(ui: &Ui, text: &str, font: FontId, color: Color32, width: f32) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), font, color);
+    job.wrap = egui::text::TextWrapping {
+        max_width: width.max(1.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    ui.painter().layout_job(job)
+}
+
+/// Small capitals with hair spaces between letters. egui does have tracking
+/// (`TextFormat::extra_letter_spacing`, as `overline` uses); this is for plain strings.
+pub fn spaced(text: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in text.to_uppercase().chars().enumerate() {
+        if i > 0 {
+            out.push('\u{200A}');
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn overline_job(ui: &Ui, text: &str, color: Color32) -> egui::text::LayoutJob {
+    let s = style(ui);
     let mut job = egui::text::LayoutJob::default();
     job.append(
         &text.to_uppercase(),
         0.0,
         egui::TextFormat {
-            font_id: overline_font(),
+            font_id: self::text(12.0, s.overline_weight),
             color,
-            extra_letter_spacing: 1.9,
+            extra_letter_spacing: s.overline_tracking,
             ..Default::default()
         },
     );
+    job
+}
+
+/// A printed label: uppercase, tracked wide.
+pub fn overline(ui: &mut Ui, text: &str, color: Color32) -> Response {
+    let job = overline_job(ui, text, color);
     ui.add(egui::Label::new(job).selectable(false))
+}
+
+/// The same, painted with its left edge at `pos.x` and centred on `pos.y`. Returns its width.
+pub fn overline_at(ui: &Ui, pos: Pos2, text: &str, color: Color32) -> f32 {
+    let galley = ui.painter().layout_job(overline_job(ui, text, color));
+    let w = galley.size().x;
+    ui.painter()
+        .galley(pos2(pos.x, pos.y - galley.size().y / 2.0), galley, color);
+    w
 }
 
 /// Column titles in tables: uppercase, 11 pt semibold, tracked.
@@ -331,7 +631,7 @@ pub fn column_title(ui: &mut Ui, text: &str) -> Response {
         &text.to_uppercase(),
         0.0,
         egui::TextFormat {
-            font_id: text_font(11.0, 600),
+            font_id: self::text(11.0, 600),
             color: INK_MUTED,
             extra_letter_spacing: 1.2,
             ..Default::default()
@@ -341,13 +641,15 @@ pub fn column_title(ui: &mut Ui, text: &str) -> Response {
     ui.add(egui::Label::new(job).selectable(false).extend())
 }
 
-fn text_font(size: f32, weight: u16) -> FontId {
-    text(size, weight)
-}
-
 /// A cell exactly `width` wide (and at least `height` tall): table columns and form columns stay
 /// aligned whatever their content.
-pub fn cell<R>(ui: &mut Ui, width: f32, height: f32, layout: egui::Layout, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub fn cell<R>(
+    ui: &mut Ui,
+    width: f32,
+    height: f32,
+    layout: egui::Layout,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
     // Allocated like any widget, so a horizontal row centres it vertically with its neighbours.
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     // A child that doesn't move the parent's cursor again: the allocation above already did.
@@ -358,50 +660,83 @@ pub fn cell<R>(ui: &mut Ui, width: f32, height: f32, layout: egui::Layout, add: 
 // MARK: controls
 
 pub fn text_width(ui: &Ui, text: &str, font: &FontId) -> f32 {
-    ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), INK).size().x)
+    ui.fonts_mut(|f| {
+        f.layout_no_wrap(text.to_string(), font.clone(), INK)
+            .size()
+            .x
+    })
 }
 
-/// The chip's lamp: red when lit, a dim dot when not.
+/// The chip's lamp: lit in the app's lamp colour (`Style::led`), a dim dot when not.
 pub fn led(ui: &Ui, center: Pos2, lit: bool, size: f32) {
-    let p = ui.painter();
+    let s = style(ui);
+    led_in(ui.painter(), center, lit, size, s.led, s.led_glow);
+}
+
+fn led_in(p: &Painter, center: Pos2, lit: bool, size: f32, color: Color32, glow: Color32) {
     if lit {
-        p.circle_filled(center, size * 1.1, alpha(ACCENT, 0.25));
-        p.circle_filled(center, size / 2.0, ACCENT);
+        p.circle_filled(center, size * 1.1, glow);
+        p.circle_filled(center, size / 2.0, color);
     } else {
         p.circle_filled(center, size / 2.0, alpha(INK, 0.16));
     }
 }
 
-/// A chip: a small key for one-of-many choices; the chosen one sinks in and lights its LED.
-/// `content` is a text, or `None` with an icon painted by `icon`.
+/// A chip: a small key for one-of-many choices; the chosen one sinks in and lights its lamp.
 pub fn chip(ui: &mut Ui, title: &str, chosen: bool, enabled: bool) -> Response {
     chip_with(ui, title, chosen, enabled, None)
 }
 
-pub fn chip_icon(ui: &mut Ui, chosen: bool, enabled: bool, icon: fn(&Ui, Rect, Color32)) -> Response {
+pub fn chip_icon(
+    ui: &mut Ui,
+    chosen: bool,
+    enabled: bool,
+    icon: fn(&Ui, Rect, Color32),
+) -> Response {
     chip_with(ui, "", chosen, enabled, Some(icon))
 }
 
-fn chip_with(ui: &mut Ui, title: &str, chosen: bool, enabled: bool, icon: Option<fn(&Ui, Rect, Color32)>) -> Response {
+fn chip_with(
+    ui: &mut Ui,
+    title: &str,
+    chosen: bool,
+    enabled: bool,
+    icon: Option<fn(&Ui, Rect, Color32)>,
+) -> Response {
+    let s = style(ui);
     let font = label();
     let content = if icon.is_some() {
         14.0
     } else {
         text_width(ui, title, &font)
     };
-    let size = vec2(S3 + 6.0 + S2 + content + S3, 28.0);
-    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let size = vec2(s.chip_pad + 6.0 + S2 + content + s.chip_pad, s.chip_height);
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     if ui.is_rect_visible(rect) {
         let fade = if enabled { 1.0 } else { 0.4 };
+        let r = s.chip_height / 2.0;
         if chosen {
-            sunken(ui, rect, 14.0);
+            sunken(ui, rect, r);
         } else {
-            raised(ui, rect, 14.0, 0.45);
+            raised(ui, rect, r, s.chip_raise);
+            if response.hovered() && enabled {
+                ui.painter()
+                    .rect_filled(rect, CornerRadius::same(r as u8), alpha(SEASHELL, 0.03));
+            }
         }
-        led(ui, pos2(rect.min.x + S3 + 3.0, rect.center().y), chosen, 6.0);
+        led(
+            ui,
+            pos2(rect.min.x + s.chip_pad + 3.0, rect.center().y),
+            chosen,
+            6.0,
+        );
         let color = (if chosen { INK } else { INK_MUTED }).gamma_multiply(fade);
-        let left = rect.min.x + S3 + 6.0 + S2;
+        let left = rect.min.x + s.chip_pad + 6.0 + S2;
         match icon {
             Some(draw) => draw(
                 ui,
@@ -427,9 +762,55 @@ fn chip_with(ui: &mut Ui, title: &str, chosen: bool, enabled: bool, icon: Option
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+/// Segments in a sunken pill; the chosen one raised in red. Answers the one pressed.
+pub fn segments(
+    ui: &mut Ui,
+    labels: &[&str],
+    chosen: usize,
+    height: f32,
+    pad: f32,
+) -> Option<usize> {
+    let font = label();
+    let widths: Vec<f32> = labels
+        .iter()
+        .map(|l| text_width(ui, l, &font) + 2.0 * pad)
+        .collect();
+    let total: f32 = widths.iter().sum();
+    let (rect, _) = ui.allocate_exact_size(vec2(total, height), Sense::hover());
+    sunken(ui, rect, height / 2.0);
+    let mut x = rect.min.x;
+    let mut pressed = None;
+    for (i, (title, w)) in labels.iter().zip(&widths).enumerate() {
+        let seg = Rect::from_min_size(pos2(x, rect.min.y), vec2(*w, height));
+        let response = ui
+            .interact(seg, ui.scope_id().with(("segment", title)), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if i == chosen {
+            raise(ui, seg, height / 2.0, 0.6, RUBY);
+        } else if response.hovered() {
+            ui.painter()
+                .rect_filled(seg, CornerRadius::same(255), HOVER);
+        }
+        let color = if i == chosen { SEASHELL } else { INK_MUTED };
+        ui.painter().text(
+            seg.center(),
+            egui::Align2::CENTER_CENTER,
+            *title,
+            font.clone(),
+            color,
+        );
+        if response.clicked() && i != chosen {
+            pressed = Some(i);
+        }
+        x += w;
+    }
+    pressed
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Key {
-    /// The one red key per view: a soft, almost flat red, what's on it light.
+    /// The one red key per view: a soft, almost flat red, what's on it light. Disabled, it is a
+    /// dark unlit key.
     Primary,
     /// The design system's `key`: strong but not red, the body's own material, raised.
     Raised,
@@ -437,40 +818,102 @@ pub enum Key {
     Ghost,
 }
 
-/// The system's keys, 30 tall (24 for `small` ghost keys in table rows).
+/// How a key is drawn, beyond its kind and words.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct KeyOptions {
+    /// The style's `small` size (table rows).
+    pub small: bool,
+    /// A trailing arrow ("Check →").
+    pub arrow: bool,
+    /// Prints quietly and takes no clicks.
+    pub disabled: bool,
+    /// A set width; words that don't fit end in "…".
+    pub width: Option<f32>,
+    /// At least this wide: a key whose words change keeps its neighbours still.
+    pub min_width: f32,
+    /// Another height than the style's (a ghost key in a row of chips takes the chips' height).
+    pub height: Option<f32>,
+}
+
+/// The system's keys, at the style's sizes.
 pub fn button(ui: &mut Ui, kind: Key, title: &str, small: bool) -> Response {
-    button_with(ui, kind, title, small, false)
+    button_with(
+        ui,
+        kind,
+        title,
+        KeyOptions {
+            small,
+            ..Default::default()
+        },
+    )
 }
 
 /// A key with a trailing arrow ("Check →", "Open Deliver Check →").
 pub fn button_arrow(ui: &mut Ui, kind: Key, title: &str, small: bool) -> Response {
-    button_with(ui, kind, title, small, true)
+    button_with(
+        ui,
+        kind,
+        title,
+        KeyOptions {
+            small,
+            arrow: true,
+            ..Default::default()
+        },
+    )
 }
 
-fn button_with(ui: &mut Ui, kind: Key, title: &str, small: bool, arrow: bool) -> Response {
-    let font = label();
-    let height = if small { 24.0 } else { 30.0 };
-    let pad = if small { S3 } else { S4 };
-    let arrow_w = if arrow { S1 + 10.0 } else { 0.0 };
-    let size = vec2(pad * 2.0 + text_width(ui, title, &font) + arrow_w, height);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Response {
+    let s = style(ui);
+    let size = if o.small {
+        s.small
+    } else {
+        match kind {
+            Key::Primary => s.primary,
+            Key::Raised => s.raised,
+            Key::Ghost => s.ghost,
+        }
+    };
+    let font = text(size.font_size, size.font_weight);
+    let height = o.height.unwrap_or(size.height);
+    let arrow_w = if o.arrow { S1 + 10.0 } else { 0.0 };
+    let natural = size.pad * 2.0 + text_width(ui, title, &font) + arrow_w;
+    let width = o.width.unwrap_or(natural.max(o.min_width));
+    let enabled = !o.disabled;
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), sense);
     if ui.is_rect_visible(rect) {
-        let pressed = response.is_pointer_button_down_on();
+        let pressed = enabled && response.is_pointer_button_down_on();
         let r = height / 2.0;
+        let cr = CornerRadius::same(r as u8);
         let color = match kind {
+            Key::Primary if !enabled => {
+                // With nothing to do, the red key goes dark and unlit.
+                ui.painter().rect_filled(rect, cr, alpha(EBONY, 0.42));
+                ui.painter().rect_stroke(
+                    rect,
+                    cr,
+                    Stroke::new(1.0, LINE),
+                    egui::StrokeKind::Inside,
+                );
+                alpha(SEASHELL, 0.36)
+            }
             Key::Primary => {
                 let p = ui.painter();
-                let cr = CornerRadius::same(r as u8);
-                p.add(
-                    Shadow {
-                        offset: [3, 4],
-                        blur: 8,
-                        spread: 0,
-                        color: alpha(Color32::BLACK, 0.3),
-                    }
-                    .as_shape(rect, cr),
-                );
-                p.rect_filled(rect, cr, if pressed { ACCENT.gamma_multiply(0.7) } else { ACCENT });
+                for shape in shadow_shapes(rect, cr, &s.primary_shadow, 1.0) {
+                    p.add(shape);
+                }
+                let fill = if pressed {
+                    ACCENT.gamma_multiply(0.7)
+                } else if response.hovered() {
+                    Color32::from_rgb(0xDE, 0x1B, 0x0B)
+                } else {
+                    ACCENT
+                };
+                p.rect_filled(rect, cr, fill);
                 p.rect_filled(
                     Rect::from_min_max(
                         rect.min + vec2(r * 0.6, 0.0),
@@ -485,45 +928,124 @@ fn button_with(ui: &mut Ui, kind: Key, title: &str, small: bool, arrow: bool) ->
                 if pressed {
                     sunken(ui, rect, r)
                 } else {
-                    raised(ui, rect, r, 0.6)
+                    raised(ui, rect, r, s.key_raise)
                 }
-                INK
+                if enabled { INK } else { INK_NOTE }
             }
             Key::Ghost => {
-                let cr = CornerRadius::same(r as u8);
-                if response.hovered() {
+                if response.hovered() && enabled {
                     ui.painter().rect_filled(rect, cr, HOVER);
                 }
-                ui.painter()
-                    .rect_stroke(rect, cr, Stroke::new(1.0, LINE_PRINT), egui::StrokeKind::Inside);
-                if pressed {
+                let line = if enabled {
+                    LINE_PRINT
+                } else {
+                    alpha(SEASHELL, 0.12)
+                };
+                ui.painter().rect_stroke(
+                    rect,
+                    cr,
+                    Stroke::new(1.0, line),
+                    egui::StrokeKind::Inside,
+                );
+                if !enabled {
+                    INK_NOTE
+                } else if pressed {
                     INK_PRINT.gamma_multiply(0.7)
                 } else {
                     INK_PRINT
                 }
             }
         };
-        let text_rect = paint_text(
-            ui,
-            pos2(rect.min.x + pad, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            title,
-            font,
-            color,
-        );
-        if arrow {
-            arrow_right(ui, pos2(text_rect.max.x + S1 + 5.0, rect.center().y), 10.0, color);
+        if o.width.is_some() {
+            let g = elided(ui, title, font, color, width - 2.0 * S2 - arrow_w);
+            let pos = rect.center() - vec2(arrow_w / 2.0, 0.0) - g.size() / 2.0;
+            let right = pos.x + g.size().x;
+            ui.painter().galley(pos, g, color);
+            if o.arrow {
+                arrow_right(ui, pos2(right + S1 + 5.0, rect.center().y), 10.0, color);
+            }
+        } else {
+            let left = rect.center().x - (natural - size.pad * 2.0) / 2.0;
+            let text_rect = paint_text(
+                ui,
+                pos2(left, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                title,
+                font,
+                color,
+            );
+            if o.arrow {
+                arrow_right(
+                    ui,
+                    pos2(text_rect.max.x + S1 + 5.0, rect.center().y),
+                    10.0,
+                    color,
+                );
+            }
         }
+    }
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
+}
+
+/// A round printed outline around a drawn glyph (day arrows, "previous", "next").
+pub fn round_ghost(
+    ui: &mut Ui,
+    size: f32,
+    enabled: bool,
+    glyph: impl FnOnce(&Painter, Rect, Color32),
+) -> Response {
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), sense);
+    if ui.is_rect_visible(rect) {
+        let fade = if enabled { 1.0 } else { 0.3 };
+        let p = ui.painter();
+        if response.hovered() && enabled {
+            p.circle_filled(rect.center(), size / 2.0, HOVER);
+        }
+        p.circle_stroke(
+            rect.center(),
+            size / 2.0 - 0.5,
+            Stroke::new(1.0, LINE_PRINT.gamma_multiply(fade)),
+        );
+        glyph(p, rect, INK_PRINT.gamma_multiply(fade));
+    }
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
+}
+
+/// A round raised key around a drawn glyph (a settings button).
+pub fn round_raised(
+    ui: &mut Ui,
+    size: f32,
+    glyph: impl FnOnce(&Painter, Rect, Color32),
+) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+    if ui.is_rect_visible(rect) {
+        raised(ui, rect, size / 2.0, style(ui).chip_raise);
+        glyph(ui.painter(), rect, INK);
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Switch: the knob fits inside the track; lit means on.
+/// Switch: the knob fits inside the track; lit means on. Answers clicks; the caller flips.
 pub fn switch(ui: &mut Ui, on: bool) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(40.0, 24.0), Sense::click());
+    let s = style(ui);
+    let (rect, response) = ui.allocate_exact_size(s.switch, Sense::click());
     let t = ui.ctx().animate_bool_with_time(response.id, on, 0.25);
     let p = ui.painter();
-    let track = CornerRadius::same(12);
+    let half = s.switch.y / 2.0;
+    let track = CornerRadius::same(half as u8);
     p.rect_filled(rect, track, lerp_color(SUNKEN, alpha(INK, 0.9), t));
     if t < 1.0 {
         p.rect_stroke(
@@ -533,19 +1055,34 @@ pub fn switch(ui: &mut Ui, on: bool) -> Response {
             egui::StrokeKind::Inside,
         );
     }
-    let x = egui::lerp(rect.min.x + 12.0..=rect.max.x - 12.0, t);
+    let x = egui::lerp(rect.min.x + half..=rect.max.x - half, t);
     let knob = pos2(x, rect.center().y);
-    p.circle_filled(knob + vec2(1.0, 2.0), 9.0, alpha(Color32::BLACK, 0.4));
-    p.circle_filled(knob, 9.0, lerp_color(alpha(INK, 0.85), GROUND, t));
+    p.circle_filled(knob + vec2(1.0, 2.0), s.knob, alpha(Color32::BLACK, 0.4));
+    p.circle_filled(knob, s.knob, lerp_color(alpha(INK, 0.85), GROUND, t));
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
-    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
-    Color32::from_rgba_premultiplied(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()), l(a.a(), b.a()))
+/// A switch bound to a value: flips it when clicked; `changed()` says so.
+pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
+    let mut response = switch(ui, *on);
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    response
 }
 
-#[derive(Clone, Copy, PartialEq)]
+pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    Color32::from_rgba_premultiplied(
+        l(a.r(), b.r()),
+        l(a.g(), b.g()),
+        l(a.b(), b.b()),
+        l(a.a(), b.a()),
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum TagKind {
     /// Solid ink with the ground's colour on it.
     Ink,
@@ -563,86 +1100,202 @@ impl TagKind {
             _ => TagKind::Quiet,
         }
     }
+
+    fn colours(self) -> (Color32, Color32) {
+        match self {
+            TagKind::Ink => (INK, GROUND),
+            TagKind::Quiet => (SUNKEN, INK_PRINT),
+            TagKind::Accent => (ACCENT, SEASHELL),
+        }
+    }
 }
 
-/// A small printed tag: a rounded trapezoid, wider at the top (the design system's own outline,
-/// traced as TagShape in the Mac app). The slant side gets twice the straight side's room.
+/// A small printed tag at the style's size (`Style::tag_height`).
 pub fn tag(ui: &mut Ui, title: &str, kind: TagKind) -> Response {
-    let mut job = egui::text::LayoutJob::default();
-    let (fill, color) = match kind {
-        TagKind::Ink => (INK, GROUND),
-        TagKind::Quiet => (SUNKEN, INK_PRINT),
-        TagKind::Accent => (ACCENT, SEASHELL),
-    };
-    job.append(
-        &title.to_uppercase(),
-        0.0,
-        egui::TextFormat {
-            font_id: text(11.0, 600),
-            color,
-            extra_letter_spacing: 1.0,
-            ..Default::default()
-        },
-    );
-    let galley = ui.fonts_mut(|f| f.layout_job(job));
-    let size = vec2(S2 + galley.size().x + S4, 20.0);
+    let s = style(ui);
+    let g = tag_galley(ui.painter(), title, kind, s.tag_font, s.tag_tracking);
+    let size = vec2(tag_width(g.size().x, s.tag_height), s.tag_height);
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     if ui.is_rect_visible(rect) {
-        ui.painter()
-            .add(egui::Shape::convex_polygon(tag_outline(rect), fill, Stroke::NONE));
-        ui.painter().galley(
-            pos2(rect.min.x + S2, rect.center().y - galley.size().y / 2.0),
-            galley,
-            color,
-        );
+        paint_tag_galley(ui.painter(), rect.min, s.tag_height, g, kind);
     }
     response
 }
 
-/// The tag outline: rounded on the left, the right side slanting in towards the bottom.
-fn tag_outline(r: Rect) -> Vec<Pos2> {
+/// A tag painted with its top left at `at`, `height` tall, in type of `font` (size, weight):
+/// for tags drawn over pictures. Returns its width.
+pub fn paint_tag(
+    painter: &Painter,
+    at: Pos2,
+    height: f32,
+    font: (f32, u16),
+    title: &str,
+    kind: TagKind,
+) -> f32 {
+    let tracking = font.0 * 0.12;
+    let g = tag_galley(painter, title, kind, font, tracking);
+    let w = tag_width(g.size().x, height);
+    paint_tag_galley(painter, at, height, g, kind);
+    w
+}
+
+fn tag_galley(
+    painter: &Painter,
+    title: &str,
+    kind: TagKind,
+    font: (f32, u16),
+    tracking: f32,
+) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        &title.to_uppercase(),
+        0.0,
+        egui::TextFormat {
+            font_id: text(font.0, font.1),
+            color: kind.colours().1,
+            extra_letter_spacing: tracking,
+            ..Default::default()
+        },
+    );
+    painter.layout_job(job)
+}
+
+/// Left padding, the words, and the slanted end (the design system's 32-px tag: 11.5 before the
+/// words, 28.4 after, scaled to the height).
+fn tag_width(words: f32, height: f32) -> f32 {
+    let s = height / 32.0;
+    11.5 * s + words + 28.4 * s
+}
+
+fn paint_tag_galley(painter: &Painter, at: Pos2, height: f32, g: Arc<egui::Galley>, kind: TagKind) {
+    let (fill, color) = kind.colours();
+    let rect = Rect::from_min_size(at, vec2(tag_width(g.size().x, height), height));
+    painter.add(egui::Shape::convex_polygon(
+        tag_outline(rect),
+        fill,
+        Stroke::NONE,
+    ));
+    painter.galley(
+        pos2(
+            rect.min.x + 11.5 * height / 32.0,
+            rect.center().y - g.size().y / 2.0,
+        ),
+        g,
+        color,
+    );
+}
+
+/// The tag outline, traced from the design system's own shape (TagShape in the Mac apps, 30
+/// units tall): a flat top, the right side slanting in towards the bottom, a sharp top corner
+/// rounded 7.89 and a wide bottom corner rounded 12.17 so the two read as equally round, the
+/// left side rounded 8.
+pub fn tag_outline(r: Rect) -> Vec<Pos2> {
+    use std::f32::consts::PI;
     let s = r.height() / 30.0;
+    let cap = r.max.x - 23.0 * s;
     let left = 8.0 * s;
+    let at = |x: f32, y: f32| pos2(cap + x * s, r.min.y + y * s);
     let mut points = Vec::new();
     let arc = |points: &mut Vec<Pos2>, c: Pos2, radius: f32, from: f32, to: f32| {
-        for i in 0..=6 {
-            let a = from + (to - from) * i as f32 / 6.0;
+        for i in 0..=8 {
+            let a = from + (to - from) * i as f32 / 8.0;
             points.push(c + radius * Vec2::angled(a));
         }
     };
-    use std::f32::consts::PI;
-    // Top left corner, top edge, the slanted right side, bottom edge, bottom left corner.
-    arc(&mut points, pos2(r.min.x + left, r.min.y + left), left, PI, 1.5 * PI);
-    let top_right = r.max.x - 7.0 * s;
+    // top left, the top edge to the sharp corner (centre (10.99, 7.89)), the slant, the wide
+    // corner (centre (2.03, 17.83)), the bottom edge, bottom left
     arc(
         &mut points,
-        pos2(top_right - 2.0 * s, r.min.y + 7.0 * s),
-        7.0 * s,
+        pos2(r.min.x + left, r.min.y + left),
+        left,
+        PI,
         1.5 * PI,
-        1.88 * PI,
     );
-    let bottom_right = r.max.x - 12.0 * s;
+    let sharp_end = (11.02_f32 - 7.89).atan2(18.23 - 10.99);
     arc(
         &mut points,
-        pos2(bottom_right - 4.0 * s, r.max.y - 6.0 * s),
-        6.0 * s,
-        0.38 * PI,
+        at(10.99, 7.89),
+        7.89 * s,
+        1.5 * PI,
+        2.0 * PI + sharp_end,
+    );
+    let wide_start = (22.66_f32 - 17.83).atan2(13.19 - 2.03);
+    arc(
+        &mut points,
+        at(2.03, 17.83),
+        12.17 * s,
+        wide_start,
         0.5 * PI,
     );
-    arc(&mut points, pos2(r.min.x + left, r.max.y - left), left, 0.5 * PI, PI);
+    arc(
+        &mut points,
+        pos2(r.min.x + left, r.max.y - left),
+        left,
+        0.5 * PI,
+        PI,
+    );
     points
 }
 
-/// A sunken text field, 28 tall, in tabular figures.
+/// What a status line says, for its lamp and weight.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Status {
+    /// A pass: a dim dot, muted type.
+    Ok,
+    /// A recommendation: an ink dot.
+    Neutral,
+    /// A broken requirement: the lit red lamp, full ink type.
+    Warning,
+    /// Nothing published: an empty ring.
+    Unspecified,
+}
+
+/// A status lamp before a line of text (Swift: AdviceLabel + StatusLamp): lit red for a broken
+/// requirement, an ink dot for a recommendation, a dim dot for a pass, an empty ring where nothing
+/// is published. Only the broken one gets full ink type.
+pub fn advice(ui: &mut Ui, status: impl Into<Status>, message: &str) -> Response {
+    let status = status.into();
+    let (font, color) = match status {
+        Status::Warning => (label(), INK),
+        Status::Neutral => (body(), INK_PRINT),
+        Status::Ok => (body(), INK_MUTED),
+        Status::Unspecified => (body(), INK_MUTED.gamma_multiply(0.75)),
+    };
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = S2;
+        let (rect, _) = ui.allocate_exact_size(vec2(6.0, font.size * 1.3), Sense::hover());
+        let c = pos2(rect.center().x, rect.min.y + font.size * 0.62);
+        let p = ui.painter();
+        match status {
+            // a warning is red in every app, whatever colour its chips' lamps are
+            Status::Warning => led_in(p, c, true, 6.0, ACCENT, alpha(ACCENT, 0.25)),
+            Status::Neutral => {
+                p.circle_filled(c, 3.0, INK_PRINT);
+            }
+            Status::Ok => {
+                p.circle_filled(c, 3.0, alpha(INK, 0.22));
+            }
+            Status::Unspecified => {
+                p.circle_stroke(c, 2.5, Stroke::new(1.0, LINE_PRINT));
+            }
+        }
+        wrapped(ui, message, font, color)
+    })
+    .inner
+}
+
+/// A sunken text field at the style's height, in a capsule.
 pub fn field(ui: &mut Ui, value: &mut String, width: f32, hint: &str, invalid: bool) -> Response {
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
-    sunken(ui, rect, 14.0);
+    let s = style(ui);
+    let h = s.field_height;
+    let (rect, _) = ui.allocate_exact_size(vec2(width, h), Sense::hover());
+    sunken(ui, rect, h / 2.0);
     let edit = egui::TextEdit::singleline(value)
-        .font(text(14.0, 500))
+        .font(text(s.field_font.0, s.field_font.1))
         .text_color(INK)
         .hint_text(egui::RichText::new(hint).color(INK_MUTED))
         .frame(egui::Frame::NONE)
-        .margin(vec2(S3, 0.0))
+        .margin(vec2(s.field_margin, 0.0))
         .align(egui::Align2::LEFT_CENTER)
         .desired_width(width);
     let response = ui.put(rect, edit);
@@ -653,8 +1306,12 @@ pub fn field(ui: &mut Ui, value: &mut String, width: f32, hint: &str, invalid: b
     } else {
         Stroke::new(1.0, LINE)
     };
-    ui.painter()
-        .rect_stroke(rect, CornerRadius::same(14), stroke, egui::StrokeKind::Inside);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same((h / 2.0) as u8),
+        stroke,
+        egui::StrokeKind::Inside,
+    );
     response
 }
 
@@ -670,12 +1327,24 @@ pub fn arrow_right(ui: &Ui, center: Pos2, size: f32, color: Color32) {
     let s = size / 2.0;
     let stroke = Stroke::new(1.6, color);
     let p = ui.painter();
-    p.line_segment([center - vec2(s * 0.85, 0.0), center + vec2(s * 0.85, 0.0)], stroke);
     p.line_segment(
-        [center + vec2(s * 0.85, 0.0), center + vec2(s * 0.15, -s * 0.7)],
+        [center - vec2(s * 0.85, 0.0), center + vec2(s * 0.85, 0.0)],
         stroke,
     );
-    p.line_segment([center + vec2(s * 0.85, 0.0), center + vec2(s * 0.15, s * 0.7)], stroke);
+    p.line_segment(
+        [
+            center + vec2(s * 0.85, 0.0),
+            center + vec2(s * 0.15, -s * 0.7),
+        ],
+        stroke,
+    );
+    p.line_segment(
+        [
+            center + vec2(s * 0.85, 0.0),
+            center + vec2(s * 0.15, s * 0.7),
+        ],
+        stroke,
+    );
 }
 
 pub fn chevron(ui: &Ui, center: Pos2, open: f32, color: Color32) {
@@ -694,12 +1363,48 @@ pub fn chevron(ui: &Ui, center: Pos2, open: f32, color: Color32) {
     ui.painter().line(vec![a, b, c], stroke);
 }
 
+/// A chevron pointing up or down, centred in `rect` (for round keys).
+pub fn chevron_vertical(p: &Painter, rect: Rect, color: Color32, up: bool) {
+    let c = rect.center();
+    let d = if up { -1.0 } else { 1.0 };
+    p.line(
+        vec![
+            c + vec2(-4.0, -2.0 * d),
+            c + vec2(0.0, 2.0 * d),
+            c + vec2(4.0, -2.0 * d),
+        ],
+        Stroke::new(1.6, color),
+    );
+}
+
+/// The settings glyph: three sliders.
+pub fn sliders(p: &Painter, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let stroke = Stroke::new(1.5, color);
+    for (dy, knob) in [(-4.5_f32, 1.5_f32), (0.0, -2.0), (4.5, 2.5)] {
+        p.line_segment([c + vec2(-7.0, dy), c + vec2(7.0, dy)], stroke);
+        p.circle_filled(c + vec2(knob, dy), 2.4, GROUND);
+        p.circle_stroke(c + vec2(knob, dy), 2.2, stroke);
+    }
+}
+
+/// A plus sign.
+pub fn plus(p: &Painter, c: Pos2, color: Color32) {
+    let s = Stroke::new(1.6, color);
+    p.line_segment([c + vec2(-4.5, 0.0), c + vec2(4.5, 0.0)], s);
+    p.line_segment([c + vec2(0.0, -4.5), c + vec2(0.0, 4.5)], s);
+}
+
 pub fn copy_icon(ui: &Ui, rect: Rect, color: Color32) {
     let s = rect.width() / 16.0;
     let stroke = Stroke::new(1.3, color);
     let front = Rect::from_min_size(rect.min + vec2(5.0, 5.0) * s, vec2(8.5, 8.5) * s);
-    ui.painter()
-        .rect_stroke(front, CornerRadius::same(2), stroke, egui::StrokeKind::Middle);
+    ui.painter().rect_stroke(
+        front,
+        CornerRadius::same(2),
+        stroke,
+        egui::StrokeKind::Middle,
+    );
     ui.painter().line(
         vec![
             rect.min + vec2(3.0, 10.5) * s,
@@ -742,7 +1447,11 @@ pub fn dashed_rect(ui: &Ui, rect: Rect, color: Color32, dash: f32, gap: f32) {
     ];
     let stroke = Stroke::new(1.5, color);
     for pair in corners.windows(2) {
-        ui.painter()
-            .extend(egui::Shape::dashed_line(&[pair[0], pair[1]], stroke, dash, gap));
+        ui.painter().extend(egui::Shape::dashed_line(
+            &[pair[0], pair[1]],
+            stroke,
+            dash,
+            gap,
+        ));
     }
 }

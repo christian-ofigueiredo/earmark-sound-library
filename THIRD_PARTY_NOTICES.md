@@ -71,7 +71,7 @@ A drawn window (egui on wgpu and winit) on the engine above.
 | opener | Show in Folder | MIT or Apache-2.0 |
 | image | The window icon and checking screenshots | MIT or Apache-2.0 |
 | windows-sys, winresource (Windows) | The dark window frame; the .exe's icon | MIT or Apache-2.0; MIT |
-| Tessel and Brakwell | Static weights cut from the variable fonts (egui can't pick a weight) | As the Mac app's (see above) |
+| Tessel and Brakwell | The interface's type, as in the Mac app | As the Mac app's (see above) |
 
 ## Python libraries (installed by `setup.sh`, not distributed here)
 

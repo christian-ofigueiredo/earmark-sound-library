@@ -12,10 +12,8 @@
 mod analysis;
 mod backend;
 mod frame;
-mod look;
 mod player;
-// The family theme, shared as it is with the other apps: not every piece is used here.
-#[allow(dead_code)]
+// The family theme, shared as it is with the other apps (Offload keeps the original).
 mod theme;
 mod ui;
 
@@ -44,9 +42,15 @@ fn check() -> Result<(), String> {
     );
     println!("“door”: {} sounds", back.sounds(&Scope::All, "door")?.len());
     for c in ["DOORS", "DOORWood"] {
-        println!("{c}: {} sounds", back.sounds(&Scope::Category(c.into()), "")?.len());
+        println!(
+            "{c}: {} sounds",
+            back.sounds(&Scope::Category(c.into()), "")?.len()
+        );
     }
-    println!("duplicates: {} sounds", back.sounds(&Scope::Duplicates, "")?.len());
+    println!(
+        "duplicates: {} sounds",
+        back.sounds(&Scope::Duplicates, "")?.len()
+    );
     if let Some(first) = all.first() {
         let details = back.tool("get_sound", serde_json::json!({ "sound_id": first.id }))?;
         println!(
@@ -54,7 +58,10 @@ fn check() -> Result<(), String> {
             first.id,
             details.to_string().chars().take(160).collect::<String>()
         );
-        let similar = back.tool("find_similar", serde_json::json!({ "sound_id": first.id, "limit": 3 }))?;
+        let similar = back.tool(
+            "find_similar",
+            serde_json::json!({ "sound_id": first.id, "limit": 3 }),
+        )?;
         let names: Vec<&str> = similar["similar"]
             .as_array()
             .map(|a| a.iter().filter_map(|r| r["name"].as_str()).collect())
@@ -69,7 +76,11 @@ fn check() -> Result<(), String> {
     );
     let started = std::time::Instant::now();
     let map = back.sound_map(Some("DOORS".into()))?;
-    println!("map of DOORS: {} points ({:?})", map.points.len(), started.elapsed());
+    println!(
+        "map of DOORS: {} points ({:?})",
+        map.points.len(),
+        started.elapsed()
+    );
     Ok(())
 }
 
@@ -77,7 +88,9 @@ fn analyse() -> Result<String, String> {
     let back = Backend::open()?;
     drop(back);
     let path = earmark_mcp::default_database_path();
-    let db = std::sync::Mutex::new(earmark_db::LibraryDatabase::open(Some(&path), false).map_err(backend::error)?);
+    let db = std::sync::Mutex::new(
+        earmark_db::LibraryDatabase::open(Some(&path), false).map_err(backend::error)?,
+    );
     let stop = AtomicBool::new(false);
     let report = |what: &str, done: usize, total: usize| {
         if done == total || done.is_multiple_of(10) {

@@ -256,7 +256,11 @@ impl Backend {
                     count,
                     subcategories: subs
                         .into_iter()
-                        .map(|(label, (cat_id, count))| Subcategory { label, cat_id, count })
+                        .map(|(label, (cat_id, count))| Subcategory {
+                            label,
+                            cat_id,
+                            count,
+                        })
                         .collect(),
                 })
                 .collect(),
@@ -302,8 +306,17 @@ impl Backend {
             Scope::Library(id) => Some(*id),
             _ => None,
         };
-        let all = self.db.lock().map_err(error)?.songs(library).map_err(error)?;
-        let words: Vec<String> = query.to_lowercase().split_whitespace().map(String::from).collect();
+        let all = self
+            .db
+            .lock()
+            .map_err(error)?
+            .songs(library)
+            .map_err(error)?;
+        let words: Vec<String> = query
+            .to_lowercase()
+            .split_whitespace()
+            .map(String::from)
+            .collect();
         Ok(all
             .into_iter()
             .filter(|s| {
@@ -349,7 +362,11 @@ impl Backend {
     }
 
     pub fn remove_library(&self, id: i64) -> Result<(), String> {
-        self.db.lock().map_err(error)?.remove_library(id).map_err(error)?;
+        self.db
+            .lock()
+            .map_err(error)?
+            .remove_library(id)
+            .map_err(error)?;
         self.changed();
         Ok(())
     }
@@ -361,7 +378,11 @@ impl Backend {
     }
 
     /// Reads the libraries again, on a thread of its own; `tell` hears how far it is.
-    pub fn start_scan(self: &Arc<Self>, ids: Vec<i64>, tell: impl Fn(Event) + Send + Sync + 'static) {
+    pub fn start_scan(
+        self: &Arc<Self>,
+        ids: Vec<i64>,
+        tell: impl Fn(Event) + Send + Sync + 'static,
+    ) {
         if self.scanning.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -375,7 +396,12 @@ impl Backend {
     }
 
     fn scan_libraries(&self, ids: &[i64], tell: &(dyn Fn(Event) + Sync)) -> Result<(), String> {
-        let libraries = self.db.lock().map_err(error)?.libraries(None).map_err(error)?;
+        let libraries = self
+            .db
+            .lock()
+            .map_err(error)?
+            .libraries(None)
+            .map_err(error)?;
         for library in libraries.iter().filter(|l| ids.contains(&l.id)) {
             if !library.is_online() {
                 continue;
@@ -544,8 +570,16 @@ impl Backend {
             let mut x = Floats::page(rows.len());
             x.copy_from_slice(&rows);
             drop(rows);
-            let map = sound_map::map(&x, ids.len(), d, &sound_map::Settings::default(), 3, &|_| {}, &|| false)
-                .ok_or("The map was stopped.")?;
+            let map = sound_map::map(
+                &x,
+                ids.len(),
+                d,
+                &sound_map::Settings::default(),
+                3,
+                &|_| {},
+                &|| false,
+            )
+            .ok_or("The map was stopped.")?;
             ids.iter()
                 .zip(&map.points)
                 .map(|(id, p)| {

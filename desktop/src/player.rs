@@ -30,8 +30,8 @@ impl Player {
     pub fn play(&mut self, path: &str) -> Result<(), String> {
         self.stop();
         if self.stream.is_none() {
-            let mut stream =
-                rodio::DeviceSinkBuilder::open_default_sink().map_err(|e| format!("No sound output: {e}"))?;
+            let mut stream = rodio::DeviceSinkBuilder::open_default_sink()
+                .map_err(|e| format!("No sound output: {e}"))?;
             stream.log_on_drop(false);
             self.stream = Some(stream);
         }

@@ -3,12 +3,16 @@
 //! details, and the status bar. Same layout as the Mac app and the earlier web window.
 
 use crate::backend::{Backend, Event, Row, Scope, Snapshot, SongRow, SoundMap, teller};
-use crate::look::{self, INK_NOTE};
 use crate::player::Player;
-use crate::theme::{self, INK, INK_MUTED, INK_PRINT, Key as KeyKind, LINE, SHARK};
+use crate::theme::{
+    self, INK, INK_MUTED, INK_NOTE, INK_PRINT, Key as KeyKind, KeyOptions, LINE, SHARK,
+};
 
 const ROW_HEIGHT: f32 = 28.0;
-use egui::{Align, Align2, Color32, CornerRadius, Frame, Key, Layout, Margin, Rect, Sense, Stroke, Ui, pos2, vec2};
+use egui::{
+    Align, Align2, Color32, CornerRadius, Frame, Key, Layout, Margin, Rect, Sense, Stroke, Ui,
+    pos2, vec2,
+};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -193,9 +197,13 @@ impl EarmarkApp {
     fn reload(&mut self) {
         self.dirty = false;
         let result = if self.music {
-            self.back.songs(&self.scope, &self.query).map(|s| self.songs = s)
+            self.back
+                .songs(&self.scope, &self.query)
+                .map(|s| self.songs = s)
         } else {
-            self.back.sounds(&self.scope, &self.query).map(|r| self.rows = r)
+            self.back
+                .sounds(&self.scope, &self.query)
+                .map(|r| self.rows = r)
         };
         if let Err(e) = result {
             self.say(&e, Some(6));
@@ -232,7 +240,10 @@ impl EarmarkApp {
         self.details = if self.music {
             None
         } else {
-            match self.back.tool("get_sound", serde_json::json!({ "sound_id": id })) {
+            match self
+                .back
+                .tool("get_sound", serde_json::json!({ "sound_id": id }))
+            {
                 Ok(v) => Some(v),
                 Err(e) => {
                     self.say(&e, Some(6));
@@ -294,7 +305,10 @@ impl EarmarkApp {
         let tell = self.tell(ctx);
         std::thread::spawn(move || {
             let found = back
-                .tool("find_similar", serde_json::json!({ "sound_id": id, "limit": 50 }))
+                .tool(
+                    "find_similar",
+                    serde_json::json!({ "sound_id": id, "limit": 50 }),
+                )
                 .map(|v| v["similar"].as_array().cloned().unwrap_or_default());
             tell(Event::Similar(id, found));
         });
@@ -324,7 +338,11 @@ impl EarmarkApp {
         while let Ok(event) = self.rx.try_recv() {
             match event {
                 Event::Progress(name, done, total) => self.say(
-                    &format!("Reading “{name}”: {} of {} files", number(done), number(total)),
+                    &format!(
+                        "Reading “{name}”: {} of {} files",
+                        number(done),
+                        number(total)
+                    ),
                     None,
                 ),
                 Event::Scanned(problem) => {
@@ -334,9 +352,10 @@ impl EarmarkApp {
                     }
                     self.refresh();
                 }
-                Event::Analysis(what, done, total) => {
-                    self.say(&format!("{what}: {} of {}", number(done), number(total)), None)
-                }
+                Event::Analysis(what, done, total) => self.say(
+                    &format!("{what}: {} of {}", number(done), number(total)),
+                    None,
+                ),
                 Event::Analysed(said) => {
                     self.analysing = false;
                     self.stopping = false;
@@ -402,7 +421,9 @@ impl EarmarkApp {
         } else {
             self.rows.iter().map(|r| (r.id, r.path.clone())).collect()
         };
-        let at = self.selected.and_then(|s| ids.iter().position(|(id, _)| *id == s));
+        let at = self
+            .selected
+            .and_then(|s| ids.iter().position(|(id, _)| *id == s));
         if space && let Some(i) = at {
             let path = ids[i].1.clone();
             self.play(&path);
@@ -436,7 +457,13 @@ impl EarmarkApp {
                 theme::display(30.0, 700),
                 INK,
             );
-            if let Some(i) = look::segments(ui, &["Sound Effects", "Music"], usize::from(self.music), 34.0, 18.0) {
+            if let Some(i) = theme::segments(
+                ui,
+                &["Sound Effects", "Music"],
+                usize::from(self.music),
+                34.0,
+                18.0,
+            ) {
                 self.set_section(i == 1);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -462,8 +489,16 @@ impl EarmarkApp {
 
     // MARK: sidebar
 
-    fn side_item(ui: &mut Ui, label: &str, count: Option<usize>, on: bool, indent: f32, dim: bool) -> egui::Response {
-        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 27.0), Sense::click());
+    fn side_item(
+        ui: &mut Ui,
+        label: &str,
+        count: Option<usize>,
+        on: bool,
+        indent: f32,
+        dim: bool,
+    ) -> egui::Response {
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(ui.available_width(), 27.0), Sense::click());
         let p = ui.painter();
         if on {
             p.rect_filled(rect, CornerRadius::same(8), theme::SELECTION_RED);
@@ -485,7 +520,7 @@ impl EarmarkApp {
         } else {
             INK
         };
-        let g = look::elided(ui, label, theme::text(13.0, 400), color, right - x);
+        let g = theme::elided(ui, label, theme::text(13.0, 400), color, right - x);
         ui.painter()
             .galley(pos2(x, rect.center().y - g.size().y / 2.0), g, color);
         response
@@ -497,7 +532,7 @@ impl EarmarkApp {
         ui.painter().text(
             pos2(rect.min.x + 8.0, rect.center().y),
             Align2::LEFT_CENTER,
-            look::spaced(title),
+            theme::spaced(title),
             theme::text(11.0, 600),
             INK_NOTE,
         );
@@ -508,7 +543,11 @@ impl EarmarkApp {
         ui.spacing_mut().item_spacing.y = 0.0;
         let music = self.music;
         let all = if music { "All Songs" } else { "All Sounds" };
-        let count = if music { self.snap.songs } else { self.snap.sounds };
+        let count = if music {
+            self.snap.songs
+        } else {
+            self.snap.sounds
+        };
         if Self::side_item(ui, all, Some(count), self.scope == Scope::All, 0.0, false).clicked() {
             self.choose(Scope::All);
         }
@@ -542,7 +581,11 @@ impl EarmarkApp {
                 }
             });
         }
-        let add = if music { "Add Music Folder…" } else { "Add Library…" };
+        let add = if music {
+            "Add Music Folder…"
+        } else {
+            "Add Library…"
+        };
         if Self::side_item(ui, add, None, false, 0.0, true).clicked() {
             self.add_library(ctx, music);
         }
@@ -585,7 +628,9 @@ impl EarmarkApp {
             };
             ui.painter().line(points, Stroke::new(1.6, INK_NOTE));
             if r.clicked() {
-                let on_chevron = r.interact_pointer_pos().is_some_and(|p| p.x < r.rect.min.x + 24.0);
+                let on_chevron = r
+                    .interact_pointer_pos()
+                    .is_some_and(|p| p.x < r.rect.min.x + 24.0);
                 if on_chevron {
                     if open {
                         self.expanded.remove(&c.name);
@@ -599,7 +644,9 @@ impl EarmarkApp {
             if open {
                 for s in &c.subcategories {
                     let on = self.scope == Scope::Category(s.cat_id.clone());
-                    if Self::side_item(ui, &title_case(&s.label), Some(s.count), on, 18.0, false).clicked() {
+                    if Self::side_item(ui, &title_case(&s.label), Some(s.count), on, 18.0, false)
+                        .clicked()
+                    {
                         self.choose(Scope::Category(s.cat_id.clone()));
                     }
                 }
@@ -623,7 +670,13 @@ impl EarmarkApp {
                 (80.0, true),
             ]
         } else {
-            &[(2.0, false), (1.1, false), (64.0, true), (1.4, false), (130.0, true)]
+            &[
+                (2.0, false),
+                (1.1, false),
+                (64.0, true),
+                (1.4, false),
+                (130.0, true),
+            ]
         };
         let shown: Vec<bool> = (0..spec.len())
             .map(|i| match (music, i) {
@@ -679,8 +732,12 @@ impl EarmarkApp {
             } else {
                 INK_MUTED
             };
-            let shown = if head { look::spaced(text) } else { text.to_string() };
-            let g = look::elided(ui, &shown, font.clone(), color, *w);
+            let shown = if head {
+                theme::spaced(text)
+            } else {
+                text.to_string()
+            };
+            let g = theme::elided(ui, &shown, font.clone(), color, *w);
             let gx = if *right {
                 rect.min.x + x + w - g.size().x
             } else {
@@ -719,14 +776,23 @@ impl EarmarkApp {
         ui.painter()
             .hline(head.x_range(), head.max.y - 0.5, Stroke::new(1.0, LINE));
 
-        let count = if music { self.songs.len() } else { self.rows.len() };
+        let count = if music {
+            self.songs.len()
+        } else {
+            self.rows.len()
+        };
         if count == 0 {
             if !self.query.is_empty() {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     ui.add_space(14.0);
                     ui.label(
-                        egui::RichText::new(if music { "No songs match." } else { "No sounds match." }).color(INK_NOTE),
+                        egui::RichText::new(if music {
+                            "No songs match."
+                        } else {
+                            "No sounds match."
+                        })
+                        .color(INK_NOTE),
                     );
                 });
             }
@@ -744,7 +810,8 @@ impl EarmarkApp {
         let output = area.show_rows(ui, ROW_HEIGHT, count, |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for i in range {
-                let (rect, response) = ui.allocate_exact_size(vec2(width, ROW_HEIGHT), Sense::click());
+                let (rect, response) =
+                    ui.allocate_exact_size(vec2(width, ROW_HEIGHT), Sense::click());
                 let (id, path) = if music {
                     (self.songs[i].id, &self.songs[i].path)
                 } else {
@@ -759,8 +826,11 @@ impl EarmarkApp {
                     // The playing mark sits in the left margin, so names line up with the
                     // toolbar's left edge.
                     let c = pos2(rect.min.x + 7.0, rect.center().y);
-                    ui.painter()
-                        .circle_filled(c, 6.0, Color32::from_rgba_unmultiplied(212, 17, 1, 50));
+                    ui.painter().circle_filled(
+                        c,
+                        6.0,
+                        Color32::from_rgba_unmultiplied(212, 17, 1, 50),
+                    );
                     ui.painter().circle_filled(c, 4.0, theme::MILANO);
                 }
                 if music {
@@ -849,8 +919,13 @@ impl EarmarkApp {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click());
         let note_at = rect.min + vec2(16.0, 10.0);
         let note = |ui: &Ui, text: &str| {
-            ui.painter()
-                .text(note_at, Align2::LEFT_TOP, text, theme::text(13.0, 400), INK_NOTE);
+            ui.painter().text(
+                note_at,
+                Align2::LEFT_TOP,
+                text,
+                theme::text(13.0, 400),
+                INK_NOTE,
+            );
         };
         if let Some(p) = &self.map_problem {
             note(ui, p);
@@ -872,7 +947,10 @@ impl EarmarkApp {
         let mut order: Vec<(&str, usize)> = counts.into_iter().collect();
         order.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
         let colour = |c: &str| {
-            let i = order.iter().position(|(n, _)| *n == c).unwrap_or(usize::MAX);
+            let i = order
+                .iter()
+                .position(|(n, _)| *n == c)
+                .unwrap_or(usize::MAX);
             MAP_COLOURS[i.min(MAP_COLOURS.len() - 1)]
         };
         let pad = 30.0;
@@ -946,18 +1024,18 @@ impl EarmarkApp {
             ui.allocate_ui_with_layout(vec2(widths, 30.0), Layout::left_to_right(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 if music {
-                    if look::key(ui, KeyKind::Primary, "Add Music Folder…", true, None).clicked() {
+                    if theme::button_with(ui, KeyKind::Primary, "Add Music Folder…", KeyOptions::default()).clicked() {
                         self.add_library(ctx, true);
                     }
                 } else {
-                    if look::key(ui, KeyKind::Primary, "Add Sound Library…", true, None).clicked() {
+                    if theme::button_with(ui, KeyKind::Primary, "Add Sound Library…", KeyOptions::default()).clicked() {
                         self.add_library(ctx, false);
                     }
-                    if look::key(ui, KeyKind::Raised, "Add Music Folder…", true, None).clicked() {
+                    if theme::button_with(ui, KeyKind::Raised, "Add Music Folder…", KeyOptions::default()).clicked() {
                         self.add_library(ctx, true);
                     }
                 }
-                if look::key(ui, KeyKind::Raised, "Import Analysis…", true, None).clicked() {
+                if theme::button_with(ui, KeyKind::Raised, "Import Analysis…", KeyOptions::default()).clicked() {
                     self.import();
                 }
             });
@@ -997,7 +1075,7 @@ impl EarmarkApp {
     fn block_title(ui: &mut Ui, title: &str) {
         ui.add_space(18.0);
         ui.label(
-            egui::RichText::new(look::spaced(title))
+            egui::RichText::new(theme::spaced(title))
                 .font(theme::text(11.0, 600))
                 .color(INK_NOTE),
         );
@@ -1007,14 +1085,21 @@ impl EarmarkApp {
     fn play_key(&mut self, ui: &mut Ui, path: &str) {
         let (rect, response) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::click());
         let on = self.player.path.as_deref() == Some(path);
-        look::raise(ui, rect, 22.0, if on { theme::RUBY } else { SHARK });
+        theme::raise(ui, rect, 22.0, 0.6, if on { theme::RUBY } else { SHARK });
         let c = rect.center();
         if on {
-            ui.painter()
-                .rect_filled(Rect::from_center_size(c, vec2(9.0, 9.0)), CornerRadius::same(1), INK);
+            ui.painter().rect_filled(
+                Rect::from_center_size(c, vec2(9.0, 9.0)),
+                CornerRadius::same(1),
+                INK,
+            );
         } else {
             ui.painter().add(egui::Shape::convex_polygon(
-                vec![c + vec2(-3.0, -5.0), c + vec2(5.5, 0.0), c + vec2(-3.0, 5.0)],
+                vec![
+                    c + vec2(-3.0, -5.0),
+                    c + vec2(5.5, 0.0),
+                    c + vec2(-3.0, 5.0),
+                ],
                 INK,
                 Stroke::NONE,
             ));
@@ -1063,9 +1148,13 @@ impl EarmarkApp {
 
     fn heading(ui: &mut Ui, title: &str, under: &str) {
         ui.add(
-            egui::Label::new(egui::RichText::new(title).font(theme::text(17.0, 600)).color(INK))
-                .wrap()
-                .selectable(true),
+            egui::Label::new(
+                egui::RichText::new(title)
+                    .font(theme::text(17.0, 600))
+                    .color(INK),
+            )
+            .wrap()
+            .selectable(true),
         );
         ui.add_space(4.0);
         if !under.is_empty() {
@@ -1080,12 +1169,26 @@ impl EarmarkApp {
         Self::block_title(ui, "Song");
         Self::pair(ui, "Album", s.album.as_deref().unwrap_or(""));
         Self::pair(ui, "Length", &length(s.length));
-        Self::pair(ui, "Tempo", &s.bpm.map(|b| format!("{b:.1} BPM")).unwrap_or_default());
+        Self::pair(
+            ui,
+            "Tempo",
+            &s.bpm.map(|b| format!("{b:.1} BPM")).unwrap_or_default(),
+        );
         Self::pair(ui, "Key", s.key.as_deref().unwrap_or(""));
         Self::pair(ui, "Path", &s.path);
         ui.add_space(18.0);
         let half = (ui.available_width() - 8.0) / 2.0;
-        if look::key(ui, KeyKind::Raised, "Show in Folder", true, Some(half)).clicked() {
+        if theme::button_with(
+            ui,
+            KeyKind::Raised,
+            "Show in Folder",
+            KeyOptions {
+                width: Some(half),
+                ..Default::default()
+            },
+        )
+        .clicked()
+        {
             let _ = opener::reveal(&s.path);
         }
     }
@@ -1137,7 +1240,10 @@ impl EarmarkApp {
         Self::pair(
             ui,
             "Peak",
-            &d["peak"].as_f64().map(|l| format!("{l:.1} dBFS")).unwrap_or_default(),
+            &d["peak"]
+                .as_f64()
+                .map(|l| format!("{l:.1} dBFS"))
+                .unwrap_or_default(),
         );
 
         Self::block_title(ui, "File");
@@ -1158,7 +1264,16 @@ impl EarmarkApp {
         let analysed = d["analysed"].as_bool().unwrap_or(false);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            let similar = look::key(ui, KeyKind::Raised, "Find Similar", analysed, Some(half));
+            let similar = theme::button_with(
+                ui,
+                KeyKind::Raised,
+                "Find Similar",
+                KeyOptions {
+                    disabled: !analysed,
+                    width: Some(half),
+                    ..Default::default()
+                },
+            );
             let similar = if analysed {
                 similar
             } else {
@@ -1167,16 +1282,46 @@ impl EarmarkApp {
             if similar.clicked() {
                 self.find_similar(ctx, id);
             }
-            if look::key(ui, KeyKind::Raised, "Show in Folder", true, Some(half)).clicked() {
+            if theme::button_with(
+                ui,
+                KeyKind::Raised,
+                "Show in Folder",
+                KeyOptions {
+                    width: Some(half),
+                    ..Default::default()
+                },
+            )
+            .clicked()
+            {
                 let _ = opener::reveal(&path);
             }
         });
         ui.add_space(8.0);
-        if look::key(ui, KeyKind::Raised, "Add to DaVinci Resolve", true, Some(width)).clicked() {
+        if theme::button_with(
+            ui,
+            KeyKind::Raised,
+            "Add to DaVinci Resolve",
+            KeyOptions {
+                width: Some(width),
+                ..Default::default()
+            },
+        )
+        .clicked()
+        {
             self.add_to_resolve(ctx, id, &name);
         }
         ui.add_space(8.0);
-        if look::key(ui, KeyKind::Raised, "Save as Timeline File", true, Some(width)).clicked() {
+        if theme::button_with(
+            ui,
+            KeyKind::Raised,
+            "Save as Timeline File",
+            KeyOptions {
+                width: Some(width),
+                ..Default::default()
+            },
+        )
+        .clicked()
+        {
             self.save_timeline(id);
         }
 
@@ -1191,9 +1336,13 @@ impl EarmarkApp {
                 }
                 Ok(list) => {
                     for r in list {
-                        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
-                        ui.painter()
-                            .hline(rect.x_range(), rect.min.y + 0.5, Stroke::new(1.0, LINE));
+                        let (rect, response) = ui
+                            .allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
+                        ui.painter().hline(
+                            rect.x_range(),
+                            rect.min.y + 0.5,
+                            Stroke::new(1.0, LINE),
+                        );
                         if response.hovered() {
                             ui.painter().rect_filled(rect, 0.0, theme::HOVER);
                         }
@@ -1201,19 +1350,27 @@ impl EarmarkApp {
                             .as_f64()
                             .map(|s| format!("{}%", (s * 100.0).round()))
                             .unwrap_or_default();
-                        let pg = ui.painter().layout_no_wrap(pct, theme::text(13.0, 400), INK_NOTE);
+                        let pg = ui
+                            .painter()
+                            .layout_no_wrap(pct, theme::text(13.0, 400), INK_NOTE);
                         let px = rect.max.x - pg.size().x;
-                        ui.painter()
-                            .galley(pos2(px, rect.center().y - pg.size().y / 2.0), pg, INK_NOTE);
-                        let ng = look::elided(
+                        ui.painter().galley(
+                            pos2(px, rect.center().y - pg.size().y / 2.0),
+                            pg,
+                            INK_NOTE,
+                        );
+                        let ng = theme::elided(
                             ui,
                             r["name"].as_str().unwrap_or(""),
                             theme::text(13.0, 400),
                             INK,
                             px - rect.min.x - 8.0,
                         );
-                        ui.painter()
-                            .galley(pos2(rect.min.x, rect.center().y - ng.size().y / 2.0), ng, INK);
+                        ui.painter().galley(
+                            pos2(rect.min.x, rect.center().y - ng.size().y / 2.0),
+                            ng,
+                            INK,
+                        );
                         let rpath = r["path"].as_str().unwrap_or("").to_string();
                         if response.double_clicked() {
                             if let Some(rid) = r["id"].as_i64() {
@@ -1257,13 +1414,19 @@ impl EarmarkApp {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
                     if remove.is_some() {
-                        if look::key(ui, KeyKind::Primary, "Remove", true, None).clicked() {
+                        if theme::button_with(ui, KeyKind::Primary, "Remove", KeyOptions::default())
+                            .clicked()
+                        {
                             confirmed = true;
                         }
-                        if look::key(ui, KeyKind::Raised, "Cancel", true, None).clicked() {
+                        if theme::button_with(ui, KeyKind::Raised, "Cancel", KeyOptions::default())
+                            .clicked()
+                        {
                             close = true;
                         }
-                    } else if look::key(ui, KeyKind::Primary, "OK", true, None).clicked() {
+                    } else if theme::button_with(ui, KeyKind::Primary, "OK", KeyOptions::default())
+                        .clicked()
+                    {
                         close = true;
                     }
                 });
@@ -1321,8 +1484,8 @@ impl EarmarkApp {
             shot.asked = true;
             let path = shot.path.clone();
             let ctx2 = ctx.clone();
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::ScreenshotCallback::new(
-                move |image| {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
+                egui::ScreenshotCallback::new(move |image| {
                     let [w, h] = image.size;
                     let bytes: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
                     if let Some(buffer) = image::RgbaImage::from_raw(w as u32, h as u32, bytes) {
@@ -1330,8 +1493,8 @@ impl EarmarkApp {
                     }
                     ctx2.send_viewport_cmd(egui::ViewportCommand::Close);
                     ctx2.request_repaint();
-                },
-            )));
+                }),
+            ));
         }
         ctx.request_repaint();
     }
@@ -1365,7 +1528,11 @@ impl eframe::App for EarmarkApp {
                         number(self.snap.songs),
                         number(self.snap.analysed)
                     );
-                    ui.label(egui::RichText::new(counts).font(theme::text(12.0, 400)).color(INK_NOTE));
+                    ui.label(
+                        egui::RichText::new(counts)
+                            .font(theme::text(12.0, 400))
+                            .color(INK_NOTE),
+                    );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new(&self.activity)
@@ -1405,36 +1572,65 @@ impl eframe::App for EarmarkApp {
                 let nothing = !self.snap.libraries.iter().any(|l| l.music == self.music);
                 // The toolbar.
                 let bar = Rect::from_min_size(ui.max_rect().min, vec2(ui.available_width(), 50.0));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(vec2(14.0, 10.0))), |ui| {
-                    ui.horizontal_centered(|ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        if !self.music
-                            && let Some(i) =
-                                look::segments(ui, &["List", "Map"], usize::from(self.map_view), 30.0, 14.0)
-                        {
-                            self.map_view = i == 1;
-                        }
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if look::key(ui, KeyKind::Raised, "Rescan All Folders", true, None).clicked() {
-                                let ids = self.back.library_ids();
-                                self.back.start_scan(ids, self.tell(ctx));
+                ui.scope_builder(
+                    egui::UiBuilder::new().max_rect(bar.shrink2(vec2(14.0, 10.0))),
+                    |ui| {
+                        ui.horizontal_centered(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            if !self.music
+                                && let Some(i) = theme::segments(
+                                    ui,
+                                    &["List", "Map"],
+                                    usize::from(self.map_view),
+                                    30.0,
+                                    14.0,
+                                )
+                            {
+                                self.map_view = i == 1;
                             }
-                            if look::key(ui, KeyKind::Raised, "Import Analysis…", true, None).clicked() {
-                                self.import();
-                            }
-                            let label = if self.stopping {
-                                "Stopping…"
-                            } else if self.analysing {
-                                "Stop Analysis"
-                            } else {
-                                "Analyse"
-                            };
-                            if look::key(ui, KeyKind::Raised, label, true, None).clicked() {
-                                self.analyse(ctx);
-                            }
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if theme::button_with(
+                                    ui,
+                                    KeyKind::Raised,
+                                    "Rescan All Folders",
+                                    KeyOptions::default(),
+                                )
+                                .clicked()
+                                {
+                                    let ids = self.back.library_ids();
+                                    self.back.start_scan(ids, self.tell(ctx));
+                                }
+                                if theme::button_with(
+                                    ui,
+                                    KeyKind::Raised,
+                                    "Import Analysis…",
+                                    KeyOptions::default(),
+                                )
+                                .clicked()
+                                {
+                                    self.import();
+                                }
+                                let label = if self.stopping {
+                                    "Stopping…"
+                                } else if self.analysing {
+                                    "Stop Analysis"
+                                } else {
+                                    "Analyse"
+                                };
+                                if theme::button_with(
+                                    ui,
+                                    KeyKind::Raised,
+                                    label,
+                                    KeyOptions::default(),
+                                )
+                                .clicked()
+                                {
+                                    self.analyse(ctx);
+                                }
+                            });
                         });
-                    });
-                });
+                    },
+                );
                 ui.advance_cursor_after_rect(bar);
                 if nothing {
                     self.empty(ui, ctx);
@@ -1446,7 +1642,10 @@ impl eframe::App for EarmarkApp {
             });
         // The thin lines between the columns.
         let screen = ctx.content_rect();
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("lines")));
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::unique("lines"),
+        ));
         let top = screen.min.y + 58.0;
         let bottom = screen.max.y - 29.0;
         painter.vline(screen.min.x + 240.5, top..=bottom, line);
@@ -1461,6 +1660,10 @@ impl eframe::App for EarmarkApp {
 
 impl EarmarkApp {
     fn scanning_or_analysing(&self) -> bool {
-        self.analysing || self.back.scanning.load(std::sync::atomic::Ordering::Relaxed)
+        self.analysing
+            || self
+                .back
+                .scanning
+                .load(std::sync::atomic::Ordering::Relaxed)
     }
 }

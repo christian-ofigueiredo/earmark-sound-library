@@ -9,9 +9,12 @@ use raw_window_handle::HasWindowHandle;
 pub fn paint(window: &impl HasWindowHandle) {
     use raw_window_handle::RawWindowHandle;
     use windows_sys::Win32::Graphics::Dwm::{
-        DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
+        DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
+        DwmSetWindowAttribute,
     };
-    let Ok(handle) = window.window_handle() else { return };
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
     let RawWindowHandle::Win32(win) = handle.as_raw() else {
         return;
     };
@@ -28,9 +31,24 @@ pub fn paint(window: &impl HasWindowHandle) {
             (&dark as *const i32).cast(),
             size(4),
         );
-        DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR as u32, (&shark as *const u32).cast(), size(4));
-        DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR as u32, (&shark as *const u32).cast(), size(4));
-        DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR as u32, (&seashell as *const u32).cast(), size(4));
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR as u32,
+            (&shark as *const u32).cast(),
+            size(4),
+        );
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR as u32,
+            (&shark as *const u32).cast(),
+            size(4),
+        );
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TEXT_COLOR as u32,
+            (&seashell as *const u32).cast(),
+            size(4),
+        );
     }
 }
 
