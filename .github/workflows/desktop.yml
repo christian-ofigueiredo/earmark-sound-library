@@ -72,8 +72,32 @@ jobs:
           else
             cp desktop/target/release/earmark-desktop out/earmark
           fi
+      - name: Installer
+        if: runner.os == 'Windows'
+        # Inno Setup 6 comes with GitHub's Windows runners, so nothing is downloaded here. If an
+        # image ever drops it, this step fails rather than fetching an unpinned copy.
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Output "::error::Inno Setup 6 is not on this runner image"
+            exit 1
+          }
+          $version = (Select-String -Path desktop/Cargo.toml -Pattern '^version = "(.*)"' |
+            Select-Object -First 1).Matches[0].Groups[1].Value
+          New-Item -ItemType Directory -Force installer | Out-Null
+          & $iscc "/DAppVersion=$version" "/DSourceExe=$PWD\out\Earmark.exe" `
+            "/DOutputDir=$PWD\installer" desktop\installer\earmark.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem installer
       - uses: actions/upload-artifact@v4
         with:
           name: Earmark-${{ matrix.name }}
           path: out/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: Earmark-Windows-Installer
+          path: installer/*.exe
           if-no-files-found: error

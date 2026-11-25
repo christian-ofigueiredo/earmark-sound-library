@@ -22,6 +22,7 @@ server (`earmark_mcp`), so they answer as there.
 - `src/frame.rs`: the dark frame (on Windows the caption, border and caption text are set
   through DWM), the same file as Aspect's.
 - `src/player.rs`: playing a sound (rodio).
+- `installer/earmark.iss`: the Windows installer (Inno Setup).
 - `assets/fonts`: Tessel and Brakwell, the variable fonts; the theme picks each weight.
 
 ## What it does
@@ -71,9 +72,18 @@ On a copy of a database (`EARMARK_DATABASE=/path/copy.sqlite`):
 ## Downloads
 
 The `Desktop` workflow builds them on every change to `desktop/` or `engine/`, under the run's
-**Artifacts** (Actions → Desktop → the latest run): **Earmark-Windows** (`Earmark.exe`, runs as
-is, no installer yet) and **Earmark-Linux** (`earmark`, built on Ubuntu 24.04: needs a 2024
-distribution or later).
+**Artifacts** (Actions → Desktop → the latest run):
+
+- **Earmark-Windows-Installer** (`Earmark-Setup-<version>.exe`): installs for your user only, no
+  administrator rights needed, into `%LOCALAPPDATA%\Programs\Earmark`, with a Start menu entry and
+  an uninstaller (Settings ▸ Apps). Uninstalling leaves the library's data in `%APPDATA%\Earmark`.
+  Made with Inno Setup (`installer/earmark.iss`), which GitHub's Windows runners already have.
+- **Earmark-Windows** (`Earmark.exe`): the same program on its own, runs as is.
+- **Earmark-Linux** (`earmark`): built on Ubuntu 24.04, needs a 2024 distribution or later.
+
+**Not signed yet.** There is no code-signing certificate, so Windows SmartScreen warns the first
+time the installer or the program is opened ("Windows protected your PC" → More info → Run
+anyway).
 
 ## Building
 

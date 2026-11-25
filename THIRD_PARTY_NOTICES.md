@@ -72,6 +72,7 @@ A drawn window (egui on wgpu and winit) on the engine above.
 | image | The window icon and checking screenshots | MIT or Apache-2.0 |
 | windows-sys, winresource (Windows) | The dark window frame; the .exe's icon | MIT or Apache-2.0; MIT |
 | Tessel and Brakwell | The interface's type, as in the Mac app | As the Mac app's (see above) |
+| Inno Setup 6 (build tool; its setup and uninstall code is inside the Windows installer) | The Windows installer | Inno Setup License (free, redistribution allowed with the copyright notice kept), jrsoftware.org |
 
 ## Python libraries (installed by `setup.sh`, not distributed here)
 
