@@ -75,11 +75,29 @@ extension ShapeStyle where Self == Color {
 // MARK: type
 
 enum DSFont {
-    /// The installed variable families, if any.
+    /// The variable fonts that come with the app (app/Fonts, copied into Resources/Fonts by
+    /// `scripts/build-app.sh`), as the files' own descriptors. Fonts are made from these, not from
+    /// the family name: when static fonts of the same family are installed (in ~/Library/Fonts, say),
+    /// macOS resolves the name to the static Regular and drops the weight, so every weight drew as
+    /// Regular.
+    /// CTFontDescriptor is immutable (Core Text documents it as thread-safe), just not marked Sendable.
+    nonisolated(unsafe) private static let bundled: [String: CTFontDescriptor] = {
+        var found: [String: CTFontDescriptor] = [:]
+        guard let folder = Bundle.main.resourceURL?.appendingPathComponent("Fonts") else { return found }
+        for (key, file) in [("display", "Brakwell[wght].ttf"), ("text", "Tessel[wght].ttf")] {
+            let url = folder.appendingPathComponent(file)
+            if let list = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
+               let first = list.first {
+                found[key] = first
+            }
+        }
+        return found
+    }()
+
+    /// Otherwise (running outside the app bundle), the installed variable families, if any.
     private static let families: [String: String] = {
         let installed = Set(NSFontManager.shared.availableFontFamilies)
         var found: [String: String] = [:]
-        // Brakwell and Tessel come with the app (app/Fonts; `scripts/build-app.sh`).
         for (key, names) in [("display", ["Brakwell", "BABCOCK Variable", "Babcock Variable", "Babcock"]),
                              ("text", ["Tessel", "N27 Variable", "N27"])] {
             if let name = names.first(where: installed.contains) { found[key] = name }
@@ -103,8 +121,13 @@ enum DSFont {
     }
 
     private static func make(_ key: String, _ size: CGFloat, _ weight: CGFloat) -> NSFont {
+        let wght = NSNumber(value: 0x7767_6874)   // the 'wght' variation axis
+        if let file = bundled[key] {
+            let attributes = [kCTFontVariationAttribute: [wght: NSNumber(value: Double(weight))]]
+            let descriptor = CTFontDescriptorCreateCopyWithAttributes(file, attributes as CFDictionary)
+            return CTFontCreateWithFontDescriptor(descriptor, size, nil) as NSFont
+        }
         if let family = families[key] {
-            let wght = NSNumber(value: 0x7767_6874)   // the 'wght' variation axis
             let descriptor = NSFontDescriptor(fontAttributes: [
                 .family: family,
                 .variation: [wght: NSNumber(value: Double(weight))],
@@ -171,6 +194,17 @@ extension View {
 
 // MARK: controls
 
+extension View {
+    /// Brakwell and Tessel have an ascent of 0.80 and a descent of 0.20 of the size, with capitals
+    /// 0.70 tall, so in a line box the capitals' middle sits at 45%: a little above the centre of a
+    /// key or pill. This lowers a one-line label by that much, for every key, chip and segment
+    /// alike. `size` is the label's point size.
+    func opticallyCentred(_ size: CGFloat = 14) -> some View {
+        offset(y: (size * 0.06 * 2).rounded() / 2)   // on the half-point grid, so it stays sharp at 2x
+    }
+}
+
+
 private struct KeyShadow: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     let scale: CGFloat
@@ -207,6 +241,7 @@ struct DSButtonStyle: ButtonStyle {
         configuration.label
             .font(.dsLabel)
             .lineLimit(1)
+            .opticallyCentred()
             .foregroundStyle(kind == .primary ? Color.dsSeashell : kind == .key ? Color.dsInk : Color.dsInkPrint)
             .padding(.horizontal, kind == .ghost ? 14 : 18)
             .frame(minHeight: 30)
@@ -269,6 +304,7 @@ struct DSChip: View {
                 Circle().fill(chosen ? Color.dsAccent : Color.dsInk.opacity(0.16)).frame(width: 6, height: 6)
                     .shadow(color: chosen ? Color.dsAccent.opacity(0.7) : .clear, radius: 3)
                 Text(title).font(.dsLabel).foregroundStyle(chosen ? Color.dsInk : Color.dsInkMuted).lineLimit(1).fixedSize()
+                    .opticallyCentred()
             }
             .padding(.horizontal, 13)
             .frame(height: height)
