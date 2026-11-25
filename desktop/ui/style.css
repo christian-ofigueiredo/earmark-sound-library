@@ -103,7 +103,7 @@ button {
   font-weight: 500;
 }
 .mini-pill .segment {
-  height: 26px;
+  height: 28px;
   padding: 0 14px;
 }
 .segment.on {
@@ -112,7 +112,7 @@ button {
   box-shadow: var(--rim), var(--key-shadow);
 }
 .search {
-  width: 280px;
+  width: 304px;
   height: 32px;
   border-radius: 999px;
   border: 0;
@@ -122,6 +122,8 @@ button {
   outline: none;
 }
 .key {
+  flex: none;
+  white-space: nowrap;
   height: 28px;
   padding: 0 14px;
   border-radius: 999px;
@@ -143,9 +145,10 @@ button {
   min-height: 0;
 }
 .sidebar {
+  flex: none;
   width: 240px;
   overflow-y: auto;
-  padding: 4px 10px 20px;
+  padding: 10px 10px 20px;
 }
 .side-title {
   margin: 16px 8px 6px;
@@ -185,11 +188,21 @@ button {
   font-size: 11px;
 }
 .side-add {
-  margin: 2px 8px 0;
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 8px;
+  text-align: left;
   color: var(--ink-note);
+}
+.side-add:hover,
+.side-item:not(.on):hover {
+  background: rgb(241 241 241 / 0.04);
 }
 .disclosure {
   display: flex;
+  flex: none;
+  justify-content: center;
   width: 12px;
   color: var(--ink-note);
   transition: transform 0.12s;
@@ -200,6 +213,7 @@ button {
 
 .content {
   flex: 1;
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -216,31 +230,46 @@ button {
 /* The list. */
 .list {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   min-height: 0;
-}
-.rows {
-  flex: 1;
   overflow-y: auto;
 }
+/* The playing mark sits in the left margin, so names line up with the toolbar's left edge. */
 .row {
+  position: relative;
   display: grid;
-  grid-template-columns: 22px minmax(160px, 2.2fr) minmax(120px, 1.4fr) 70px minmax(120px, 1.6fr) minmax(110px, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.1fr) 64px minmax(0, 1.4fr) 130px;
+  gap: 12px;
   align-items: center;
   height: 28px;
   padding: 0 14px;
   white-space: nowrap;
 }
 .row.music {
-  grid-template-columns: 22px minmax(160px, 2fr) minmax(110px, 1.2fr) minmax(110px, 1.2fr) 70px 60px 70px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 1.2fr) 64px 56px 80px;
+}
+.row > .num {
+  text-align: right;
+}
+/* Narrow windows drop the folder, then the format, instead of pushing the details off screen. */
+@container (max-width: 620px) {
+  .row:not(.music) > :nth-child(5) { display: none; }
+  .row:not(.music) { grid-template-columns: minmax(0, 2fr) minmax(0, 1.1fr) 64px 130px; }
+}
+@container (max-width: 470px) {
+  .row:not(.music) > :nth-child(6) { display: none; }
+  .row:not(.music) { grid-template-columns: minmax(0, 2fr) minmax(0, 1.1fr) 64px; }
+  .row.music > :nth-child(4) { display: none; }
+  .row.music { grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) 64px 56px 80px; }
 }
 .row > span {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .row.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--shark);
   height: 26px;
   font-size: 11px;
   font-weight: 600;
@@ -258,9 +287,21 @@ button {
 .row .muted {
   color: var(--ink-muted);
 }
-.mark {
-  color: var(--milano);
-  font-size: 10px;
+.row > .mark {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 50%;
+}
+.row > .mark.on {
+  background: var(--milano);
+  box-shadow: 0 0 6px rgb(212 17 1 / 0.7);
+}
+.list .note {
+  padding: 12px 14px;
 }
 
 /* The sound map. */
@@ -308,9 +349,13 @@ button {
 
 /* The details pane. */
 .details {
+  flex: none;
   width: 340px;
   overflow-y: auto;
-  padding: 18px;
+  /* The scroll bar's room is kept even when it isn't shown, so the pane's right edge stays under
+     the search field's (10 px bar + 8 px = the 18 px margin). */
+  scrollbar-gutter: stable;
+  padding: 10px 8px 18px 18px;
 }
 .details-empty {
   margin-top: 30vh;
@@ -344,7 +389,7 @@ button {
   border-top: 1px solid var(--line);
 }
 .pair > span:first-child {
-  width: 96px;
+  width: 88px;
   color: var(--ink-note);
   flex: none;
 }
@@ -355,17 +400,38 @@ button {
 }
 .actions {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
 }
+/* The detail keys: two equal columns, so their edges line up with each other and with the pairs. */
+.actions.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 18px;
+}
+.actions.grid .key {
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.actions.grid .wide {
+  grid-column: 1 / -1;
+}
+.key:disabled {
+  color: var(--ink-note);
+}
 .play {
+  display: grid;
+  place-items: center;
   width: 44px;
   height: 44px;
   border-radius: 999px;
   background: var(--shark);
   box-shadow: var(--rim), var(--key-shadow);
-  font-size: 15px;
+}
+.play svg {
+  display: block;
 }
 .play.on {
   background: var(--ruby);
@@ -386,10 +452,31 @@ button {
 }
 
 .status {
+  flex: none;
   display: flex;
   gap: 16px;
   padding: 6px 18px;
   border-top: 1px solid var(--line);
   color: var(--ink-note);
   font-size: 12px;
+}
+
+/* Scroll bars in the theme's colours (WebView2 and WebKitGTK otherwise draw light system ones). */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgb(241 241 241 / 0.16) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(241 241 241 / 0.28);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }

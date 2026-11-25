@@ -118,7 +118,10 @@ function drawSidebar() {
 }
 
 function titleCase(text) {
-  return text.toLowerCase().replace(/(^|[\s/&-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+  return text
+    .toLowerCase()
+    .replace(/(^|[\s/&-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase())
+    .replace(/\b(Ui|Tv|Sfx|Dj|Pa)\b/g, (w) => w.toUpperCase());
 }
 
 function drawStatus() {
@@ -141,7 +144,7 @@ function choose(scope) {
 async function reload() {
   state.rows = [];
   state.total = 0;
-  $("rows").scrollTop = 0;
+  $("list").scrollTop = 0;
   drawHead();
   if (state.section === "music") {
     state.rows = await invoke("songs", { query: state.query });
@@ -179,8 +182,11 @@ function drawHead() {
   head.replaceChildren();
   const music = state.section === "music";
   head.className = "row head" + (music ? " music" : "");
-  const names = music ? ["", "Title", "Artist", "Album", "Length", "BPM", "Key"] : ["", "Name", "Category", "Length", "Folder", "Format"];
-  for (const n of names) head.append(el("span", "", n));
+  const names = music ? ["Title", "Artist", "Album", "Length", "BPM", "Key"] : ["Name", "Category", "Length", "Folder", "Format"];
+  const numeric = music ? ["Length", "BPM"] : ["Length"];
+  // The same first child as the rows (the playing mark), so the narrow-window rules match both.
+  head.append(el("span", "mark"));
+  for (const n of names) head.append(el("span", numeric.includes(n) ? "num" : "", n));
 }
 
 function drawRows() {
@@ -189,23 +195,23 @@ function drawRows() {
   const music = state.section === "music";
   for (const r of state.rows) {
     const row = el("div", "row" + (music ? " music" : "") + (state.selected === r.id ? " on" : ""));
-    const mark = el("span", "mark", state.playing === r.path ? "●" : "");
+    const mark = el("span", "mark" + (state.playing === r.path ? " on" : ""));
     if (music) {
       row.append(mark, el("span", "", r.title), el("span", "muted", r.artist ?? ""), el("span", "muted", r.album ?? ""),
-        el("span", "muted", length(r.length)), el("span", "muted", r.bpm ? r.bpm.toFixed(1) : ""), el("span", "muted", r.key ?? ""));
+        el("span", "muted num", length(r.length)), el("span", "muted num", r.bpm ? r.bpm.toFixed(1) : ""), el("span", "muted", r.key ?? ""));
     } else {
-      row.append(mark, el("span", "", r.name), el("span", "muted", titleCase(r.category)), el("span", "muted", length(r.length)),
+      row.append(mark, el("span", "", r.name), el("span", "muted", titleCase(r.category)), el("span", "muted num", length(r.length)),
         el("span", "muted", r.folder), el("span", "muted", r.format));
     }
     row.onclick = () => select(r);
     row.ondblclick = () => play(r.path);
     box.append(row);
   }
-  if (!state.rows.length) box.append(el("div", "note", state.query ? "  No sounds match." : "").parentElement ?? el("div"));
+  if (!state.rows.length && state.query) box.append(el("div", "note", music ? "No songs match." : "No sounds match."));
 }
 
-$("rows").addEventListener("scroll", () => {
-  const box = $("rows");
+$("list").addEventListener("scroll", () => {
+  const box = $("list");
   if (state.section === "sounds" && box.scrollTop + box.clientHeight > box.scrollHeight - 400) more();
 });
 
@@ -243,6 +249,24 @@ function pair(box, label, value) {
   box.append(p);
 }
 
+const PLAY_ICON = '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M5 3.2v9.6L12.8 8z" fill="currentColor"/></svg>';
+const STOP_ICON = '<svg viewBox="0 0 16 16" width="16" height="16"><rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor"/></svg>';
+
+function playKey(path) {
+  const key = el("button", "play" + (state.playing === path ? " on" : ""));
+  key.innerHTML = state.playing === path ? STOP_ICON : PLAY_ICON;
+  key.title = "Play (Space)";
+  key.onclick = () => play(path);
+  return key;
+}
+
+function setPlayKey(on) {
+  const key = document.querySelector(".details .play");
+  if (!key) return;
+  key.classList.toggle("on", on);
+  key.innerHTML = on ? STOP_ICON : PLAY_ICON;
+}
+
 function block(title) {
   const b = el("div", "block");
   b.append(el("div", "block-title", title));
@@ -256,10 +280,8 @@ function drawDetails(d) {
   body.replaceChildren();
   if (!d) return;
   const s = d.sound;
-  const playKey = el("button", "play" + (state.playing === s.path ? " on" : ""), state.playing === s.path ? "■" : "▶");
-  playKey.onclick = () => play(s.path);
   const top = el("div", "actions");
-  top.append(playKey);
+  top.append(playKey(s.path));
   body.append(el("h2", "", s.name), el("div", "note", s.file), top);
 
   const about = block("About");
@@ -286,7 +308,7 @@ function drawDetails(d) {
   if (d.sameRecording?.length) pair(file, "Same recording", d.sameRecording.length);
   body.append(file);
 
-  const keys = el("div", "actions");
+  const keys = el("div", "actions grid");
   const similar = el("button", "key", "Find Similar");
   similar.disabled = !d.analysed;
   similar.title = d.analysed ? "" : "Analyse it first (or import an analysis file)";
@@ -297,7 +319,10 @@ function drawDetails(d) {
   timeline.onclick = () => saveTimeline([s.id]);
   const reveal = el("button", "key", "Show in Folder");
   reveal.onclick = () => invoke("reveal", { path: s.path });
-  keys.append(similar, resolve, timeline, reveal);
+  // Two short keys side by side, the two long ones across the pane.
+  resolve.classList.add("wide");
+  timeline.classList.add("wide");
+  keys.append(similar, reveal, resolve, timeline);
   body.append(keys);
   const list = el("div", "block");
   list.id = "similar";
@@ -309,10 +334,8 @@ function drawSong(r) {
   const body = $("details-body");
   body.hidden = false;
   body.replaceChildren();
-  const playKey = el("button", "play" + (state.playing === r.path ? " on" : ""), state.playing === r.path ? "■" : "▶");
-  playKey.onclick = () => play(r.path);
   const top = el("div", "actions");
-  top.append(playKey);
+  top.append(playKey(r.path));
   body.append(el("h2", "", r.title), el("div", "note", r.artist ?? ""), top);
   const b = block("Song");
   pair(b, "Album", r.album);
@@ -323,7 +346,7 @@ function drawSong(r) {
   body.append(b);
   const reveal = el("button", "key", "Show in Folder");
   reveal.onclick = () => invoke("reveal", { path: r.path });
-  const keys = el("div", "actions");
+  const keys = el("div", "actions grid");
   keys.append(reveal);
   body.append(keys);
 }
@@ -391,20 +414,12 @@ function play(path) {
     state.playing = path;
   }
   drawRows();
-  const key = document.querySelector(".details .play");
-  if (key) {
-    key.classList.toggle("on", state.playing != null);
-    key.textContent = state.playing ? "■" : "▶";
-  }
+  setPlayKey(state.playing != null);
 }
 player.onended = () => {
   state.playing = null;
   drawRows();
-  const key = document.querySelector(".details .play");
-  if (key) {
-    key.classList.remove("on");
-    key.textContent = "▶";
-  }
+  setPlayKey(false);
 };
 
 // MARK: the map

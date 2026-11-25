@@ -14,7 +14,7 @@
         "title": "Earmark",
         "width": 1400,
         "height": 900,
-        "minWidth": 980,
+        "minWidth": 1100,
         "minHeight": 620,
         "center": true,
         "visible": false,
