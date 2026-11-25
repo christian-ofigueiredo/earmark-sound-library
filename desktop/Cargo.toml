@@ -1,5 +1,5 @@
 [package]
-name = "earmark-native"
+name = "earmark-desktop"
 description = "Earmark for Windows and Linux, drawn with egui (wgpu + winit)"
 version = "0.1.0"
 edition = "2024"
@@ -9,15 +9,15 @@ publish = false
 build = "build.rs"
 
 [[bin]]
-name = "earmark-native"
+name = "earmark-desktop"
 path = "src/main.rs"
 
 [dependencies]
-earmark-core = { path = "../../engine/crates/earmark-core" }
-earmark-db = { path = "../../engine/crates/earmark-db" }
-earmark-audio = { path = "../../engine/crates/earmark-audio" }
-earmark-mcp = { path = "../../engine/crates/earmark-mcp" }
-earmark-models = { path = "../../engine/crates/earmark-models" }
+earmark-core = { path = "../engine/crates/earmark-core" }
+earmark-db = { path = "../engine/crates/earmark-db" }
+earmark-audio = { path = "../engine/crates/earmark-audio" }
+earmark-mcp = { path = "../engine/crates/earmark-mcp" }
+earmark-models = { path = "../engine/crates/earmark-models" }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "x11", "wayland"] }
 egui = "0.37"

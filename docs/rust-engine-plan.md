@@ -3,7 +3,7 @@
 Approved by the owner on 2026-10-29: "start porting it to Rust so we can have a new Mac
 version and the Windows version". This is option B in ROADMAP.md: the engine moves to
 Rust; the Mac keeps its SwiftUI interface; Windows and Linux share their own interface
-(Tauri) on the same engine. Linux was added on 2026-11-20, marked untested.
+on the same engine (Tauri at first; a drawn egui window since 2026-11-25, step 9c). Linux was added on 2026-11-20, marked untested.
 
 ## Where it lives
 
@@ -329,6 +329,14 @@ Each step ends with tests passing on macOS, Windows and Linux (GitHub Actions).
      sounds (`earmark-desktop --analyse`). Not yet: Earmark's category guesses, the models
      downloaded by the app (they'd come from a release), and ONNX Runtime on Windows and Linux
      run for real (it's linked in statically, as on the Mac).
+   - **9c, a drawn window instead of the web one (2026-11-25):** the owner didn't like the Tauri
+     web window on Windows, and its frame took his blue system accent. His rule since then, for
+     every app: native Swift on the Mac, Rust with a drawn interface (wgpu + winit + egui) on
+     Windows and Linux, the frame in the app's dark grey. `desktop/` is now that app, with the
+     same features, on the family theme shared with Aspect (`theme.rs`, `frame.rs`). The
+     Desktop workflow builds `Earmark.exe` and a Linux program (no installer or AppImage yet).
+     Checked on a Mac against a copy of the owner's database (`--check`, screenshots with
+     `--shot`); not yet run on Windows or Linux.
 
 Until step 8 the Mac app doesn't use Rust at all, so nothing changes for testers.
 Features added to Swift meanwhile (such as timeline files) are ported in their step.

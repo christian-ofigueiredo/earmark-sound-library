@@ -915,6 +915,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "earmark-desktop"
+version = "0.1.0"
+dependencies = [
+ "earmark-audio",
+ "earmark-core",
+ "earmark-db",
+ "earmark-mcp",
+ "earmark-models",
+ "eframe",
+ "egui",
+ "image",
+ "opener",
+ "raw-window-handle",
+ "rfd",
+ "rodio",
+ "serde_json",
+ "windows-sys 0.61.2",
+ "winresource",
+]
+
+[[package]]
 name = "earmark-mcp"
 version = "0.1.0"
 dependencies = [
@@ -934,27 +955,6 @@ dependencies = [
  "earmark-audio",
  "earmark-core",
  "ort",
-]
-
-[[package]]
-name = "earmark-native"
-version = "0.1.0"
-dependencies = [
- "earmark-audio",
- "earmark-core",
- "earmark-db",
- "earmark-mcp",
- "earmark-models",
- "eframe",
- "egui",
- "image",
- "opener",
- "raw-window-handle",
- "rfd",
- "rodio",
- "serde_json",
- "windows-sys 0.61.2",
- "winresource",
 ]
 
 [[package]]

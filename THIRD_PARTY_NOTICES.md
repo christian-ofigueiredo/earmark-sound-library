@@ -60,16 +60,9 @@ scikit-learn's (BSD-3-Clause); no scikit-learn code is included.
 
 ## The Windows and Linux app (`desktop/`)
 
+A drawn window (egui on wgpu and winit) on the engine above.
+
 | Item | Used for | License |
-|---|---|---|
-| Tauri 2 (`tauri`, `tauri-build`, `tauri-plugin-dialog`, `tauri-plugin-opener`, and the crates they use: `wry`, `tao` and others) | The window, dialogs and opening files | MIT or Apache-2.0 (a few dependencies also offer MPL-2.0 or are BSD, ISC or Zlib) |
-| `@tauri-apps/cli` (npm) | Building the installers, not shipped | MIT or Apache-2.0 |
-| Microsoft Edge WebView2 (Windows) and WebKitGTK (Linux) | Drawing the window; the system's own, not shipped | Microsoft's licence; LGPL-2.1 |
-| Tessel and Brakwell | The interface's type, as in the Mac app | As the Mac app's (see above) |
-
-### The drawn window (`desktop/native`)
-
-| Component | Use | Licence |
 |---|---|---|
 | egui and eframe (and `epaint`, `egui-wgpu`, `egui-winit`) | Drawing the window | MIT or Apache-2.0 |
 | wgpu, winit | The GPU and the window | MIT or Apache-2.0 |
