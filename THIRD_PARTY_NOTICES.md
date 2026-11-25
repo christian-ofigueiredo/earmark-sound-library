@@ -67,6 +67,19 @@ scikit-learn's (BSD-3-Clause); no scikit-learn code is included.
 | Microsoft Edge WebView2 (Windows) and WebKitGTK (Linux) | Drawing the window; the system's own, not shipped | Microsoft's licence; LGPL-2.1 |
 | Tessel and Brakwell | The interface's type, as in the Mac app | As the Mac app's (see above) |
 
+### The drawn window (`desktop/native`)
+
+| Component | Use | Licence |
+|---|---|---|
+| egui and eframe (and `epaint`, `egui-wgpu`, `egui-winit`) | Drawing the window | MIT or Apache-2.0 |
+| wgpu, winit | The GPU and the window | MIT or Apache-2.0 |
+| rodio, cpal (and Symphonia, already above) | Playing sounds | MIT or Apache-2.0; Symphonia MPL-2.0 |
+| rfd | Folder and file dialogs | MIT |
+| opener | Show in Folder | MIT or Apache-2.0 |
+| image | The window icon and checking screenshots | MIT or Apache-2.0 |
+| windows-sys, winresource (Windows) | The dark window frame; the .exe's icon | MIT or Apache-2.0; MIT |
+| Tessel and Brakwell | Static weights cut from the variable fonts (egui can't pick a weight) | As the Mac app's (see above) |
+
 ## Python libraries (installed by `setup.sh`, not distributed here)
 
 Mostly permissive (BSD, MIT, Apache-2.0, ISC): PyTorch, transformers,

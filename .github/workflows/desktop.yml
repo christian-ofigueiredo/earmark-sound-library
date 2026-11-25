@@ -1,7 +1,7 @@
 name: Desktop
 
 # Builds Earmark for Windows (installer) and Linux (AppImage and .deb) from desktop/ and the Rust
-# engine. Every run keeps the files as downloadable artifacts (Actions → Desktop → the run →
+# engine; and the drawn (egui) app that replaces the web window, from desktop/native. Every run keeps the files as downloadable artifacts (Actions → Desktop → the run →
 # Artifacts). Publishing a release stays a person's job.
 
 on:
@@ -80,4 +80,59 @@ jobs:
         with:
           name: Earmark-${{ matrix.name }}
           path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  native:
+    name: Native (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            # 24.04 for the same reason as above (ONNX Runtime's glibc).
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        # ALSA for playing sounds; winit loads X11 and Wayland when it runs.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustc --version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/native/target
+          key: native-${{ runner.os }}-${{ hashFiles('desktop/native/Cargo.lock') }}
+      - name: Lint
+        working-directory: desktop/native
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+      - name: Build
+        working-directory: desktop/native
+        run: cargo build --locked --release
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp desktop/native/target/release/earmark-native.exe out/Earmark.exe
+          else
+            cp desktop/native/target/release/earmark-native out/earmark
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Earmark-Native-${{ matrix.name }}
+          path: out/*
           if-no-files-found: error

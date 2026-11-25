@@ -24,4 +24,5 @@ app/Sources/EarmarkEngine/Generated/
 # The Windows and Linux app (desktop/)
 desktop/node_modules/
 desktop/src-tauri/target/
+desktop/native/target/
 desktop/src-tauri/gen/
