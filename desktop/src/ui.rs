@@ -522,7 +522,7 @@ impl EarmarkApp {
             ui.spacing_mut().item_spacing.x = 18.0;
             let (rect, _) = ui.allocate_exact_size(vec2(131.0, 34.0), Sense::hover());
             ui.painter().text(
-                pos2(rect.min.x, rect.center().y + 1.0),
+                pos2(rect.min.x, rect.center().y),
                 Align2::LEFT_CENTER,
                 "EARMARK",
                 theme::display(30.0, 700),
