@@ -1,12 +1,12 @@
-//! The window frame in the app's own dark grey (#131314), never the system accent: on Windows the
-//! title bar and border take the user's accent colour unless told otherwise (his PC is blue).
-//! Linux window managers draw their own frames; there the dark theme is asked for and the rest is
-//! up to the system.
+//! The window frame in the app's own ground, never the system accent: dark grey (#131314) in the
+//! dark theme, Seashell (#F1F1F1) in the light. On Windows the title bar and border take the
+//! user's accent colour unless told otherwise (his PC is blue). Linux window managers draw their
+//! own frames; there the theme is asked for (`theme::set_theme`) and the rest is up to the system.
 
 use raw_window_handle::HasWindowHandle;
 
 #[cfg(windows)]
-pub fn paint(window: &impl HasWindowHandle) {
+pub fn paint(window: &impl HasWindowHandle, dark: bool) {
     use raw_window_handle::RawWindowHandle;
     use windows_sys::Win32::Graphics::Dwm::{
         DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
@@ -22,7 +22,13 @@ pub fn paint(window: &impl HasWindowHandle) {
     // COLORREF is 0x00BBGGRR.
     let shark: u32 = 0x0014_1313;
     let seashell: u32 = 0x00F1_F1F1;
-    let dark: i32 = 1;
+    let ebony: u32 = 0x0004_0404;
+    let (ground, ink) = if dark {
+        (shark, seashell)
+    } else {
+        (seashell, ebony)
+    };
+    let dark = i32::from(dark);
     let size = |n: usize| n as u32;
     unsafe {
         DwmSetWindowAttribute(
@@ -34,23 +40,23 @@ pub fn paint(window: &impl HasWindowHandle) {
         DwmSetWindowAttribute(
             hwnd,
             DWMWA_CAPTION_COLOR as u32,
-            (&shark as *const u32).cast(),
+            (&ground as *const u32).cast(),
             size(4),
         );
         DwmSetWindowAttribute(
             hwnd,
             DWMWA_BORDER_COLOR as u32,
-            (&shark as *const u32).cast(),
+            (&ground as *const u32).cast(),
             size(4),
         );
         DwmSetWindowAttribute(
             hwnd,
             DWMWA_TEXT_COLOR as u32,
-            (&seashell as *const u32).cast(),
+            (&ink as *const u32).cast(),
             size(4),
         );
     }
 }
 
 #[cfg(not(windows))]
-pub fn paint(_window: &impl HasWindowHandle) {}
+pub fn paint(_window: &impl HasWindowHandle, _dark: bool) {}

@@ -19,7 +19,7 @@ server (`earmark_mcp`), so they answer as there.
   (Aspect, Earmark, Graticule, Offload). Offload keeps the original
   (`~/Documents/Offload/desktop/src/theme.rs`): change it there and copy it over unchanged, so
   the apps keep one look. Earmark uses its default measures (`Style::EARMARK`).
-- `src/frame.rs`: the dark frame (on Windows the caption, border and caption text are set
+- `src/frame.rs`: the window frame in the theme's ground (on Windows the caption, border and caption text are set
   through DWM), the same file as Aspect's.
 - `src/player.rs`: playing a sound (rodio).
 - `installer/earmark.iss`: the Windows installer (Inno Setup).
@@ -40,6 +40,9 @@ server (`earmark_mcp`), so they answer as there.
   (`CLAPAudio.onnx` and the `PEAV` folder that `models/convert_onnx.py` makes, about 4.5 GB; on
   Windows `%APPDATA%\Earmark\Models`), both models' vectors, then the similarity groups with
   their names. The key stops it.
+- **Light and dark**, as on the Mac: the settings key next to the search field (or Ctrl+,) picks
+  System, Light or Dark. System follows Windows' or the desktop's setting. The window frame takes
+  the app's own ground (dark grey or Seashell), never the system's accent colour.
 - Rescan All Folders, and **Import Analysis…**: an analysis file exported by the Mac app (File ▸
   Export Analysis…) brings its loudness, sound vectors, categories and song analysis.
 
@@ -56,7 +59,8 @@ On a copy of a database (`EARMARK_DATABASE=/path/copy.sqlite`):
 
 - `earmark-desktop --check`: the window's calls, printed.
 - `earmark-desktop --analyse`: the analysis without the window.
-- `earmark-desktop --shot file.png [--select] [--music] [--map] [--size 1400x900]`: opens the
+- `earmark-desktop --shot file.png [--select] [--music] [--map] [--light|--dark] [--settings]
+  [--size 1400x900]`: opens the
   window, saves what it draws and quits.
 
 ## What has and has not been checked

@@ -4,9 +4,7 @@
 
 use crate::backend::{Backend, Event, Row, Scope, Snapshot, SongRow, SoundMap, teller};
 use crate::player::Player;
-use crate::theme::{
-    self, INK, INK_MUTED, INK_NOTE, INK_PRINT, Key as KeyKind, KeyOptions, LINE, SHARK,
-};
+use crate::theme::{self, Key as KeyKind, KeyOptions, pal};
 
 const ROW_HEIGHT: f32 = 28.0;
 use egui::{
@@ -84,11 +82,66 @@ enum Dialog {
 }
 
 /// For checking without driving the window: `--shot file.png` saves what's drawn and quits.
+/// Earmark's own light or dark, or the system's: the same choice as the Mac app's Settings
+/// (`Appearance` in Preferences.swift). Kept in a small file beside the database.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Appearance {
+    System,
+    Light,
+    Dark,
+}
+
+impl Appearance {
+    const ALL: [Appearance; 3] = [Appearance::System, Appearance::Light, Appearance::Dark];
+
+    fn title(self) -> &'static str {
+        match self {
+            Appearance::System => "System",
+            Appearance::Light => "Light",
+            Appearance::Dark => "Dark",
+        }
+    }
+
+    fn file() -> Option<std::path::PathBuf> {
+        earmark_mcp::default_database_path()
+            .parent()
+            .map(|d| d.join("appearance"))
+    }
+
+    fn load() -> Appearance {
+        let saved = Self::file().and_then(|f| std::fs::read_to_string(f).ok());
+        match saved.as_deref().map(str::trim) {
+            Some("light") => Appearance::Light,
+            Some("dark") => Appearance::Dark,
+            _ => Appearance::System,
+        }
+    }
+
+    fn save(self) {
+        if let Some(f) = Self::file() {
+            let _ = std::fs::write(f, self.title().to_lowercase());
+        }
+    }
+
+    /// Dark or not, given what the system says (dark when it says nothing).
+    fn dark(self, system: Option<egui::Theme>) -> bool {
+        match self {
+            Appearance::Light => false,
+            Appearance::Dark => true,
+            Appearance::System => system != Some(egui::Theme::Light),
+        }
+    }
+}
+
 pub struct Shot {
     pub path: std::path::PathBuf,
     pub select_first: bool,
     pub music: bool,
     pub map: bool,
+    /// `--light` or `--dark`: the theme to draw in, whatever is saved.
+    pub theme: Option<Appearance>,
+    /// `--settings`: draw with the settings open.
+    pub settings: bool,
     frames: u32,
     asked: bool,
 }
@@ -100,6 +153,8 @@ impl Shot {
             select_first,
             music,
             map,
+            theme: None,
+            settings: false,
             frames: 0,
             asked: false,
         }
@@ -136,15 +191,26 @@ pub struct EarmarkApp {
     viewport: f32,
     scroll_to: Option<f32>,
     shot: Option<Shot>,
+    appearance: Appearance,
+    /// The theme drawn now (dark or not), and whether the window frame still has to follow it.
+    dark: bool,
+    frame_due: bool,
+    settings_open: bool,
+    settings_key: Rect,
 }
 
 impl EarmarkApp {
     pub fn new(cc: &eframe::CreationContext<'_>, back: Backend, shot: Option<Shot>) -> Self {
         theme::install(&cc.egui_ctx);
-        crate::frame::paint(cc);
-        // Linux: ask for the dark theme, which Wayland's drawn title bar and GNOME follow.
-        cc.egui_ctx
-            .send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
+        let appearance = shot
+            .as_ref()
+            .and_then(|s| s.theme)
+            .unwrap_or_else(Appearance::load);
+        let dark = appearance.dark(cc.egui_ctx.system_theme());
+        // Also asks Linux for the theme, which Wayland's drawn title bar and GNOME follow.
+        theme::set_theme(&cc.egui_ctx, dark);
+        crate::frame::paint(cc, dark);
+        let settings_open = shot.as_ref().is_some_and(|s| s.settings);
         let (tx, rx) = channel();
         let mut app = EarmarkApp {
             back: Arc::new(back),
@@ -175,6 +241,11 @@ impl EarmarkApp {
             viewport: 0.0,
             scroll_to: None,
             shot,
+            appearance,
+            dark,
+            frame_due: false,
+            settings_open,
+            settings_key: Rect::NOTHING,
         };
         app.refresh();
         app
@@ -455,7 +526,7 @@ impl EarmarkApp {
                 Align2::LEFT_CENTER,
                 "EARMARK",
                 theme::display(30.0, 700),
-                INK,
+                pal().ink,
             );
             if let Some(i) = theme::segments(
                 ui,
@@ -472,9 +543,9 @@ impl EarmarkApp {
                 let inner = rect.shrink2(vec2(14.0, 0.0));
                 let edit = egui::TextEdit::singleline(&mut self.query)
                     .frame(Frame::NONE)
-                    .hint_text(egui::RichText::new("Search").color(INK_NOTE))
+                    .hint_text(egui::RichText::new("Search").color(pal().ink_note))
                     .font(theme::text(13.0, 400))
-                    .text_color(INK)
+                    .text_color(pal().ink)
                     .align(Align2::LEFT_CENTER)
                     .margin(Margin::ZERO);
                 let response = ui.put(inner, edit);
@@ -483,8 +554,66 @@ impl EarmarkApp {
                     self.scroll_to = Some(0.0);
                     self.map = None;
                 }
+                // 12 between the key and the field (the field is placed, not laid out).
+                ui.add_space(9.0);
+                let key = theme::round_raised(ui, 32.0, theme::sliders)
+                    .on_hover_text("Settings (Ctrl+,)");
+                if key.clicked() {
+                    self.settings_open = !self.settings_open;
+                }
+                self.settings_key = key.rect;
             });
         });
+    }
+
+    /// Settings, under its key in the header: Appearance, as in the Mac app's Settings.
+    fn settings(&mut self, ctx: &egui::Context) {
+        if !self.settings_open || self.settings_key == Rect::NOTHING {
+            return;
+        }
+        let width = 300.0;
+        let pos = pos2(
+            self.settings_key.max.x - width,
+            self.settings_key.max.y + 10.0,
+        );
+        let area = egui::Area::new(egui::Id::unique("settings"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                ui.set_width(width);
+                theme::panel(ui, 20.0, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    theme::overline(ui, "Appearance", pal().ink_note);
+                    ui.add_space(10.0);
+                    let titles = Appearance::ALL.map(Appearance::title);
+                    let chosen = Appearance::ALL
+                        .iter()
+                        .position(|a| *a == self.appearance)
+                        .unwrap_or(0);
+                    if let Some(i) = theme::segments(ui, &titles, chosen, 30.0, 16.0) {
+                        self.appearance = Appearance::ALL[i];
+                        self.appearance.save();
+                        ctx.request_repaint();
+                    }
+                    ui.add_space(10.0);
+                    theme::wrapped(
+                        ui,
+                        "System follows the light or dark setting of Windows or your desktop.",
+                        theme::note(),
+                        pal().ink_muted,
+                    );
+                });
+            });
+        // Closes with Escape or a click anywhere else (the key itself toggles it).
+        let outside = ctx.input(|i| {
+            i.pointer.any_pressed()
+                && i.pointer.interact_pos().is_some_and(|p| {
+                    !area.response.rect.contains(p) && !self.settings_key.contains(p)
+                })
+        });
+        if outside || ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.settings_open = false;
+        }
     }
 
     // MARK: sidebar
@@ -501,24 +630,28 @@ impl EarmarkApp {
             ui.allocate_exact_size(vec2(ui.available_width(), 27.0), Sense::click());
         let p = ui.painter();
         if on {
-            p.rect_filled(rect, CornerRadius::same(8), theme::SELECTION_RED);
+            p.rect_filled(rect, CornerRadius::same(8), theme::pal().selection_red);
         } else if response.hovered() {
-            p.rect_filled(rect, CornerRadius::same(8), theme::HOVER);
+            p.rect_filled(rect, CornerRadius::same(8), theme::pal().hover);
         }
         let mut right = rect.max.x - 8.0;
         if let Some(n) = count {
-            let g = p.layout_no_wrap(number(n), theme::text(11.0, 400), INK_NOTE);
+            let g = p.layout_no_wrap(number(n), theme::text(11.0, 400), pal().ink_note);
             right -= g.size().x;
-            p.galley(pos2(right, rect.center().y - g.size().y / 2.0), g, INK_NOTE);
+            p.galley(
+                pos2(right, rect.center().y - g.size().y / 2.0),
+                g,
+                pal().ink_note,
+            );
             right -= 6.0;
         }
         let x = rect.min.x + 8.0 + indent;
         let color = if dim {
-            INK_NOTE
+            pal().ink_note
         } else if indent > 0.0 && !on {
-            INK_PRINT
+            pal().ink_print
         } else {
-            INK
+            pal().ink
         };
         let g = theme::elided(ui, label, theme::text(13.0, 400), color, right - x);
         ui.painter()
@@ -534,7 +667,7 @@ impl EarmarkApp {
             Align2::LEFT_CENTER,
             theme::spaced(title),
             theme::text(11.0, 600),
-            INK_NOTE,
+            pal().ink_note,
         );
         ui.add_space(6.0 - ui.spacing().item_spacing.y);
     }
@@ -626,7 +759,7 @@ impl EarmarkApp {
                     centre + vec2(-1.8, 3.5),
                 ]
             };
-            ui.painter().line(points, Stroke::new(1.6, INK_NOTE));
+            ui.painter().line(points, Stroke::new(1.6, pal().ink_note));
             if r.clicked() {
                 let on_chevron = r
                     .interact_pointer_pos()
@@ -726,11 +859,11 @@ impl EarmarkApp {
         for (i, (col, (text, right))) in cols.iter().zip(texts).enumerate() {
             let Some((x, w)) = col else { continue };
             let color = if head {
-                INK_NOTE
+                pal().ink_note
             } else if i == 0 {
-                INK
+                pal().ink
             } else {
-                INK_MUTED
+                pal().ink_muted
             };
             let shown = if head {
                 theme::spaced(text)
@@ -773,8 +906,11 @@ impl EarmarkApp {
             ]
         };
         Self::cells(ui, head, &cols, &names, true);
-        ui.painter()
-            .hline(head.x_range(), head.max.y - 0.5, Stroke::new(1.0, LINE));
+        ui.painter().hline(
+            head.x_range(),
+            head.max.y - 0.5,
+            Stroke::new(1.0, pal().line),
+        );
 
         let count = if music {
             self.songs.len()
@@ -792,7 +928,7 @@ impl EarmarkApp {
                         } else {
                             "No sounds match."
                         })
-                        .color(INK_NOTE),
+                        .color(pal().ink_note),
                     );
                 });
             }
@@ -818,9 +954,10 @@ impl EarmarkApp {
                     (self.rows[i].id, &self.rows[i].path)
                 };
                 if self.selected == Some(id) {
-                    ui.painter().rect_filled(rect, 0.0, theme::SELECTION_RED);
+                    ui.painter()
+                        .rect_filled(rect, 0.0, theme::pal().selection_red);
                 } else if response.hovered() {
-                    ui.painter().rect_filled(rect, 0.0, theme::HOVER);
+                    ui.painter().rect_filled(rect, 0.0, theme::pal().hover);
                 }
                 if playing.as_deref() == Some(path.as_str()) {
                     // The playing mark sits in the left margin, so names line up with the
@@ -924,7 +1061,7 @@ impl EarmarkApp {
                 Align2::LEFT_TOP,
                 text,
                 theme::text(13.0, 400),
-                INK_NOTE,
+                pal().ink_note,
             );
         };
         if let Some(p) = &self.map_problem {
@@ -978,7 +1115,7 @@ impl EarmarkApp {
         if let Some(pos) = response.hover_pos()
             && let Some(p) = near(pos)
         {
-            painter.circle_stroke(at(p.x, p.y), 4.0, Stroke::new(1.5, INK));
+            painter.circle_stroke(at(p.x, p.y), 4.0, Stroke::new(1.5, pal().ink));
             response.clone().on_hover_text_at_pointer(&p.name);
         }
         if response.clicked()
@@ -1008,7 +1145,7 @@ impl EarmarkApp {
                     "Add your sound library"
                 })
                 .font(theme::display(34.0, 700))
-                .color(INK),
+                .color(pal().ink),
             );
             ui.add_space(10.0);
             ui.label(
@@ -1017,7 +1154,7 @@ impl EarmarkApp {
                 } else {
                     "Pick the folder that holds your sound effects. Earmark reads the files and never changes them."
                 })
-                .color(INK_MUTED),
+                .color(pal().ink_muted),
             );
             ui.add_space(14.0);
             let widths = if music { 290.0 } else { 440.0 };
@@ -1050,8 +1187,11 @@ impl EarmarkApp {
         }
         let width = ui.available_width();
         let top = ui.cursor().min;
-        ui.painter()
-            .hline(top.x..=top.x + width, top.y + 0.5, Stroke::new(1.0, LINE));
+        ui.painter().hline(
+            top.x..=top.x + width,
+            top.y + 0.5,
+            Stroke::new(1.0, pal().line),
+        );
         ui.add_space(5.0);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
@@ -1061,10 +1201,10 @@ impl EarmarkApp {
                 Align2::LEFT_TOP,
                 label,
                 theme::text(13.0, 400),
-                INK_NOTE,
+                pal().ink_note,
             );
             ui.add(
-                egui::Label::new(egui::RichText::new(value).color(INK))
+                egui::Label::new(egui::RichText::new(value).color(pal().ink))
                     .wrap()
                     .selectable(true),
             );
@@ -1077,7 +1217,7 @@ impl EarmarkApp {
         ui.label(
             egui::RichText::new(theme::spaced(title))
                 .font(theme::text(11.0, 600))
-                .color(INK_NOTE),
+                .color(pal().ink_note),
         );
         ui.add_space(6.0);
     }
@@ -1085,13 +1225,19 @@ impl EarmarkApp {
     fn play_key(&mut self, ui: &mut Ui, path: &str) {
         let (rect, response) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::click());
         let on = self.player.path.as_deref() == Some(path);
-        theme::raise(ui, rect, 22.0, 0.6, if on { theme::RUBY } else { SHARK });
+        theme::raise(
+            ui,
+            rect,
+            22.0,
+            0.6,
+            if on { theme::RUBY } else { pal().ground },
+        );
         let c = rect.center();
         if on {
             ui.painter().rect_filled(
                 Rect::from_center_size(c, vec2(9.0, 9.0)),
                 CornerRadius::same(1),
-                INK,
+                pal().ink,
             );
         } else {
             ui.painter().add(egui::Shape::convex_polygon(
@@ -1100,7 +1246,7 @@ impl EarmarkApp {
                     c + vec2(5.5, 0.0),
                     c + vec2(-3.0, 5.0),
                 ],
-                INK,
+                pal().ink,
                 Stroke::NONE,
             ));
         }
@@ -1128,7 +1274,7 @@ impl EarmarkApp {
                     .font(theme::text(13.0, 600)),
                 );
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new("Select one to hear it.").color(INK_NOTE));
+                ui.label(egui::RichText::new("Select one to hear it.").color(pal().ink_note));
             });
             return;
         }
@@ -1151,14 +1297,14 @@ impl EarmarkApp {
             egui::Label::new(
                 egui::RichText::new(title)
                     .font(theme::text(17.0, 600))
-                    .color(INK),
+                    .color(pal().ink),
             )
             .wrap()
             .selectable(true),
         );
         ui.add_space(4.0);
         if !under.is_empty() {
-            ui.add(egui::Label::new(egui::RichText::new(under).color(INK_NOTE)).wrap());
+            ui.add(egui::Label::new(egui::RichText::new(under).color(pal().ink_note)).wrap());
         }
         ui.add_space(14.0);
     }
@@ -1329,10 +1475,10 @@ impl EarmarkApp {
             Self::block_title(ui, "Similar");
             match found {
                 Err(e) => {
-                    ui.label(egui::RichText::new(e).color(INK_NOTE));
+                    ui.label(egui::RichText::new(e).color(pal().ink_note));
                 }
                 Ok(list) if list.is_empty() => {
-                    ui.label(egui::RichText::new("Finding…").color(INK_NOTE));
+                    ui.label(egui::RichText::new("Finding…").color(pal().ink_note));
                 }
                 Ok(list) => {
                     for r in list {
@@ -1341,35 +1487,37 @@ impl EarmarkApp {
                         ui.painter().hline(
                             rect.x_range(),
                             rect.min.y + 0.5,
-                            Stroke::new(1.0, LINE),
+                            Stroke::new(1.0, pal().line),
                         );
                         if response.hovered() {
-                            ui.painter().rect_filled(rect, 0.0, theme::HOVER);
+                            ui.painter().rect_filled(rect, 0.0, theme::pal().hover);
                         }
                         let pct = r["similarity"]
                             .as_f64()
                             .map(|s| format!("{}%", (s * 100.0).round()))
                             .unwrap_or_default();
-                        let pg = ui
-                            .painter()
-                            .layout_no_wrap(pct, theme::text(13.0, 400), INK_NOTE);
+                        let pg = ui.painter().layout_no_wrap(
+                            pct,
+                            theme::text(13.0, 400),
+                            pal().ink_note,
+                        );
                         let px = rect.max.x - pg.size().x;
                         ui.painter().galley(
                             pos2(px, rect.center().y - pg.size().y / 2.0),
                             pg,
-                            INK_NOTE,
+                            pal().ink_note,
                         );
                         let ng = theme::elided(
                             ui,
                             r["name"].as_str().unwrap_or(""),
                             theme::text(13.0, 400),
-                            INK,
+                            pal().ink,
                             px - rect.min.x - 8.0,
                         );
                         ui.painter().galley(
                             pos2(rect.min.x, rect.center().y - ng.size().y / 2.0),
                             ng,
-                            INK,
+                            pal().ink,
                         );
                         let rpath = r["path"].as_str().unwrap_or("").to_string();
                         if response.double_clicked() {
@@ -1401,15 +1549,15 @@ impl EarmarkApp {
         egui::Modal::new(egui::Id::unique("dialog"))
             .frame(
                 Frame::new()
-                    .fill(SHARK)
-                    .stroke(Stroke::new(1.0, LINE))
+                    .fill(pal().ground)
+                    .stroke(Stroke::new(1.0, pal().line))
                     .corner_radius(14)
                     .inner_margin(Margin::same(22))
                     .shadow(ctx.global_style().visuals.window_shadow),
             )
             .show(ctx, |ui| {
                 ui.set_max_width(380.0);
-                ui.add(egui::Label::new(egui::RichText::new(text).color(INK)).wrap());
+                ui.add(egui::Label::new(egui::RichText::new(text).color(pal().ink)).wrap());
                 ui.add_space(18.0);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
@@ -1501,16 +1649,30 @@ impl EarmarkApp {
 }
 
 impl eframe::App for EarmarkApp {
-    fn ui(&mut self, root: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, root: &mut Ui, frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
+        // The theme: the saved choice, or the system's as it changes.
+        let dark = self.appearance.dark(ctx.system_theme());
+        if dark != self.dark {
+            self.dark = dark;
+            theme::set_theme(ctx, dark);
+            self.frame_due = true;
+        }
+        if self.frame_due {
+            crate::frame::paint(frame, self.dark);
+            self.frame_due = false;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::Comma)) {
+            self.settings_open = !self.settings_open;
+        }
         self.take_events();
         self.shot(ctx);
         if self.dirty {
             self.reload();
         }
         self.keys(ctx);
-        let line = Stroke::new(1.0, LINE);
-        let fill = Frame::new().fill(SHARK);
+        let line = Stroke::new(1.0, pal().line);
+        let fill = Frame::new().fill(pal().ground);
 
         egui::Panel::top("header")
             .exact_size(58.0)
@@ -1518,6 +1680,7 @@ impl eframe::App for EarmarkApp {
             .frame(fill.inner_margin(Margin::symmetric(18, 0)))
             .show(root, |ui| self.header(ui));
         egui::Panel::bottom("status")
+            .show_separator_line(false)
             .exact_size(29.0)
             .frame(fill.inner_margin(Margin::symmetric(18, 0)))
             .show(root, |ui| {
@@ -1531,18 +1694,19 @@ impl eframe::App for EarmarkApp {
                     ui.label(
                         egui::RichText::new(counts)
                             .font(theme::text(12.0, 400))
-                            .color(INK_NOTE),
+                            .color(pal().ink_note),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new(&self.activity)
                                 .font(theme::text(12.0, 400))
-                                .color(INK_NOTE),
+                                .color(pal().ink_note),
                         );
                     });
                 });
             });
         egui::Panel::left("sidebar")
+            .show_separator_line(false)
             .exact_size(240.0)
             .resizable(false)
             .frame(fill.inner_margin(Margin {
@@ -1557,6 +1721,7 @@ impl eframe::App for EarmarkApp {
                     .show(ui, |ui| self.sidebar(ui, ctx));
             });
         egui::Panel::right("details")
+            .show_separator_line(false)
             .exact_size(340.0)
             .resizable(false)
             .frame(fill.inner_margin(Margin {
@@ -1642,8 +1807,9 @@ impl eframe::App for EarmarkApp {
             });
         // The thin lines between the columns.
         let screen = ctx.content_rect();
+        // Above the panels, under menus and the settings.
         let painter = ctx.layer_painter(egui::LayerId::new(
-            egui::Order::Foreground,
+            egui::Order::Middle,
             egui::Id::unique("lines"),
         ));
         let top = screen.min.y + 58.0;
@@ -1652,6 +1818,7 @@ impl eframe::App for EarmarkApp {
         painter.vline(screen.max.x - 340.5, top..=bottom, line);
         painter.hline(screen.x_range(), bottom + 0.5, line);
         self.dialogs(ctx);
+        self.settings(ctx);
         if self.player.path.is_some() || self.scanning_or_analysing() {
             ctx.request_repaint_after(Duration::from_millis(200));
         }

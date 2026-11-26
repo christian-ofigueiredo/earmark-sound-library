@@ -4,7 +4,7 @@
 //!
 //! `--check` runs the window's calls without the window on the database EARMARK_DATABASE names (a
 //! copy); `--analyse` runs the analysis without the window; `--shot file.png [--select] [--music]
-//! [--map]` opens the window, saves what it draws and quits (for checking on a computer where the
+//! [--map] [--light|--dark] [--settings]` opens the window, saves what it draws and quits (for checking on a computer where the
 //! window can't be driven).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -142,7 +142,18 @@ fn main() {
         .iter()
         .position(|a| a == "--shot")
         .and_then(|i| args.get(i + 1))
-        .map(|p| ui::Shot::new(p.into(), has("--select"), has("--music"), has("--map")));
+        .map(|p| {
+            let mut shot = ui::Shot::new(p.into(), has("--select"), has("--music"), has("--map"));
+            shot.theme = if has("--light") {
+                Some(ui::Appearance::Light)
+            } else if has("--dark") {
+                Some(ui::Appearance::Dark)
+            } else {
+                None
+            };
+            shot.settings = has("--settings");
+            shot
+        });
     let size = args
         .iter()
         .position(|a| a == "--size")

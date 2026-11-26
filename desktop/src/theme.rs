@@ -2,8 +2,10 @@
 //! since egui has none of it built in. One file for every app of the family (Aspect, Earmark,
 //! Graticule, Offload): copy it as it is; nothing here belongs to one app.
 //!
-//! Dark only, as the window frame must be the app's own dark grey (#131314) and never the system
-//! accent. Six colours exist; everything else is one of them at an opacity. The ground and the
+//! Dark and light, as on the Mac (`DesignSystem.swift`): [`DARK`] and [`LIGHT`] are the two
+//! palettes, [`set_theme`] picks one for the whole app and [`pal`] reads it. The window frame takes
+//! the palette's ground (#131314 dark, #F1F1F1 light), never the system accent. Six colours exist;
+//! everything else is one of them at an opacity. The ground and the
 //! panels are one colour: depth comes from light and shadow. Red is one signal per view. Brakwell
 //! for titles and numbers (24 pt and up), Tessel for the rest: the variable fonts, each weight
 //! picked through the `wght` axis (`FontTweak::coords`).
@@ -36,32 +38,106 @@ pub const fn alpha(c: Color32, a: f32) -> Color32 {
     Color32::from_rgba_unmultiplied_const(c.r(), c.g(), c.b(), (a * 255.0) as u8)
 }
 
-/// The window's ground and its panels, one colour.
-pub const GROUND: Color32 = SHARK;
-/// Sunken wells, fields and pressed keys.
-pub const SUNKEN: Color32 = alpha(EBONY, 0.42);
-/// Decoration only: rules.
-pub const LINE: Color32 = alpha(SEASHELL, 0.12);
-/// Printed outlines.
-pub const LINE_PRINT: Color32 = alpha(SEASHELL, 0.30);
-pub const INK: Color32 = SEASHELL;
-/// Labels printed on the body.
-pub const INK_PRINT: Color32 = alpha(SEASHELL, 0.78);
-pub const INK_MUTED: Color32 = alpha(SEASHELL, 0.62);
-/// Notes and counts: quieter than `INK_MUTED`.
-pub const INK_NOTE: Color32 = alpha(SEASHELL, 0.46);
-/// The one red: Milano on the dark ground. What sits on it is always light.
-pub const ACCENT: Color32 = MILANO;
-/// A selected row: Ruby Red as a tint, the text staying ink.
-pub const SELECTION_RED: Color32 = alpha(RUBY, 0.45);
-/// A row that needs attention: the same red, much quieter.
-pub const ALERT: Color32 = alpha(RUBY, 0.16);
-/// Hover: ink, faint.
-pub const HOVER: Color32 = alpha(SEASHELL, 0.08);
-/// The light from the top left that raises keys and panels.
-pub const LIGHT: Color32 = alpha(Color32::WHITE, 0.06);
-pub const SHADE: Color32 = alpha(Color32::BLACK, 0.55);
-pub const RIM: Color32 = alpha(Color32::WHITE, 0.20);
+/// The colours that change with the theme. Everything that sits on red stays [`SEASHELL`] in both.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Palette {
+    pub dark: bool,
+    /// The window's ground and its panels, one colour.
+    pub ground: Color32,
+    /// Sunken wells, fields and pressed keys.
+    pub sunken: Color32,
+    /// Decoration only: rules.
+    pub line: Color32,
+    /// Printed outlines.
+    pub line_print: Color32,
+    pub ink: Color32,
+    /// Labels printed on the body.
+    pub ink_print: Color32,
+    pub ink_muted: Color32,
+    /// Notes and counts: quieter than `ink_muted`.
+    pub ink_note: Color32,
+    /// The one red: Milano on the dark ground, Ruby on the light. What sits on it is always light.
+    pub accent: Color32,
+    /// A selected row: Ruby Red as a tint, the text staying ink.
+    pub selection_red: Color32,
+    /// A row that needs attention: the same red, much quieter.
+    pub alert: Color32,
+    /// Hover: ink, faint.
+    pub hover: Color32,
+    /// The light from the top left that raises keys and panels.
+    pub light: Color32,
+    /// Shadows of windows, menus and panels.
+    pub shade: Color32,
+    /// The rim light on a raised thing's top edge, and the faint ring all round it.
+    pub rim: Color32,
+    pub rim_ring: Color32,
+    /// The inner shadow on a sunken thing's top edge.
+    pub inset: Color32,
+    /// A panel's hairline edge.
+    pub edge: Color32,
+    /// A switch's knob shadow.
+    pub knob_shadow: Color32,
+}
+
+/// Dark: the family's look until 2026-11-26, unchanged.
+pub const DARK: Palette = Palette {
+    dark: true,
+    ground: SHARK,
+    sunken: alpha(EBONY, 0.42),
+    line: alpha(SEASHELL, 0.12),
+    line_print: alpha(SEASHELL, 0.30),
+    ink: SEASHELL,
+    ink_print: alpha(SEASHELL, 0.78),
+    ink_muted: alpha(SEASHELL, 0.62),
+    ink_note: alpha(SEASHELL, 0.46),
+    accent: MILANO,
+    selection_red: alpha(RUBY, 0.45),
+    alert: alpha(RUBY, 0.16),
+    hover: alpha(SEASHELL, 0.08),
+    light: alpha(Color32::WHITE, 0.06),
+    shade: alpha(Color32::BLACK, 0.55),
+    rim: alpha(Color32::WHITE, 0.20),
+    rim_ring: alpha(Color32::WHITE, 0.03),
+    inset: alpha(Color32::BLACK, 0.35),
+    edge: alpha(Color32::WHITE, 0.05),
+    knob_shadow: alpha(Color32::BLACK, 0.4),
+};
+
+/// Light: the Mac apps' light tokens (Seashell ground, Ebony ink, Ruby accent); the key light from
+/// the top left is near white and the shadows a quarter as strong, as `KeyShadow` there.
+pub const LIGHT: Palette = Palette {
+    dark: false,
+    ground: SEASHELL,
+    sunken: alpha(EBONY, 0.06),
+    line: alpha(EBONY, 0.14),
+    line_print: alpha(EBONY, 0.32),
+    ink: EBONY,
+    ink_print: alpha(EBONY, 0.78),
+    ink_muted: alpha(EBONY, 0.62),
+    ink_note: alpha(EBONY, 0.56),
+    accent: RUBY,
+    selection_red: alpha(RUBY, 0.16),
+    alert: alpha(RUBY, 0.08),
+    hover: alpha(EBONY, 0.06),
+    light: alpha(Color32::WHITE, 0.90),
+    shade: alpha(Color32::BLACK, 0.14),
+    rim: alpha(Color32::WHITE, 0.90),
+    rim_ring: alpha(EBONY, 0.04),
+    inset: alpha(Color32::BLACK, 0.10),
+    edge: alpha(EBONY, 0.05),
+    knob_shadow: alpha(Color32::BLACK, 0.18),
+};
+
+static IS_LIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The palette in use (one for the whole app).
+pub fn pal() -> &'static Palette {
+    if IS_LIGHT.load(std::sync::atomic::Ordering::Relaxed) {
+        &LIGHT
+    } else {
+        &DARK
+    }
+}
 
 // MARK: spacing
 
@@ -94,7 +170,25 @@ pub struct KeyShadow {
     pub light_blur: f32,
     pub dark_offset: [f32; 2],
     pub dark_blur: f32,
-    pub dark: Color32,
+    /// The shadow's black opacity: [on the dark ground, on the light].
+    pub dark: [f32; 2],
+}
+
+/// The colour of a chip's lamp when lit.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Lamp {
+    Accent,
+    Ink,
+}
+
+impl Lamp {
+    /// The lamp and its glow in the current palette.
+    pub fn colors(self) -> (Color32, Color32) {
+        match self {
+            Lamp::Accent => (pal().accent, alpha(pal().accent, 0.25)),
+            Lamp::Ink => (pal().ink, alpha(pal().ink, 0.12)),
+        }
+    }
 }
 
 /// What differs between the Mac apps of the family: sizes, the chip's lamp, the key's shadow.
@@ -103,9 +197,8 @@ pub struct KeyShadow {
 pub struct Style {
     pub chip_height: f32,
     pub chip_pad: f32,
-    /// The chip's lamp when lit: Milano in Aspect, ink in Offload.
-    pub led: Color32,
-    pub led_glow: Color32,
+    /// The chip's lamp when lit: red in Aspect, ink in Offload.
+    pub led: Lamp,
     /// How strongly a chip that is not chosen stands up.
     pub chip_raise: f32,
     pub primary: KeySize,
@@ -134,7 +227,7 @@ const ASPECT_SHADOW: KeyShadow = KeyShadow {
     light_blur: 6.0,
     dark_offset: [3.0, 4.0],
     dark_blur: 8.0,
-    dark: SHADE,
+    dark: [0.55, 0.14],
 };
 
 impl Style {
@@ -142,8 +235,7 @@ impl Style {
     pub const ASPECT: Style = Style {
         chip_height: 28.0,
         chip_pad: S3,
-        led: ACCENT,
-        led_glow: alpha(ACCENT, 0.25),
+        led: Lamp::Accent,
         chip_raise: 0.45,
         primary: KeySize {
             height: 30.0,
@@ -175,7 +267,7 @@ impl Style {
             light_blur: 0.0,
             dark_offset: [3.0, 4.0],
             dark_blur: 8.0,
-            dark: alpha(Color32::BLACK, 0.3),
+            dark: [0.3, 0.3],
         },
         shadow: ASPECT_SHADOW,
         switch: Vec2::new(40.0, 24.0),
@@ -197,8 +289,7 @@ impl Style {
     pub const OFFLOAD: Style = Style {
         chip_height: 36.0,
         chip_pad: S4,
-        led: INK,
-        led_glow: alpha(SEASHELL, 0.12),
+        led: Lamp::Ink,
         chip_raise: 0.6,
         primary: KeySize {
             height: 48.0,
@@ -230,14 +321,14 @@ impl Style {
             light_blur: 0.0,
             dark_offset: [4.0, 6.0],
             dark_blur: 10.0,
-            dark: alpha(Color32::BLACK, 0.3),
+            dark: [0.3, 0.3],
         },
         shadow: KeyShadow {
             light_offset: -3.0,
             light_blur: 8.0,
             dark_offset: [4.0, 5.0],
             dark_blur: 12.0,
-            dark: alpha(Color32::BLACK, 0.6),
+            dark: [0.6, 0.15],
         },
         switch: Vec2::new(44.0, 26.0),
         knob: 10.0,
@@ -363,8 +454,30 @@ pub fn install(ctx: &egui::Context) {
         .unwrap()
         .insert(0, "tessel-400".into());
     ctx.set_fonts(fonts);
+    apply(ctx);
+}
 
-    ctx.set_theme(egui::Theme::Dark);
+/// Dark or light for the whole app: the palette, egui's own widgets, and the system's idea of the
+/// window (Linux title bars follow it). The Windows frame is painted by the app (`frame::paint`).
+pub fn set_theme(ctx: &egui::Context, dark: bool) {
+    IS_LIGHT.store(!dark, std::sync::atomic::Ordering::Relaxed);
+    apply(ctx);
+    ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(if dark {
+        egui::SystemTheme::Dark
+    } else {
+        egui::SystemTheme::Light
+    }));
+    ctx.request_repaint();
+}
+
+/// egui's own widgets in the current palette.
+fn apply(ctx: &egui::Context) {
+    let dark = pal().dark;
+    ctx.set_theme(if dark {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    });
     let mut style = (*ctx.global_style()).clone();
     style.text_styles.insert(egui::TextStyle::Body, body());
     style.text_styles.insert(egui::TextStyle::Button, label());
@@ -377,28 +490,28 @@ pub fn install(ctx: &egui::Context) {
     style.spacing.interact_size.y = 28.0;
     style.spacing.combo_height = 420.0;
     let v = &mut style.visuals;
-    v.dark_mode = true;
-    v.override_text_color = Some(INK);
-    v.panel_fill = GROUND;
-    v.window_fill = GROUND;
-    v.extreme_bg_color = SUNKEN;
-    v.faint_bg_color = HOVER;
-    v.hyperlink_color = INK;
-    v.selection.bg_fill = SELECTION_RED;
-    v.selection.stroke = Stroke::new(1.0, INK);
-    v.text_cursor.stroke = Stroke::new(1.5, INK);
-    v.window_stroke = Stroke::new(1.0, LINE);
+    v.dark_mode = dark;
+    v.override_text_color = Some(pal().ink);
+    v.panel_fill = pal().ground;
+    v.window_fill = pal().ground;
+    v.extreme_bg_color = pal().sunken;
+    v.faint_bg_color = pal().hover;
+    v.hyperlink_color = pal().ink;
+    v.selection.bg_fill = pal().selection_red;
+    v.selection.stroke = Stroke::new(1.0, pal().ink);
+    v.text_cursor.stroke = Stroke::new(1.5, pal().ink);
+    v.window_stroke = Stroke::new(1.0, pal().line);
     v.window_shadow = Shadow {
         offset: [3, 4],
         blur: 16,
         spread: 0,
-        color: SHADE,
+        color: pal().shade,
     };
     v.popup_shadow = Shadow {
         offset: [2, 4],
         blur: 12,
         spread: 0,
-        color: SHADE,
+        color: pal().shade,
     };
     v.window_corner_radius = CornerRadius::same(RADIUS_SM as u8);
     v.menu_corner_radius = CornerRadius::same(RADIUS_SM as u8);
@@ -410,20 +523,20 @@ pub fn install(ctx: &egui::Context) {
         &mut v.widgets.open,
     ] {
         w.corner_radius = CornerRadius::same(8);
-        w.fg_stroke = Stroke::new(1.0, INK);
-        w.bg_stroke = Stroke::new(1.0, LINE);
-        w.bg_fill = GROUND;
-        w.weak_bg_fill = GROUND;
+        w.fg_stroke = Stroke::new(1.0, pal().ink);
+        w.bg_stroke = Stroke::new(1.0, pal().line);
+        w.bg_fill = pal().ground;
+        w.weak_bg_fill = pal().ground;
         w.expansion = 0.0;
     }
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, LINE);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, INK_PRINT);
-    v.widgets.hovered.weak_bg_fill = HOVER;
-    v.widgets.hovered.bg_fill = HOVER;
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, LINE_PRINT);
-    v.widgets.active.weak_bg_fill = SUNKEN;
-    v.widgets.active.bg_fill = SUNKEN;
-    v.widgets.open.weak_bg_fill = SUNKEN;
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, pal().line);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, pal().ink_print);
+    v.widgets.hovered.weak_bg_fill = pal().hover;
+    v.widgets.hovered.bg_fill = pal().hover;
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, pal().line_print);
+    v.widgets.active.weak_bg_fill = pal().sunken;
+    v.widgets.active.bg_fill = pal().sunken;
+    v.widgets.open.weak_bg_fill = pal().sunken;
     ctx.set_global_style(style);
 }
 
@@ -437,7 +550,7 @@ fn shadow_shapes(rect: Rect, r: CornerRadius, s: &KeyShadow, strength: f32) -> [
             blur: (s.light_blur * strength) as u8,
             spread: 0,
             color: if s.light_blur > 0.0 {
-                LIGHT
+                pal().light
             } else {
                 Color32::TRANSPARENT
             },
@@ -448,7 +561,7 @@ fn shadow_shapes(rect: Rect, r: CornerRadius, s: &KeyShadow, strength: f32) -> [
             offset: [o(s.dark_offset[0]), o(s.dark_offset[1])],
             blur: (s.dark_blur * strength) as u8,
             spread: 0,
-            color: s.dark,
+            color: alpha(Color32::BLACK, s.dark[usize::from(!pal().dark)]),
         }
         .as_shape(rect, r)
         .into(),
@@ -458,7 +571,7 @@ fn shadow_shapes(rect: Rect, r: CornerRadius, s: &KeyShadow, strength: f32) -> [
 /// Raised like a key on a flat surface: a soft light from the top left, a shadow below, a rim
 /// light on the top edge. The shadow is the app's (`Style::shadow`).
 pub fn raised(ui: &Ui, rect: Rect, radius: f32, strength: f32) {
-    raise(ui, rect, radius, strength, GROUND);
+    raise(ui, rect, radius, strength, pal().ground);
 }
 
 /// Raised in a given fill (red for what's chosen in a segmented switch).
@@ -478,26 +591,25 @@ pub fn rim(ui: &Ui, rect: Rect, radius: f32) {
     ui.painter().rect_stroke(
         rect,
         r,
-        Stroke::new(1.0, alpha(Color32::WHITE, 0.03)),
+        Stroke::new(1.0, pal().rim_ring),
         egui::StrokeKind::Inside,
     );
     let top = Rect::from_min_max(
         rect.min + vec2(radius * 0.6, 0.0),
         pos2(rect.max.x - radius * 0.6, rect.min.y + 1.0),
     );
-    ui.painter().rect_filled(top, 0.0, RIM);
+    ui.painter().rect_filled(top, 0.0, pal().rim);
 }
 
 /// Pressed into the body: sunken fill and a soft inner shadow on the top edge.
 pub fn sunken(ui: &Ui, rect: Rect, radius: f32) {
     let r = CornerRadius::same(radius.min(255.0) as u8);
-    ui.painter().rect_filled(rect, r, SUNKEN);
+    ui.painter().rect_filled(rect, r, pal().sunken);
     let top = Rect::from_min_max(
         rect.min + vec2(radius * 0.5, 0.5),
         pos2(rect.max.x - radius * 0.5, rect.min.y + 1.5),
     );
-    ui.painter()
-        .rect_filled(top, 0.0, alpha(Color32::BLACK, 0.35));
+    ui.painter().rect_filled(top, 0.0, pal().inset);
 }
 
 /// A panel: the ground's own colour, lifted by light and a soft shadow, radius 24.
@@ -523,15 +635,15 @@ pub fn panel<R>(ui: &mut Ui, padding: f32, add: impl FnOnce(&mut Ui) -> R) -> R 
             offset: [2, 3],
             blur: 6,
             spread: 0,
-            color: SHADE,
+            color: pal().shade,
         }
         .as_shape(rect, r),
     ));
-    shapes.push(egui::Shape::rect_filled(rect, r, GROUND));
+    shapes.push(egui::Shape::rect_filled(rect, r, pal().ground));
     shapes.push(egui::Shape::rect_stroke(
         rect,
         r,
-        Stroke::new(1.0, alpha(Color32::WHITE, 0.05)),
+        Stroke::new(1.0, pal().edge),
         egui::StrokeKind::Inside,
     ));
     ui.painter().set(where_, egui::Shape::Vec(shapes));
@@ -632,7 +744,7 @@ pub fn column_title(ui: &mut Ui, text: &str) -> Response {
         0.0,
         egui::TextFormat {
             font_id: self::text(11.0, 600),
-            color: INK_MUTED,
+            color: pal().ink_muted,
             extra_letter_spacing: 1.2,
             ..Default::default()
         },
@@ -661,7 +773,7 @@ pub fn cell<R>(
 
 pub fn text_width(ui: &Ui, text: &str, font: &FontId) -> f32 {
     ui.fonts_mut(|f| {
-        f.layout_no_wrap(text.to_string(), font.clone(), INK)
+        f.layout_no_wrap(text.to_string(), font.clone(), pal().ink)
             .size()
             .x
     })
@@ -670,7 +782,14 @@ pub fn text_width(ui: &Ui, text: &str, font: &FontId) -> f32 {
 /// The chip's lamp: lit in the app's lamp colour (`Style::led`), a dim dot when not.
 pub fn led(ui: &Ui, center: Pos2, lit: bool, size: f32) {
     let s = style(ui);
-    led_in(ui.painter(), center, lit, size, s.led, s.led_glow);
+    led_in(
+        ui.painter(),
+        center,
+        lit,
+        size,
+        s.led.colors().0,
+        s.led.colors().1,
+    );
 }
 
 fn led_in(p: &Painter, center: Pos2, lit: bool, size: f32, color: Color32, glow: Color32) {
@@ -678,7 +797,7 @@ fn led_in(p: &Painter, center: Pos2, lit: bool, size: f32, color: Color32, glow:
         p.circle_filled(center, size * 1.1, glow);
         p.circle_filled(center, size / 2.0, color);
     } else {
-        p.circle_filled(center, size / 2.0, alpha(INK, 0.16));
+        p.circle_filled(center, size / 2.0, alpha(pal().ink, 0.16));
     }
 }
 
@@ -726,7 +845,7 @@ fn chip_with(
             raised(ui, rect, r, s.chip_raise);
             if response.hovered() && enabled {
                 ui.painter()
-                    .rect_filled(rect, CornerRadius::same(r as u8), alpha(SEASHELL, 0.03));
+                    .rect_filled(rect, CornerRadius::same(r as u8), alpha(pal().ink, 0.03));
             }
         }
         led(
@@ -735,7 +854,7 @@ fn chip_with(
             chosen,
             6.0,
         );
-        let color = (if chosen { INK } else { INK_MUTED }).gamma_multiply(fade);
+        let color = (if chosen { pal().ink } else { pal().ink_muted }).gamma_multiply(fade);
         let left = rect.min.x + s.chip_pad + 6.0 + S2;
         match icon {
             Some(draw) => draw(
@@ -789,9 +908,13 @@ pub fn segments(
             raise(ui, seg, height / 2.0, 0.6, RUBY);
         } else if response.hovered() {
             ui.painter()
-                .rect_filled(seg, CornerRadius::same(255), HOVER);
+                .rect_filled(seg, CornerRadius::same(255), pal().hover);
         }
-        let color = if i == chosen { SEASHELL } else { INK_MUTED };
+        let color = if i == chosen {
+            SEASHELL
+        } else {
+            pal().ink_muted
+        };
         ui.painter().text(
             seg.center(),
             egui::Align2::CENTER_CENTER,
@@ -892,14 +1015,14 @@ pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Respon
         let color = match kind {
             Key::Primary if !enabled => {
                 // With nothing to do, the red key goes dark and unlit.
-                ui.painter().rect_filled(rect, cr, alpha(EBONY, 0.42));
+                ui.painter().rect_filled(rect, cr, pal().sunken);
                 ui.painter().rect_stroke(
                     rect,
                     cr,
-                    Stroke::new(1.0, LINE),
+                    Stroke::new(1.0, pal().line),
                     egui::StrokeKind::Inside,
                 );
-                alpha(SEASHELL, 0.36)
+                alpha(pal().ink, 0.36)
             }
             Key::Primary => {
                 let p = ui.painter();
@@ -907,11 +1030,16 @@ pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Respon
                     p.add(shape);
                 }
                 let fill = if pressed {
-                    ACCENT.gamma_multiply(0.7)
+                    pal().accent.gamma_multiply(0.7)
                 } else if response.hovered() {
-                    Color32::from_rgb(0xDE, 0x1B, 0x0B)
+                    // A step brighter than the accent.
+                    if pal().dark {
+                        Color32::from_rgb(0xDE, 0x1B, 0x0B)
+                    } else {
+                        Color32::from_rgb(0xB4, 0x12, 0x06)
+                    }
                 } else {
-                    ACCENT
+                    pal().accent
                 };
                 p.rect_filled(rect, cr, fill);
                 p.rect_filled(
@@ -930,16 +1058,16 @@ pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Respon
                 } else {
                     raised(ui, rect, r, s.key_raise)
                 }
-                if enabled { INK } else { INK_NOTE }
+                if enabled { pal().ink } else { pal().ink_note }
             }
             Key::Ghost => {
                 if response.hovered() && enabled {
-                    ui.painter().rect_filled(rect, cr, HOVER);
+                    ui.painter().rect_filled(rect, cr, pal().hover);
                 }
                 let line = if enabled {
-                    LINE_PRINT
+                    pal().line_print
                 } else {
-                    alpha(SEASHELL, 0.12)
+                    pal().line
                 };
                 ui.painter().rect_stroke(
                     rect,
@@ -948,11 +1076,11 @@ pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Respon
                     egui::StrokeKind::Inside,
                 );
                 if !enabled {
-                    INK_NOTE
+                    pal().ink_note
                 } else if pressed {
-                    INK_PRINT.gamma_multiply(0.7)
+                    pal().ink_print.gamma_multiply(0.7)
                 } else {
-                    INK_PRINT
+                    pal().ink_print
                 }
             }
         };
@@ -1008,14 +1136,14 @@ pub fn round_ghost(
         let fade = if enabled { 1.0 } else { 0.3 };
         let p = ui.painter();
         if response.hovered() && enabled {
-            p.circle_filled(rect.center(), size / 2.0, HOVER);
+            p.circle_filled(rect.center(), size / 2.0, pal().hover);
         }
         p.circle_stroke(
             rect.center(),
             size / 2.0 - 0.5,
-            Stroke::new(1.0, LINE_PRINT.gamma_multiply(fade)),
+            Stroke::new(1.0, pal().line_print.gamma_multiply(fade)),
         );
-        glyph(p, rect, INK_PRINT.gamma_multiply(fade));
+        glyph(p, rect, pal().ink_print.gamma_multiply(fade));
     }
     if enabled {
         response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -1032,8 +1160,13 @@ pub fn round_raised(
 ) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
     if ui.is_rect_visible(rect) {
-        raised(ui, rect, size / 2.0, style(ui).chip_raise);
-        glyph(ui.painter(), rect, INK);
+        // Sinks in while pressed, as every key of the family does.
+        if response.is_pointer_button_down_on() {
+            sunken(ui, rect, size / 2.0);
+        } else {
+            raised(ui, rect, size / 2.0, style(ui).chip_raise);
+        }
+        glyph(ui.painter(), rect, pal().ink);
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -1046,19 +1179,27 @@ pub fn switch(ui: &mut Ui, on: bool) -> Response {
     let p = ui.painter();
     let half = s.switch.y / 2.0;
     let track = CornerRadius::same(half as u8);
-    p.rect_filled(rect, track, lerp_color(SUNKEN, alpha(INK, 0.9), t));
+    p.rect_filled(
+        rect,
+        track,
+        lerp_color(pal().sunken, alpha(pal().ink, 0.9), t),
+    );
     if t < 1.0 {
         p.rect_stroke(
             rect,
             track,
-            Stroke::new(1.0, LINE_PRINT.gamma_multiply(1.0 - t)),
+            Stroke::new(1.0, pal().line_print.gamma_multiply(1.0 - t)),
             egui::StrokeKind::Inside,
         );
     }
     let x = egui::lerp(rect.min.x + half..=rect.max.x - half, t);
     let knob = pos2(x, rect.center().y);
-    p.circle_filled(knob + vec2(1.0, 2.0), s.knob, alpha(Color32::BLACK, 0.4));
-    p.circle_filled(knob, s.knob, lerp_color(alpha(INK, 0.85), GROUND, t));
+    p.circle_filled(knob + vec2(1.0, 2.0), s.knob, pal().knob_shadow);
+    p.circle_filled(
+        knob,
+        s.knob,
+        lerp_color(alpha(pal().ink, 0.85), pal().ground, t),
+    );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -1103,9 +1244,9 @@ impl TagKind {
 
     fn colours(self) -> (Color32, Color32) {
         match self {
-            TagKind::Ink => (INK, GROUND),
-            TagKind::Quiet => (SUNKEN, INK_PRINT),
-            TagKind::Accent => (ACCENT, SEASHELL),
+            TagKind::Ink => (pal().ink, pal().ground),
+            TagKind::Quiet => (pal().sunken, pal().ink_print),
+            TagKind::Accent => (pal().accent, SEASHELL),
         }
     }
 }
@@ -1256,10 +1397,10 @@ pub enum Status {
 pub fn advice(ui: &mut Ui, status: impl Into<Status>, message: &str) -> Response {
     let status = status.into();
     let (font, color) = match status {
-        Status::Warning => (label(), INK),
-        Status::Neutral => (body(), INK_PRINT),
-        Status::Ok => (body(), INK_MUTED),
-        Status::Unspecified => (body(), INK_MUTED.gamma_multiply(0.75)),
+        Status::Warning => (label(), pal().ink),
+        Status::Neutral => (body(), pal().ink_print),
+        Status::Ok => (body(), pal().ink_muted),
+        Status::Unspecified => (body(), pal().ink_muted.gamma_multiply(0.75)),
     };
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = S2;
@@ -1268,15 +1409,15 @@ pub fn advice(ui: &mut Ui, status: impl Into<Status>, message: &str) -> Response
         let p = ui.painter();
         match status {
             // a warning is red in every app, whatever colour its chips' lamps are
-            Status::Warning => led_in(p, c, true, 6.0, ACCENT, alpha(ACCENT, 0.25)),
+            Status::Warning => led_in(p, c, true, 6.0, pal().accent, alpha(pal().accent, 0.25)),
             Status::Neutral => {
-                p.circle_filled(c, 3.0, INK_PRINT);
+                p.circle_filled(c, 3.0, pal().ink_print);
             }
             Status::Ok => {
-                p.circle_filled(c, 3.0, alpha(INK, 0.22));
+                p.circle_filled(c, 3.0, alpha(pal().ink, 0.22));
             }
             Status::Unspecified => {
-                p.circle_stroke(c, 2.5, Stroke::new(1.0, LINE_PRINT));
+                p.circle_stroke(c, 2.5, Stroke::new(1.0, pal().line_print));
             }
         }
         wrapped(ui, message, font, color)
@@ -1292,19 +1433,19 @@ pub fn field(ui: &mut Ui, value: &mut String, width: f32, hint: &str, invalid: b
     sunken(ui, rect, h / 2.0);
     let edit = egui::TextEdit::singleline(value)
         .font(text(s.field_font.0, s.field_font.1))
-        .text_color(INK)
-        .hint_text(egui::RichText::new(hint).color(INK_MUTED))
+        .text_color(pal().ink)
+        .hint_text(egui::RichText::new(hint).color(pal().ink_muted))
         .frame(egui::Frame::NONE)
         .margin(vec2(s.field_margin, 0.0))
         .align(egui::Align2::LEFT_CENTER)
         .desired_width(width);
     let response = ui.put(rect, edit);
     let stroke = if invalid {
-        Stroke::new(1.5, ACCENT)
+        Stroke::new(1.5, pal().accent)
     } else if response.has_focus() {
-        Stroke::new(1.0, LINE_PRINT)
+        Stroke::new(1.0, pal().line_print)
     } else {
-        Stroke::new(1.0, LINE)
+        Stroke::new(1.0, pal().line)
     };
     ui.painter().rect_stroke(
         rect,
@@ -1383,7 +1524,7 @@ pub fn sliders(p: &Painter, rect: Rect, color: Color32) {
     let stroke = Stroke::new(1.5, color);
     for (dy, knob) in [(-4.5_f32, 1.5_f32), (0.0, -2.0), (4.5, 2.5)] {
         p.line_segment([c + vec2(-7.0, dy), c + vec2(7.0, dy)], stroke);
-        p.circle_filled(c + vec2(knob, dy), 2.4, GROUND);
+        p.circle_filled(c + vec2(knob, dy), 2.4, pal().ground);
         p.circle_stroke(c + vec2(knob, dy), 2.2, stroke);
     }
 }
