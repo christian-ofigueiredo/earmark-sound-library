@@ -540,7 +540,9 @@ impl EarmarkApp {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(304.0, 32.0), Sense::hover());
                 theme::sunken(ui, rect, 255.0);
-                let inner = rect.shrink2(vec2(14.0, 0.0));
+                let inner = rect
+                    .shrink2(vec2(14.0, 0.0))
+                    .translate(vec2(0.0, theme::optical_drop(13.0)));
                 let edit = egui::TextEdit::singleline(&mut self.query)
                     .frame(Frame::NONE)
                     .hint_text(egui::RichText::new("Search").color(pal().ink_note))

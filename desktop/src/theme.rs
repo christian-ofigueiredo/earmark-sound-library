@@ -397,6 +397,14 @@ pub fn display(size: f32, weight: u16) -> FontId {
     FontId::new(size, FontFamily::Name(name.into()))
 }
 
+/// How far to lower a one-line label so it looks centred in a key, chip or field: Brakwell and
+/// Tessel have an ascent of 0.80 and a descent of 0.20 of the size with capitals 0.70 tall, so in a
+/// line box the capitals' middle sits about 0.05 of the size above the centre. As the Mac apps'
+/// `opticallyCentred` (0.06 of the size), on the half-point grid so text stays sharp at 2x.
+pub fn optical_drop(size: f32) -> f32 {
+    (size * 0.06 * 2.0).round() / 2.0
+}
+
 /// `title-2`: the page's one big number.
 pub fn title2() -> FontId {
     display(32.0, 700)
@@ -866,9 +874,10 @@ fn chip_with(
                 color,
             ),
             None => {
+                let drop = optical_drop(font.size);
                 paint_text(
                     ui,
-                    pos2(left, rect.center().y),
+                    pos2(left, rect.center().y + drop),
                     egui::Align2::LEFT_CENTER,
                     title,
                     font,
@@ -919,7 +928,7 @@ pub fn segments(
             pal().ink_muted
         };
         ui.painter().text(
-            seg.center(),
+            seg.center() + vec2(0.0, optical_drop(font.size)),
             egui::Align2::CENTER_CENTER,
             *title,
             font.clone(),
@@ -1088,8 +1097,9 @@ pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Respon
             }
         };
         if o.width.is_some() {
+            let drop = optical_drop(font.size);
             let g = elided(ui, title, font, color, width - 2.0 * S2 - arrow_w);
-            let pos = rect.center() - vec2(arrow_w / 2.0, 0.0) - g.size() / 2.0;
+            let pos = rect.center() - vec2(arrow_w / 2.0, -drop) - g.size() / 2.0;
             let right = pos.x + g.size().x;
             ui.painter().galley(pos, g, color);
             if o.arrow {
@@ -1097,9 +1107,10 @@ pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Respon
             }
         } else {
             let left = rect.center().x - (natural - size.pad * 2.0) / 2.0;
+            let drop = optical_drop(font.size);
             let text_rect = paint_text(
                 ui,
-                pos2(left, rect.center().y),
+                pos2(left, rect.center().y + drop),
                 egui::Align2::LEFT_CENTER,
                 title,
                 font,
@@ -1434,15 +1445,26 @@ pub fn field(ui: &mut Ui, value: &mut String, width: f32, hint: &str, invalid: b
     let h = s.field_height;
     let (rect, _) = ui.allocate_exact_size(vec2(width, h), Sense::hover());
     sunken(ui, rect, h / 2.0);
+    // The text, hint, cursor and selection live in the field less its side margins (egui ignores a
+    // text edit's own margin once it is given a frame), lowered to look centred.
+    let size = s.field_font.0;
+    let inner = rect
+        .shrink2(vec2(s.field_margin, 0.0))
+        .translate(vec2(0.0, optical_drop(size)));
     let edit = egui::TextEdit::singleline(value)
-        .font(text(s.field_font.0, s.field_font.1))
+        .font(text(size, s.field_font.1))
         .text_color(pal().ink)
-        .hint_text(egui::RichText::new(hint).color(pal().ink_muted))
+        .hint_text(
+            egui::RichText::new(hint)
+                .font(text(size, s.field_font.1))
+                .color(pal().ink_muted),
+        )
         .frame(egui::Frame::NONE)
-        .margin(vec2(s.field_margin, 0.0))
+        .margin(egui::Margin::ZERO)
         .align(egui::Align2::LEFT_CENTER)
-        .desired_width(width);
-    let response = ui.put(rect, edit);
+        .desired_width(inner.width());
+    // `place`, not `put`: the field's whole width is already laid out above.
+    let response = ui.place(inner, edit);
     let stroke = if invalid {
         Stroke::new(1.5, pal().accent)
     } else if response.has_focus() {
