@@ -504,6 +504,9 @@ fn apply(ctx: &egui::Context) {
     style.spacing.button_padding = vec2(S3, S1);
     style.spacing.interact_size.y = 28.0;
     style.spacing.combo_height = 420.0;
+    // egui sizes a popup's first frame within default_area_size (400 high by default), so a
+    // long menu scrolled at about nine items even when its max_height allowed more.
+    style.spacing.default_area_size.y = 900.0;
     let v = &mut style.visuals;
     v.dark_mode = dark;
     v.override_text_color = Some(pal().ink);
