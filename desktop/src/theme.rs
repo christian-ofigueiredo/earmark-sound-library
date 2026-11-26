@@ -1560,33 +1560,77 @@ pub enum Status {
 /// is published. Only the broken one gets full ink type.
 pub fn advice(ui: &mut Ui, status: impl Into<Status>, message: &str) -> Response {
     let status = status.into();
-    let (font, color) = match status {
+    let (font, color) = advice_type(status);
+    let line = ui.fonts_mut(|f| f.row_height(&font));
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = S2;
+        let (rect, _) = ui.allocate_exact_size(vec2(6.0, font.size * 1.3), Sense::hover());
+        advice_lamp(
+            ui.painter(),
+            pos2(rect.center().x, rect.min.y + line / 2.0),
+            status,
+        );
+        wrapped(ui, message, font, color)
+    })
+    .inner
+}
+
+/// [`advice`] beside something `slot` tall (a key, a field, a row): its first line is centred in
+/// the slot, the lamp on that line, and the same room is left under the last line, so a one-line
+/// message is exactly as tall as the slot and a longer one grows downward. Lay it out in a row
+/// aligned to the top (`Layout::left_to_right(Align::Min)`) with the thing it sits beside.
+pub fn advice_in(ui: &mut Ui, status: impl Into<Status>, message: &str, slot: f32) -> Response {
+    let status = status.into();
+    let (font, color) = advice_type(status);
+    let line = ui.fonts_mut(|f| f.row_height(&font));
+    let pad = ((slot - line) / 2.0).max(0.0);
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().interact_size.y = 0.0;
+        ui.spacing_mut().item_spacing.x = S2;
+        let top = ui.cursor().min.y;
+        let (rect, _) = ui.allocate_exact_size(vec2(6.0, line + 2.0 * pad), Sense::hover());
+        advice_lamp(
+            ui.painter(),
+            pos2(rect.center().x, top + pad + line / 2.0),
+            status,
+        );
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.add_space(pad);
+            let r = wrapped(ui, message, font, color);
+            ui.add_space(pad);
+            r
+        })
+        .inner
+    })
+    .inner
+}
+
+/// The type of an advice line: a warning in the label's weight and full ink, the rest quieter.
+fn advice_type(status: Status) -> (FontId, Color32) {
+    match status {
         Status::Warning => (label(), pal().ink),
         Status::Neutral => (body(), pal().ink_print),
         Status::Ok => (body(), pal().ink_muted),
         Status::Unspecified => (body(), pal().ink_muted.gamma_multiply(0.75)),
-    };
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = S2;
-        let (rect, _) = ui.allocate_exact_size(vec2(6.0, font.size * 1.3), Sense::hover());
-        let c = pos2(rect.center().x, rect.min.y + font.size * 0.62);
-        let p = ui.painter();
-        match status {
-            // a warning is red in every app, whatever colour its chips' lamps are
-            Status::Warning => led_in(p, c, true, 6.0, pal().accent, alpha(pal().accent, 0.25)),
-            Status::Neutral => {
-                p.circle_filled(c, 3.0, pal().ink_print);
-            }
-            Status::Ok => {
-                p.circle_filled(c, 3.0, alpha(pal().ink, 0.22));
-            }
-            Status::Unspecified => {
-                p.circle_stroke(c, 2.5, Stroke::new(1.0, pal().line_print));
-            }
+    }
+}
+
+/// An advice line's lamp, centred on `c` (the middle of the text's first line).
+fn advice_lamp(p: &Painter, c: Pos2, status: Status) {
+    match status {
+        // a warning is red in every app, whatever colour its chips' lamps are
+        Status::Warning => led_in(p, c, true, 6.0, pal().accent, alpha(pal().accent, 0.25)),
+        Status::Neutral => {
+            p.circle_filled(c, 3.0, pal().ink_print);
         }
-        wrapped(ui, message, font, color)
-    })
-    .inner
+        Status::Ok => {
+            p.circle_filled(c, 3.0, alpha(pal().ink, 0.22));
+        }
+        Status::Unspecified => {
+            p.circle_stroke(c, 2.5, Stroke::new(1.0, pal().line_print));
+        }
+    }
 }
 
 /// A sunken text field at the style's height, in a capsule.
