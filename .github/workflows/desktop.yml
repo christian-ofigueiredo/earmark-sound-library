@@ -1,8 +1,8 @@
 name: Desktop
 
-# Builds Earmark for Windows (installer) and Linux (AppImage and .deb) from desktop/ and the Rust
-# engine. Every run keeps the files as downloadable artifacts (Actions → Desktop → the run →
-# Artifacts). Publishing a release stays a person's job.
+# Builds Earmark for Windows and Linux (desktop/: a drawn egui window on the Rust engine). Every
+# run keeps the programs as downloadable artifacts (Actions → Desktop → the run → Artifacts).
+# Publishing a release stays a person's job.
 
 on:
   push:
@@ -29,55 +29,75 @@ jobs:
         include:
           - name: Windows
             os: windows-latest
-            bundles: nsis
-            files: desktop/src-tauri/target/release/bundle/nsis/*.exe
           - name: Linux
             # Ubuntu 24.04: the ONNX Runtime the engine links in (ort's prebuilt library) needs
-            # glibc 2.38 and a newer libstdc++ than 22.04 has. The AppImage then runs on 2024
+            # glibc 2.38 and a newer libstdc++ than 22.04 has. The program then runs on 2024
             # distributions and later (Ubuntu 24.04, Debian 13, Fedora 39…).
             os: ubuntu-24.04
-            bundles: appimage,deb
-            files: |
-              desktop/src-tauri/target/release/bundle/appimage/*.AppImage
-              desktop/src-tauri/target/release/bundle/deb/*.deb
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Linux libraries
         if: runner.os == 'Linux'
+        # ALSA for playing sounds; winit loads X11 and Wayland when it runs.
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libasound2-dev pkg-config
       - name: Toolchain
         run: |
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustc --version
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: desktop/package-lock.json
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            desktop/src-tauri/target
-          key: desktop-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+            desktop/target
+          key: desktop-native-${{ runner.os }}-${{ hashFiles('desktop/Cargo.lock') }}
       - name: Lint
-        working-directory: desktop/src-tauri
+        working-directory: desktop
         run: |
           cargo fmt --check
           cargo clippy --locked --all-targets -- -D warnings
       - name: Build
         working-directory: desktop
+        run: cargo build --locked --release
+      - name: Package
         shell: bash
         run: |
-          npm ci
-          npx tauri build --bundles ${{ matrix.bundles }}
+          mkdir -p out
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp desktop/target/release/earmark-desktop.exe out/Earmark.exe
+          else
+            cp desktop/target/release/earmark-desktop out/earmark
+          fi
+      - name: Installer
+        if: runner.os == 'Windows'
+        # Inno Setup 6 comes with GitHub's Windows runners, so nothing is downloaded here. If an
+        # image ever drops it, this step fails rather than fetching an unpinned copy.
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Output "::error::Inno Setup 6 is not on this runner image"
+            exit 1
+          }
+          $version = (Select-String -Path desktop/Cargo.toml -Pattern '^version = "(.*)"' |
+            Select-Object -First 1).Matches[0].Groups[1].Value
+          New-Item -ItemType Directory -Force installer | Out-Null
+          & $iscc "/DAppVersion=$version" "/DSourceExe=$PWD\out\Earmark.exe" `
+            "/DOutputDir=$PWD\installer" desktop\installer\earmark.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem installer
       - uses: actions/upload-artifact@v4
         with:
           name: Earmark-${{ matrix.name }}
-          path: ${{ matrix.files }}
+          path: out/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: Earmark-Windows-Installer
+          path: installer/*.exe
           if-no-files-found: error

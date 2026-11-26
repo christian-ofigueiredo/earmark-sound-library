@@ -115,7 +115,8 @@ the details and where it stands.
 3. **Models for Windows.** Convert PE-AV, CLAP, Beat This! and S-KEY to ONNX, the
    same way `models/` converts them to Core ML, with the same parity checks. On the
    Mac, Core ML stays: it's tested and fast on Apple's GPU.
-4. **Windows and Linux interface (Tauri)**: one app for both, with the two sections,
+4. **Windows and Linux interface** (Tauri was the plan; since 2026-11-25 it's a drawn Rust
+   window, egui on wgpu and winit, by the owner's rule: no web window): one app for both, with the two sections,
    the sound map (drawn with WebGL), the player, Preferences and Connect an AI Agent.
    Tauri builds it for Windows and Linux from the same code, so Linux costs little
    extra; the Mac keeps its SwiftUI app.
