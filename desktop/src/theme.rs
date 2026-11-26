@@ -397,12 +397,18 @@ pub fn display(size: f32, weight: u16) -> FontId {
     FontId::new(size, FontFamily::Name(name.into()))
 }
 
-/// How far to lower a one-line label so it looks centred in a key, chip or field: Brakwell and
-/// Tessel have an ascent of 0.80 and a descent of 0.20 of the size with capitals 0.70 tall, so in a
-/// line box the capitals' middle sits about 0.05 of the size above the centre. As the Mac apps'
-/// `opticallyCentred` (0.06 of the size), on the half-point grid so text stays sharp at 2x.
-pub fn optical_drop(size: f32) -> f32 {
-    (size * 0.06 * 2.0).round() / 2.0
+/// How far the family's fonts sit lower than egui's line box would put them, as a fraction of the
+/// size: Brakwell and Tessel have an ascent of 0.80 and a descent of 0.20 with capitals 0.70 tall,
+/// so centred in a line box the capitals' middle sits about 0.05 of the size high. The Mac apps
+/// lower labels by 0.06 (`opticallyCentred`); here the fonts themselves carry it
+/// (`FontTweak::y_offset_factor`), so every label is centred alike: the theme's keys, chips,
+/// segments and fields, and egui's own combo boxes, menus, rows and tooltips.
+pub const OPTICAL_DROP: f32 = 0.06;
+
+/// Kept so older callers compile: the fonts now carry the drop ([`OPTICAL_DROP`]), so this is 0.
+/// Remove calls to it; adding it again would lower a label twice.
+pub fn optical_drop(_size: f32) -> f32 {
+    0.0
 }
 
 /// `title-2`: the page's one big number.
@@ -445,6 +451,7 @@ pub fn install(ctx: &egui::Context) {
     for (name, bytes, weight) in FONTS {
         let tweak = egui::FontTweak {
             coords: egui::epaint::text::VariationCoords::new([(b"wght", weight)]),
+            y_offset_factor: OPTICAL_DROP,
             ..Default::default()
         };
         fonts.font_data.insert(
@@ -874,10 +881,9 @@ fn chip_with(
                 color,
             ),
             None => {
-                let drop = optical_drop(font.size);
                 paint_text(
                     ui,
-                    pos2(left, rect.center().y + drop),
+                    pos2(left, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     title,
                     font,
@@ -928,7 +934,7 @@ pub fn segments(
             pal().ink_muted
         };
         ui.painter().text(
-            seg.center() + vec2(0.0, optical_drop(font.size)),
+            seg.center(),
             egui::Align2::CENTER_CENTER,
             *title,
             font.clone(),
@@ -997,6 +1003,88 @@ pub fn button_arrow(ui: &mut Ui, kind: Key, title: &str, small: bool) -> Respons
     )
 }
 
+/// A key's body in the family's material, for its state; answers the colour its label takes.
+fn key_body(
+    ui: &Ui,
+    rect: Rect,
+    response: &Response,
+    kind: Key,
+    enabled: bool,
+    pressed: bool,
+) -> Color32 {
+    let s = style(ui);
+    let r = rect.height() / 2.0;
+    let cr = CornerRadius::same(r.min(255.0) as u8);
+    match kind {
+        Key::Primary if !enabled => {
+            // With nothing to do, the red key goes dark and unlit.
+            ui.painter().rect_filled(rect, cr, pal().sunken);
+            ui.painter().rect_stroke(
+                rect,
+                cr,
+                Stroke::new(1.0, pal().line),
+                egui::StrokeKind::Inside,
+            );
+            alpha(pal().ink, 0.36)
+        }
+        Key::Primary => {
+            let p = ui.painter();
+            for shape in shadow_shapes(rect, cr, &s.primary_shadow, 1.0) {
+                p.add(shape);
+            }
+            let fill = if pressed {
+                pal().accent.gamma_multiply(0.7)
+            } else if response.hovered() {
+                // A step brighter than the accent.
+                if pal().dark {
+                    Color32::from_rgb(0xDE, 0x1B, 0x0B)
+                } else {
+                    Color32::from_rgb(0xB4, 0x12, 0x06)
+                }
+            } else {
+                pal().accent
+            };
+            p.rect_filled(rect, cr, fill);
+            p.rect_filled(
+                Rect::from_min_max(
+                    rect.min + vec2(r * 0.6, 0.0),
+                    pos2(rect.max.x - r * 0.6, rect.min.y + 1.0),
+                ),
+                0.0,
+                alpha(Color32::WHITE, 0.22),
+            );
+            SEASHELL
+        }
+        Key::Raised => {
+            if pressed {
+                sunken(ui, rect, r)
+            } else {
+                raised(ui, rect, r, s.key_raise)
+            }
+            if enabled { pal().ink } else { pal().ink_note }
+        }
+        Key::Ghost => {
+            if response.hovered() && enabled {
+                ui.painter().rect_filled(rect, cr, pal().hover);
+            }
+            let line = if enabled {
+                pal().line_print
+            } else {
+                pal().line
+            };
+            ui.painter()
+                .rect_stroke(rect, cr, Stroke::new(1.0, line), egui::StrokeKind::Inside);
+            if !enabled {
+                pal().ink_note
+            } else if pressed {
+                pal().ink_print.gamma_multiply(0.7)
+            } else {
+                pal().ink_print
+            }
+        }
+    }
+}
+
 pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Response {
     let s = style(ui);
     let size = if o.small {
@@ -1022,84 +1110,10 @@ pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Respon
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), sense);
     if ui.is_rect_visible(rect) {
         let pressed = enabled && response.is_pointer_button_down_on();
-        let r = height / 2.0;
-        let cr = CornerRadius::same(r as u8);
-        let color = match kind {
-            Key::Primary if !enabled => {
-                // With nothing to do, the red key goes dark and unlit.
-                ui.painter().rect_filled(rect, cr, pal().sunken);
-                ui.painter().rect_stroke(
-                    rect,
-                    cr,
-                    Stroke::new(1.0, pal().line),
-                    egui::StrokeKind::Inside,
-                );
-                alpha(pal().ink, 0.36)
-            }
-            Key::Primary => {
-                let p = ui.painter();
-                for shape in shadow_shapes(rect, cr, &s.primary_shadow, 1.0) {
-                    p.add(shape);
-                }
-                let fill = if pressed {
-                    pal().accent.gamma_multiply(0.7)
-                } else if response.hovered() {
-                    // A step brighter than the accent.
-                    if pal().dark {
-                        Color32::from_rgb(0xDE, 0x1B, 0x0B)
-                    } else {
-                        Color32::from_rgb(0xB4, 0x12, 0x06)
-                    }
-                } else {
-                    pal().accent
-                };
-                p.rect_filled(rect, cr, fill);
-                p.rect_filled(
-                    Rect::from_min_max(
-                        rect.min + vec2(r * 0.6, 0.0),
-                        pos2(rect.max.x - r * 0.6, rect.min.y + 1.0),
-                    ),
-                    0.0,
-                    alpha(Color32::WHITE, 0.22),
-                );
-                SEASHELL
-            }
-            Key::Raised => {
-                if pressed {
-                    sunken(ui, rect, r)
-                } else {
-                    raised(ui, rect, r, s.key_raise)
-                }
-                if enabled { pal().ink } else { pal().ink_note }
-            }
-            Key::Ghost => {
-                if response.hovered() && enabled {
-                    ui.painter().rect_filled(rect, cr, pal().hover);
-                }
-                let line = if enabled {
-                    pal().line_print
-                } else {
-                    pal().line
-                };
-                ui.painter().rect_stroke(
-                    rect,
-                    cr,
-                    Stroke::new(1.0, line),
-                    egui::StrokeKind::Inside,
-                );
-                if !enabled {
-                    pal().ink_note
-                } else if pressed {
-                    pal().ink_print.gamma_multiply(0.7)
-                } else {
-                    pal().ink_print
-                }
-            }
-        };
+        let color = key_body(ui, rect, &response, kind, enabled, pressed);
         if o.width.is_some() {
-            let drop = optical_drop(font.size);
             let g = elided(ui, title, font, color, width - 2.0 * S2 - arrow_w);
-            let pos = rect.center() - vec2(arrow_w / 2.0, -drop) - g.size() / 2.0;
+            let pos = rect.center() - vec2(arrow_w / 2.0, 0.0) - g.size() / 2.0;
             let right = pos.x + g.size().x;
             ui.painter().galley(pos, g, color);
             if o.arrow {
@@ -1107,10 +1121,9 @@ pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Respon
             }
         } else {
             let left = rect.center().x - (natural - size.pad * 2.0) / 2.0;
-            let drop = optical_drop(font.size);
             let text_rect = paint_text(
                 ui,
-                pos2(left, rect.center().y + drop),
+                pos2(left, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 title,
                 font,
@@ -1131,6 +1144,143 @@ pub fn button_with(ui: &mut Ui, kind: Key, title: &str, o: KeyOptions) -> Respon
     } else {
         response
     }
+}
+
+/// How a key that opens a menu or a picker looks: see [`menu_key`] and [`picker`].
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct MenuOptions {
+    /// The key's material: `Raised` (default) or `Ghost`; `Primary` works too.
+    pub kind: Key,
+    /// The style's `small` size (table rows).
+    pub small: bool,
+    /// A set width; words that don't fit end in "…". `None`: as wide as its words.
+    pub width: Option<f32>,
+    /// At least this wide.
+    pub min_width: f32,
+    /// Another height than the style's.
+    pub height: Option<f32>,
+    /// The tallest the popup gets before it scrolls.
+    pub max_height: f32,
+    /// A picker: the current value at the left, as a combo box shows it. Otherwise the title is
+    /// centred, as on any key.
+    pub picker: bool,
+    pub disabled: bool,
+}
+
+impl Default for MenuOptions {
+    fn default() -> Self {
+        MenuOptions {
+            kind: Key::Raised,
+            small: false,
+            width: None,
+            min_width: 0.0,
+            height: None,
+            max_height: 420.0,
+            picker: false,
+            disabled: false,
+        }
+    }
+}
+
+/// A key that opens a menu below it: the family's key with its label and a down chevron, sunk
+/// while the menu is open; the menu is egui's own (`Popup::menu`, as `ComboBox` uses), in the
+/// palette, so the keyboard works as there: Enter or Space opens it, Tab and the arrows move, Enter
+/// picks, Escape closes. Put `ui.button`, `ui.selectable_value` or anything else in `add`; a click
+/// on an item closes the menu.
+pub fn menu_key<R>(
+    ui: &mut Ui,
+    title: &str,
+    o: MenuOptions,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    let s = style(ui);
+    let size = if o.small {
+        s.small
+    } else {
+        match o.kind {
+            Key::Primary => s.primary,
+            Key::Raised => s.raised,
+            Key::Ghost => s.ghost,
+        }
+    };
+    let font = text(size.font_size, size.font_weight);
+    let height = o.height.unwrap_or(size.height);
+    let chevron_w = 8.0 + S2;
+    let natural = size.pad * 2.0 + text_width(ui, title, &font) + chevron_w;
+    let width = o.width.unwrap_or(natural).max(o.min_width);
+    let enabled = !o.disabled;
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), sense);
+    let popup_id = egui::Popup::default_response_id(&response);
+    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    if ui.is_rect_visible(rect) {
+        let pressed = enabled && (open || response.is_pointer_button_down_on());
+        let color = key_body(ui, rect, &response, o.kind, enabled, pressed);
+        let chevron = Rect::from_center_size(
+            pos2(rect.max.x - size.pad - 4.0, rect.center().y),
+            vec2(8.0, 8.0),
+        );
+        chevron_vertical(ui.painter(), chevron, color, open);
+        let room = width - size.pad * 2.0 - chevron_w;
+        let g = elided(ui, title, font, color, room);
+        let x = if o.picker {
+            rect.min.x + size.pad
+        } else {
+            rect.min.x + size.pad + (room - g.size().x) / 2.0
+        };
+        ui.painter()
+            .galley(pos2(x, rect.center().y - g.size().y / 2.0), g, color);
+    }
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::new(egui::Role::ComboBox);
+        info.enabled = enabled;
+        info.label = Some(title.to_string());
+        info
+    });
+    let inner = egui::Popup::menu(&response)
+        .id(popup_id)
+        .width(rect.width())
+        .gap(S1)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui| {
+            ui.set_min_width(ui.available_width());
+            egui::ScrollArea::vertical()
+                .max_height(o.max_height)
+                .show(ui, add)
+                .inner
+        })
+        .map(|r| r.inner);
+    let response = if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    };
+    egui::InnerResponse::new(inner, response)
+}
+
+/// A picker: a key showing the current value, which opens the choices below it (what
+/// `egui::ComboBox` does, drawn as the family's key). `width`: a set width, or `None` for as wide
+/// as the value.
+pub fn picker<R>(
+    ui: &mut Ui,
+    current: &str,
+    width: Option<f32>,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    menu_key(
+        ui,
+        current,
+        MenuOptions {
+            picker: true,
+            width,
+            ..Default::default()
+        },
+        add,
+    )
 }
 
 /// A round printed outline around a drawn glyph (day arrows, "previous", "next").
@@ -1446,11 +1596,9 @@ pub fn field(ui: &mut Ui, value: &mut String, width: f32, hint: &str, invalid: b
     let (rect, _) = ui.allocate_exact_size(vec2(width, h), Sense::hover());
     sunken(ui, rect, h / 2.0);
     // The text, hint, cursor and selection live in the field less its side margins (egui ignores a
-    // text edit's own margin once it is given a frame), lowered to look centred.
+    // text edit's own margin once it is given a frame).
     let size = s.field_font.0;
-    let inner = rect
-        .shrink2(vec2(s.field_margin, 0.0))
-        .translate(vec2(0.0, optical_drop(size)));
+    let inner = rect.shrink2(vec2(s.field_margin, 0.0));
     let edit = egui::TextEdit::singleline(value)
         .font(text(size, s.field_font.1))
         .text_color(pal().ink)
