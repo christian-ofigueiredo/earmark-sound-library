@@ -123,7 +123,7 @@ pub const LIGHT: Palette = Palette {
     shade: alpha(Color32::BLACK, 0.14),
     rim: alpha(Color32::WHITE, 0.90),
     rim_ring: alpha(EBONY, 0.04),
-    inset: alpha(Color32::BLACK, 0.10),
+    inset: alpha(Color32::BLACK, 0.05),
     edge: alpha(EBONY, 0.05),
     knob_shadow: alpha(Color32::BLACK, 0.18),
 };
@@ -605,9 +605,12 @@ pub fn rim(ui: &Ui, rect: Rect, radius: f32) {
 pub fn sunken(ui: &Ui, rect: Rect, radius: f32) {
     let r = CornerRadius::same(radius.min(255.0) as u8);
     ui.painter().rect_filled(rect, r, pal().sunken);
+    // Along the straight part of the top edge: a capsule (any radius past half the height) curves
+    // away from the edge before that.
+    let bend = radius.min(rect.height() / 2.0);
     let top = Rect::from_min_max(
-        rect.min + vec2(radius * 0.5, 0.5),
-        pos2(rect.max.x - radius * 0.5, rect.min.y + 1.5),
+        rect.min + vec2(bend, 0.5),
+        pos2(rect.max.x - bend, rect.min.y + 1.5),
     );
     ui.painter().rect_filled(top, 0.0, pal().inset);
 }
