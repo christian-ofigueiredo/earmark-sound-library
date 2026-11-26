@@ -707,7 +707,32 @@ pub fn elided(ui: &Ui, text: &str, font: FontId, color: Color32, width: f32) -> 
         break_anywhere: true,
         overflow_character: Some('…'),
     };
-    ui.painter().layout_job(job)
+    let galley = ui.painter().layout_job(job);
+    if !galley.elided {
+        return galley;
+    }
+    // egui cuts where the room ends, which can leave a space before the "…" ("White …").
+    let shown: String = galley
+        .rows
+        .iter()
+        .flat_map(|r| r.glyphs.iter().map(|g| g.chr))
+        .collect();
+    let kept = shown.trim_end_matches('…').trim_end();
+    if kept.len() + '…'.len_utf8() == shown.len() {
+        return galley;
+    }
+    ui.painter()
+        .layout_no_wrap(format!("{kept}…"), font_of(&galley), color)
+}
+
+/// The font a one-font galley was laid out in.
+fn font_of(galley: &egui::Galley) -> FontId {
+    galley
+        .job
+        .sections
+        .first()
+        .map(|s| s.format.font_id.clone())
+        .unwrap_or_default()
 }
 
 /// Small capitals with hair spaces between letters. egui does have tracking
@@ -1165,6 +1190,9 @@ pub struct MenuOptions {
     /// centred, as on any key.
     pub picker: bool,
     pub disabled: bool,
+    /// Stays open while things inside are used (checkboxes, sliders), closing on a click outside,
+    /// on the key or on Escape. Off: a click on any item closes it, as a menu of commands does.
+    pub stay_open: bool,
 }
 
 impl Default for MenuOptions {
@@ -1178,6 +1206,7 @@ impl Default for MenuOptions {
             max_height: 420.0,
             picker: false,
             disabled: false,
+            stay_open: false,
         }
     }
 }
@@ -1245,7 +1274,11 @@ pub fn menu_key<R>(
         .id(popup_id)
         .width(rect.width())
         .gap(S1)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .close_behavior(if o.stay_open {
+            egui::PopupCloseBehavior::CloseOnClickOutside
+        } else {
+            egui::PopupCloseBehavior::CloseOnClick
+        })
         .show(|ui| {
             ui.set_min_width(ui.available_width());
             egui::ScrollArea::vertical()
