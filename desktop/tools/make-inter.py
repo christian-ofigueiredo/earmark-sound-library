@@ -11,7 +11,8 @@ SIL Open Font License (Inter declares no Reserved Font Name):
 - instanced to the weights the theme uses, wght 300-700, at the text optical size, opsz 14;
 - digits 0-9 mapped to their tabular forms (the font's own `tnum` glyphs), because egui applies
   no OpenType features and numbers in columns should line up; spaces and punctuation are left;
-- glyphs no character reaches (alternates) and hinting dropped; kerning kept.
+- glyphs no character reaches (alternates) and hinting dropped; kerning kept;
+- the .notdef glyph left empty, so a character no font has is blank instead of a box.
 
 The licence goes beside the font as OFL.txt, the release's LICENSE.txt unchanged.
 """
@@ -50,7 +51,7 @@ def main(src: str, out: str) -> None:
     options.hinting = False
     options.name_IDs = ["*"]
     options.name_languages = ["*"]
-    options.notdef_outline = True
+    options.notdef_outline = False  # an empty .notdef: missing characters draw nothing
     options.drop_tables += ["STAT"]
     subsetter = subset.Subsetter(options)
     subsetter.populate(unicodes=font.getBestCmap().keys())

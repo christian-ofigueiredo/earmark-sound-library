@@ -478,7 +478,43 @@ pub fn install(ctx: &egui::Context) {
         .unwrap()
         .insert(0, "inter-400".into());
     ctx.set_fonts(fonts);
+    ctx.add_font_provider(Arc::new(CjkPunctuation::default()));
     apply(ctx);
+}
+
+/// Text Inter lacks (Chinese, Japanese, Korean, Arabic…) is drawn from a font of the system,
+/// found when such a character first appears: eframe's `system_fonts` feature does that, by
+/// script. Fullwidth and CJK punctuation (｢－｣, ･, 、) belong to no script, so it finds no font
+/// for a title made only of them; this asks it for a Han character instead, which brings the
+/// system's CJK font (egui then checks that the font has the character). Nothing is looked up
+/// until such a character is drawn. Whatever no font has is left blank: Inter's `.notdef` is
+/// empty (`tools/make-inter.py`), so nothing shows as a box.
+#[derive(Default)]
+struct CjkPunctuation {
+    system: std::sync::OnceLock<egui_system_font_provider::SystemFontProvider>,
+}
+
+impl egui::FontProvider for CjkPunctuation {
+    fn font_for(&self, request: &egui::FallbackRequest<'_>) -> Option<egui::FontInsert> {
+        // A character of the script whose font has this block: Japanese for the halfwidth
+        // katakana forms and ・ー, Korean for the halfwidth hangul forms, Han for the rest.
+        let like = match request.cluster.chars().next()? {
+            '\u{30FB}'..='\u{30FC}' | '\u{FF61}'..='\u{FF9F}' => "あ",
+            '\u{FFA0}'..='\u{FFDC}' => "한",
+            '\u{3000}'..='\u{303F}'
+            | '\u{3200}'..='\u{33FF}'
+            | '\u{FE30}'..='\u{FE4F}'
+            | '\u{FF00}'..='\u{FFEF}' => "中",
+            _ => return None,
+        };
+        let system = self
+            .system
+            .get_or_init(egui_system_font_provider::SystemFontProvider::new);
+        system.font_for(&egui::FallbackRequest {
+            cluster: like,
+            family: request.family,
+        })
+    }
 }
 
 /// Dark or light for the whole app: the palette, egui's own widgets, and the system's idea of the

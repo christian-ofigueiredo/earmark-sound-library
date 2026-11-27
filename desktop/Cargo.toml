@@ -19,8 +19,10 @@ earmark-audio = { path = "../engine/crates/earmark-audio" }
 earmark-mcp = { path = "../engine/crates/earmark-mcp" }
 earmark-models = { path = "../engine/crates/earmark-models" }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "x11", "wayland"] }
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "system_fonts", "accesskit", "x11", "wayland"] }
 egui = "0.37"
+# System fonts for text Inter lacks (theme.rs, CjkPunctuation), as eframe's `system_fonts` uses.
+egui_system_font_provider = "0.37"
 rodio = { version = "0.23", default-features = false, features = ["playback", "symphonia-all"] }
 rfd = "0.18"
 opener = { version = "0.9", features = ["reveal"] }
