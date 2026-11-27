@@ -10,7 +10,7 @@
 //! for titles and numbers (24 pt and up), Inter for the rest (the Mac apps use the system font
 //! there): variable fonts, each weight picked through the `wght` axis (`FontTweak::coords`).
 //! Inter is under the SIL Open Font License: `assets/fonts/OFL.txt` and `Inter-NOTE.txt` go
-//! wherever `Inter.ttf` goes.
+//! wherever its files go. [`numbers`] gives a font tabular digits for numbers in columns.
 //!
 //! What is shared: colours, type, materials (`raised`, `sunken`, `rim`), the tag outline, icons.
 //! What differs between the Mac apps (how tall a chip is, the colour of its lamp, the size of a
@@ -363,22 +363,20 @@ pub fn style(ui: &Ui) -> Style {
 
 // MARK: type
 
-/// Inter 4.1 made by `tools/make-inter.py` from the release's InterVariable.ttf: weights 300 to
-/// 700 at optical size 14, with tabular digits as the default (egui applies no OpenType
-/// features, so numbers in columns line up only this way). See `assets/fonts/Inter-NOTE.txt`.
-const INTER: &[u8] = include_bytes!("../assets/fonts/Inter.ttf");
+/// Inter 4.1 for all text: the release's InterVariable.ttf, unmodified.
+const INTER: &[u8] = include_bytes!("../assets/fonts/InterVariable.ttf");
+/// Two small files `tools/make-inter.py` makes from it, put in front of it (see
+/// `assets/fonts/Inter-NOTE.txt`): the ten digits in their tabular forms, for numbers in columns
+/// (egui applies no OpenType features, so `tnum` can't be switched on), and a font with no
+/// characters that gives each text family Inter's metrics and an empty missing-character glyph.
+const INTER_NUMBERS: &[u8] = include_bytes!("../assets/fonts/Inter-Numbers.ttf");
+const INTER_BLANK: &[u8] = include_bytes!("../assets/fonts/Inter-Blank.ttf");
 const BRAKWELL: &[u8] = include_bytes!("../assets/fonts/Brakwell.ttf");
 
-/// The weights in use, each one the variable font at that `wght`, with its optical drop.
-const FONTS: [(&str, &[u8], f32, f32); 7] = [
-    ("inter-300", INTER, 300.0, TEXT_DROP),
-    ("inter-400", INTER, 400.0, TEXT_DROP),
-    ("inter-500", INTER, 500.0, TEXT_DROP),
-    ("inter-600", INTER, 600.0, TEXT_DROP),
-    ("inter-700", INTER, 700.0, TEXT_DROP),
-    ("brakwell-600", BRAKWELL, 600.0, OPTICAL_DROP),
-    ("brakwell-700", BRAKWELL, 700.0, OPTICAL_DROP),
-];
+/// The text weights in use, each one the variable font at that `wght`.
+const INTER_WEIGHTS: [u16; 5] = [300, 400, 500, 600, 700];
+/// Brakwell's weights.
+const BRAKWELL_WEIGHTS: [u16; 2] = [600, 700];
 
 /// Inter at 300 to 700.
 pub fn text(size: f32, weight: u16) -> FontId {
@@ -390,6 +388,24 @@ pub fn text(size: f32, weight: u16) -> FontId {
         _ => "inter-700",
     };
     FontId::new(size, FontFamily::Name(name.into()))
+}
+
+/// The same font with tabular digits, for numbers that line up in columns or change in place
+/// (counts, lengths, sizes, values): `numbers(body())`, `numbers(text(11.0, 400))`. Running text
+/// keeps Inter's proportional digits. Other fonts (Brakwell) come back as they are.
+pub fn numbers(font: FontId) -> FontId {
+    let FontFamily::Name(name) = &font.family else {
+        return font;
+    };
+    let tabular = match &**name {
+        "inter-300" => "inter-num-300",
+        "inter-400" => "inter-num-400",
+        "inter-500" => "inter-num-500",
+        "inter-600" => "inter-num-600",
+        "inter-700" => "inter-num-700",
+        _ => return font,
+    };
+    FontId::new(font.size, FontFamily::Name(tabular.into()))
 }
 
 /// Brakwell at 600 or 700.
@@ -457,26 +473,56 @@ pub fn overline_font() -> FontId {
 /// colours, so nothing on screen falls back to egui's default blue or grey.
 pub fn install(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
-    for (name, bytes, weight, drop) in FONTS {
+    // Arrows, ÷ and ≈ that the family's fonts may lack come from egui's own, after Inter.
+    let egui_own = fonts.families[&FontFamily::Proportional].clone();
+    let mut add = |name: String, bytes: &'static [u8], weight: u16, drop: f32| {
         let tweak = egui::FontTweak {
-            coords: egui::epaint::text::VariationCoords::new([(b"wght", weight)]),
+            coords: egui::epaint::text::VariationCoords::new([(b"wght", f32::from(weight))]),
             y_offset_factor: drop,
             ..Default::default()
         };
-        fonts.font_data.insert(
-            name.into(),
-            Arc::new(FontData::from_static(bytes).tweak(tweak)),
-        );
-        let mut family = vec![name.to_string()];
-        // Arrows, ÷ and ≈ that the family's fonts may lack come from egui's own.
-        family.extend(fonts.families[&FontFamily::Proportional].iter().cloned());
-        fonts.families.insert(FontFamily::Name(name.into()), family);
+        let data = FontData::from_static(bytes).tweak(tweak);
+        fonts.font_data.insert(name, Arc::new(data));
+    };
+    for w in INTER_WEIGHTS {
+        add(format!("inter-blank-{w}"), INTER_BLANK, w, TEXT_DROP);
+        add(format!("inter-figures-{w}"), INTER_NUMBERS, w, TEXT_DROP);
+        add(format!("inter-face-{w}"), INTER, w, TEXT_DROP);
     }
-    fonts
-        .families
-        .get_mut(&FontFamily::Proportional)
-        .unwrap()
-        .insert(0, "inter-400".into());
+    for w in BRAKWELL_WEIGHTS {
+        add(format!("brakwell-{w}"), BRAKWELL, w, OPTICAL_DROP);
+    }
+    let family = |first: &[String]| -> Vec<String> {
+        first
+            .iter()
+            .cloned()
+            .chain(egui_own.iter().cloned())
+            .collect()
+    };
+    for w in INTER_WEIGHTS {
+        let (blank, figures, face) = (
+            format!("inter-blank-{w}"),
+            format!("inter-figures-{w}"),
+            format!("inter-face-{w}"),
+        );
+        let text = family(&[blank, face.clone()]);
+        let numbers = family(&[figures, face]);
+        fonts
+            .families
+            .insert(FontFamily::Name(format!("inter-{w}").into()), text);
+        fonts
+            .families
+            .insert(FontFamily::Name(format!("inter-num-{w}").into()), numbers);
+    }
+    for w in BRAKWELL_WEIGHTS {
+        let name = format!("brakwell-{w}");
+        fonts
+            .families
+            .insert(FontFamily::Name(name.clone().into()), family(&[name]));
+    }
+    let proportional = fonts.families.get_mut(&FontFamily::Proportional).unwrap();
+    proportional.insert(0, "inter-face-400".into());
+    proportional.insert(0, "inter-blank-400".into());
     ctx.set_fonts(fonts);
     ctx.add_font_provider(Arc::new(CjkPunctuation::default()));
     apply(ctx);
@@ -487,8 +533,8 @@ pub fn install(ctx: &egui::Context) {
 /// script. Fullwidth and CJK punctuation (｢－｣, ･, 、) belong to no script, so it finds no font
 /// for a title made only of them; this asks it for a Han character instead, which brings the
 /// system's CJK font (egui then checks that the font has the character). Nothing is looked up
-/// until such a character is drawn. Whatever no font has is left blank: Inter's `.notdef` is
-/// empty (`tools/make-inter.py`), so nothing shows as a box.
+/// until such a character is drawn. Whatever no font has is left blank: each text family starts
+/// with `Inter-Blank.ttf`, whose missing-character glyph is empty, so nothing shows as a box.
 #[derive(Default)]
 struct CjkPunctuation {
     system: std::sync::OnceLock<egui_system_font_provider::SystemFontProvider>,
