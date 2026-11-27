@@ -96,12 +96,14 @@ struct EarmarkApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         Appearance.saved.apply()
+        CheckPlacement.start()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when Earmark runs as a plain executable (Xcode or `swift run`).
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate()
+        CheckPlacement.apply()
+        if !CheckPlacement.active { NSApp.activate() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
