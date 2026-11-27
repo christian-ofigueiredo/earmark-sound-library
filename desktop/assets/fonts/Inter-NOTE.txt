@@ -1,0 +1,5 @@
+Inter.ttf is a modified copy of InterVariable.ttf from Inter 4.1
+(https://github.com/rsms/inter/releases/tag/v4.1), made by desktop/tools/make-inter.py:
+instanced to weights 300-700 at optical size 14, digits 0-9 set to their tabular forms,
+unreachable glyphs and hinting removed. It remains under the SIL Open Font License 1.1 in OFL.txt
+(the release's LICENSE.txt, unchanged). Copyright (c) 2016 The Inter Project Authors.

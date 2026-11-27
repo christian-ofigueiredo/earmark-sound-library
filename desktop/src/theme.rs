@@ -9,7 +9,8 @@
 //! panels are one colour: depth comes from light and shadow. Red is one signal per view. Brakwell
 //! for titles and numbers (24 pt and up), Inter for the rest (the Mac apps use the system font
 //! there): variable fonts, each weight picked through the `wght` axis (`FontTweak::coords`).
-//! Inter is under the SIL Open Font License: `assets/fonts/LICENSE.txt` goes wherever its files go.
+//! Inter is under the SIL Open Font License: `assets/fonts/OFL.txt` and `Inter-NOTE.txt` go
+//! wherever `Inter.ttf` goes.
 //!
 //! What is shared: colours, type, materials (`raised`, `sunken`, `rim`), the tag outline, icons.
 //! What differs between the Mac apps (how tall a chip is, the colour of its lamp, the size of a
@@ -362,22 +363,19 @@ pub fn style(ui: &Ui) -> Style {
 
 // MARK: type
 
-/// Inter 4.1 as released (the static text cut, one file per weight), with `LICENSE.txt` beside it.
-const INTER_300: &[u8] = include_bytes!("../assets/fonts/Inter-Light.ttf");
-const INTER_400: &[u8] = include_bytes!("../assets/fonts/Inter-Regular.ttf");
-const INTER_500: &[u8] = include_bytes!("../assets/fonts/Inter-Medium.ttf");
-const INTER_600: &[u8] = include_bytes!("../assets/fonts/Inter-SemiBold.ttf");
-const INTER_700: &[u8] = include_bytes!("../assets/fonts/Inter-Bold.ttf");
+/// Inter 4.1 made by `tools/make-inter.py` from the release's InterVariable.ttf: weights 300 to
+/// 700 at optical size 14, with tabular digits as the default (egui applies no OpenType
+/// features, so numbers in columns line up only this way). See `assets/fonts/Inter-NOTE.txt`.
+const INTER: &[u8] = include_bytes!("../assets/fonts/Inter.ttf");
 const BRAKWELL: &[u8] = include_bytes!("../assets/fonts/Brakwell.ttf");
 
-/// The weights in use with their optical drop. Brakwell is variable: its `wght` is set through
-/// `FontTweak::coords`; Inter's files are static (`wght` 0 = none).
+/// The weights in use, each one the variable font at that `wght`, with its optical drop.
 const FONTS: [(&str, &[u8], f32, f32); 7] = [
-    ("inter-300", INTER_300, 0.0, TEXT_DROP),
-    ("inter-400", INTER_400, 0.0, TEXT_DROP),
-    ("inter-500", INTER_500, 0.0, TEXT_DROP),
-    ("inter-600", INTER_600, 0.0, TEXT_DROP),
-    ("inter-700", INTER_700, 0.0, TEXT_DROP),
+    ("inter-300", INTER, 300.0, TEXT_DROP),
+    ("inter-400", INTER, 400.0, TEXT_DROP),
+    ("inter-500", INTER, 500.0, TEXT_DROP),
+    ("inter-600", INTER, 600.0, TEXT_DROP),
+    ("inter-700", INTER, 700.0, TEXT_DROP),
     ("brakwell-600", BRAKWELL, 600.0, OPTICAL_DROP),
     ("brakwell-700", BRAKWELL, 700.0, OPTICAL_DROP),
 ];
@@ -460,13 +458,11 @@ pub fn overline_font() -> FontId {
 pub fn install(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
     for (name, bytes, weight, drop) in FONTS {
-        let mut tweak = egui::FontTweak {
+        let tweak = egui::FontTweak {
+            coords: egui::epaint::text::VariationCoords::new([(b"wght", weight)]),
             y_offset_factor: drop,
             ..Default::default()
         };
-        if weight > 0.0 {
-            tweak.coords = egui::epaint::text::VariationCoords::new([(b"wght", weight)]);
-        }
         fonts.font_data.insert(
             name.into(),
             Arc::new(FontData::from_static(bytes).tweak(tweak)),
