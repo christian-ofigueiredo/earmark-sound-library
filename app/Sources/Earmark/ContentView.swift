@@ -390,7 +390,6 @@ struct SectionSwitch: View {
             // The same weight either way (bold made the label jump); the chosen one is light, on red.
             Text(section.title)
                 .font(.dsLabel)
-                .opticallyCentred()
                 .foregroundStyle(chosen ? Color.dsSeashell : Color.dsInkMuted)
                 .padding(.horizontal, 18)
                 .frame(height: 34)

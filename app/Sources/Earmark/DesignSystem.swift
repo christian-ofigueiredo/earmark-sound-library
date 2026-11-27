@@ -5,8 +5,8 @@ import SwiftUI
 // Offload is its reference in an app), the parts Earmark uses. Six colours exist, everything else
 // is one of them at an opacity. The ground and the panels are the same colour: depth comes from
 // light and shadow. Red is one signal per view: what's playing and the key that plays it. The
-// type is Brakwell (titles and numbers, 24 pt and up) and Tessel (everything else): the owner's
-// own releases, in the app's bundle (the system's condensed font when run outside it).
+// type is Brakwell (titles and numbers, 24 pt and up), the owner's own release in the app's bundle
+// (the system's condensed font when run outside it), and the system font for everything else.
 
 // MARK: colour
 
@@ -75,7 +75,7 @@ extension ShapeStyle where Self == Color {
 // MARK: type
 
 enum DSFont {
-    /// The variable fonts that come with the app (app/Fonts, copied into Resources/Fonts by
+    /// The variable font that comes with the app (app/Fonts, copied into Resources/Fonts by
     /// `scripts/build-app.sh`), as the files' own descriptors. Fonts are made from these, not from
     /// the family name: when static fonts of the same family are installed (in ~/Library/Fonts, say),
     /// macOS resolves the name to the static Regular and drops the weight, so every weight drew as
@@ -84,7 +84,7 @@ enum DSFont {
     nonisolated(unsafe) private static let bundled: [String: CTFontDescriptor] = {
         var found: [String: CTFontDescriptor] = [:]
         guard let folder = Bundle.main.resourceURL?.appendingPathComponent("Fonts") else { return found }
-        for (key, file) in [("display", "Brakwell[wght].ttf"), ("text", "Tessel[wght].ttf")] {
+        for (key, file) in [("display", "Brakwell[wght].ttf")] {
             let url = folder.appendingPathComponent(file)
             if let list = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
                let first = list.first {
@@ -98,8 +98,7 @@ enum DSFont {
     private static let families: [String: String] = {
         let installed = Set(NSFontManager.shared.availableFontFamilies)
         var found: [String: String] = [:]
-        for (key, names) in [("display", ["Brakwell", "BABCOCK Variable", "Babcock Variable", "Babcock"]),
-                             ("text", ["Tessel", "N27 Variable", "N27"])] {
+        for (key, names) in [("display", ["Brakwell", "BABCOCK Variable", "Babcock Variable", "Babcock"])] {
             if let name = names.first(where: installed.contains) { found[key] = name }
         }
         return found
@@ -145,8 +144,18 @@ enum DSFont {
         return NSFont.systemFont(ofSize: size, weight: system, width: .condensed)
     }
 
-    /// Tessel: everything you read or press.
-    static func text(_ size: CGFloat, _ weight: CGFloat = 400) -> NSFont { ns("text", size, weight) }
+    /// The system font (SF Pro): everything you read or press. Asked from the system, never bundled.
+    /// `weight` on the same 100–700 scale as the display font.
+    static func text(_ size: CGFloat, _ weight: CGFloat = 400) -> NSFont {
+        let system: NSFont.Weight = switch weight {
+        case ..<350: .light
+        case ..<450: .regular
+        case ..<550: .medium
+        case ..<650: .semibold
+        default: .bold
+        }
+        return NSFont.systemFont(ofSize: size, weight: system)
+    }
     /// Brakwell: titles and numbers, 24 pt and up, at 600–700.
     static func display(_ size: CGFloat, _ weight: CGFloat = 700) -> NSFont { ns("display", size, weight) }
 }
@@ -194,15 +203,9 @@ extension View {
 
 // MARK: controls
 
-extension View {
-    /// Brakwell and Tessel have an ascent of 0.80 and a descent of 0.20 of the size, with capitals
-    /// 0.70 tall, so in a line box the capitals' middle sits at 45%: a little above the centre of a
-    /// key or pill. This lowers a one-line label by that much, for every key, chip and segment
-    /// alike. `size` is the label's point size.
-    func opticallyCentred(_ size: CGFloat = 14) -> some View {
-        offset(y: (size * 0.06 * 2).rounded() / 2)   // on the half-point grid, so it stays sharp at 2x
-    }
-}
+// A label needs no nudge to sit centred in a key or pill: the system font's line box (ascent 0.97,
+// descent 0.21 of the size) puts the ink of a label like "Save" within 0.4 pt of its middle, as
+// Brakwell and Tessel did only after a 0.06 drop.
 
 
 private struct KeyShadow: ViewModifier {
@@ -241,7 +244,6 @@ struct DSButtonStyle: ButtonStyle {
         configuration.label
             .font(.dsLabel)
             .lineLimit(1)
-            .opticallyCentred()
             .foregroundStyle(kind == .primary ? Color.dsSeashell : kind == .key ? Color.dsInk : Color.dsInkPrint)
             .padding(.horizontal, kind == .ghost ? 14 : 18)
             .frame(minHeight: 30)
@@ -304,7 +306,6 @@ struct DSChip: View {
                 Circle().fill(chosen ? Color.dsAccent : Color.dsInk.opacity(0.16)).frame(width: 6, height: 6)
                     .shadow(color: chosen ? Color.dsAccent.opacity(0.7) : .clear, radius: 3)
                 Text(title).font(.dsLabel).foregroundStyle(chosen ? Color.dsInk : Color.dsInkMuted).lineLimit(1).fixedSize()
-                    .opticallyCentred()
             }
             .padding(.horizontal, 13)
             .frame(height: height)
