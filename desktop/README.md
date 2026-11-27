@@ -23,7 +23,7 @@ server (`earmark_mcp`), so they answer as there.
   through DWM), the same file as Aspect's.
 - `src/player.rs`: playing a sound (rodio).
 - `installer/earmark.iss`: the Windows installer (Inno Setup).
-- `assets/fonts`: Tessel and Brakwell, the variable fonts; the theme picks each weight.
+- `assets/fonts`: Brakwell (titles) and Inter (text, with its licence `OFL.txt`), variable fonts; the theme picks each weight.
 
 ## What it does
 

@@ -7,8 +7,9 @@
 //! the palette's ground (#131314 dark, #F1F1F1 light), never the system accent. Six colours exist;
 //! everything else is one of them at an opacity. The ground and the
 //! panels are one colour: depth comes from light and shadow. Red is one signal per view. Brakwell
-//! for titles and numbers (24 pt and up), Tessel for the rest: the variable fonts, each weight
-//! picked through the `wght` axis (`FontTweak::coords`).
+//! for titles and numbers (24 pt and up), Inter for the rest (the Mac apps use the system font
+//! there): variable fonts, each weight picked through the `wght` axis (`FontTweak::coords`).
+//! Inter is under the SIL Open Font License: `assets/fonts/OFL.txt` goes wherever `Inter.ttf` goes.
 //!
 //! What is shared: colours, type, materials (`raised`, `sunken`, `rim`), the tag outline, icons.
 //! What differs between the Mac apps (how tall a chip is, the colour of its lamp, the size of a
@@ -361,28 +362,30 @@ pub fn style(ui: &Ui) -> Style {
 
 // MARK: type
 
-const TESSEL: &[u8] = include_bytes!("../assets/fonts/Tessel.ttf");
+/// Inter 4.0, trimmed to weights 300 to 700 at optical size 14, with tabular digits as the default
+/// (egui applies no OpenType features, so numbers in columns line up only this way).
+const INTER: &[u8] = include_bytes!("../assets/fonts/Inter.ttf");
 const BRAKWELL: &[u8] = include_bytes!("../assets/fonts/Brakwell.ttf");
 
-/// The weights in use, each one the variable font at that `wght`.
-const FONTS: [(&str, &[u8], f32); 7] = [
-    ("tessel-300", TESSEL, 300.0),
-    ("tessel-400", TESSEL, 400.0),
-    ("tessel-500", TESSEL, 500.0),
-    ("tessel-600", TESSEL, 600.0),
-    ("tessel-700", TESSEL, 700.0),
-    ("brakwell-600", BRAKWELL, 600.0),
-    ("brakwell-700", BRAKWELL, 700.0),
+/// The weights in use, each one the variable font at that `wght`, with its optical drop.
+const FONTS: [(&str, &[u8], f32, f32); 7] = [
+    ("inter-300", INTER, 300.0, TEXT_DROP),
+    ("inter-400", INTER, 400.0, TEXT_DROP),
+    ("inter-500", INTER, 500.0, TEXT_DROP),
+    ("inter-600", INTER, 600.0, TEXT_DROP),
+    ("inter-700", INTER, 700.0, TEXT_DROP),
+    ("brakwell-600", BRAKWELL, 600.0, OPTICAL_DROP),
+    ("brakwell-700", BRAKWELL, 700.0, OPTICAL_DROP),
 ];
 
-/// Tessel at 300 to 700.
+/// Inter at 300 to 700.
 pub fn text(size: f32, weight: u16) -> FontId {
     let name = match weight {
-        0..=349 => "tessel-300",
-        350..=449 => "tessel-400",
-        450..=549 => "tessel-500",
-        550..=649 => "tessel-600",
-        _ => "tessel-700",
+        0..=349 => "inter-300",
+        350..=449 => "inter-400",
+        450..=549 => "inter-500",
+        550..=649 => "inter-600",
+        _ => "inter-700",
     };
     FontId::new(size, FontFamily::Name(name.into()))
 }
@@ -397,13 +400,17 @@ pub fn display(size: f32, weight: u16) -> FontId {
     FontId::new(size, FontFamily::Name(name.into()))
 }
 
-/// How far the family's fonts sit lower than egui's line box would put them, as a fraction of the
-/// size: Brakwell and Tessel have an ascent of 0.80 and a descent of 0.20 with capitals 0.70 tall,
-/// so centred in a line box the capitals' middle sits about 0.05 of the size high. The Mac apps
-/// lower labels by 0.06 (`opticallyCentred`); here the fonts themselves carry it
-/// (`FontTweak::y_offset_factor`), so every label is centred alike: the theme's keys, chips,
-/// segments and fields, and egui's own combo boxes, menus, rows and tooltips.
+/// How far Brakwell sits lower than egui's line box would put it, as a fraction of the size: it
+/// has an ascent of 0.80 and a descent of 0.20 with capitals 0.70 tall, so centred in a line box
+/// the capitals' middle sits about 0.05 of the size high. The Mac apps lower it by 0.06; here the
+/// font itself carries it (`FontTweak::y_offset_factor`), so every title is centred alike.
 pub const OPTICAL_DROP: f32 = 0.06;
+
+/// The same for Inter, the text font: its line box (ascent 0.97, descent 0.24, capitals 0.73)
+/// puts the capitals' middle at the box's middle, but its ascenders rise above the capitals, so a
+/// label's ink sat half a pixel high at 2x. 0.02 centres it (measured at 2x, light and dark) in
+/// the theme's keys, chips, segments and fields, and in egui's own menus, rows and tooltips.
+pub const TEXT_DROP: f32 = 0.02;
 
 /// Kept so older callers compile: the fonts now carry the drop ([`OPTICAL_DROP`]), so this is 0.
 /// Remove calls to it; adding it again would lower a label twice.
@@ -448,10 +455,10 @@ pub fn overline_font() -> FontId {
 /// colours, so nothing on screen falls back to egui's default blue or grey.
 pub fn install(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
-    for (name, bytes, weight) in FONTS {
+    for (name, bytes, weight, drop) in FONTS {
         let tweak = egui::FontTweak {
             coords: egui::epaint::text::VariationCoords::new([(b"wght", weight)]),
-            y_offset_factor: OPTICAL_DROP,
+            y_offset_factor: drop,
             ..Default::default()
         };
         fonts.font_data.insert(
@@ -467,7 +474,7 @@ pub fn install(ctx: &egui::Context) {
         .families
         .get_mut(&FontFamily::Proportional)
         .unwrap()
-        .insert(0, "tessel-400".into());
+        .insert(0, "inter-400".into());
     ctx.set_fonts(fonts);
     apply(ctx);
 }

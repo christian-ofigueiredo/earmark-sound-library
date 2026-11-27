@@ -744,7 +744,7 @@ impl EarmarkApp {
             let open = self.expanded.contains(&c.name);
             let on = self.scope == Scope::Category(c.name.clone());
             let r = Self::side_item(ui, &title_case(&c.name), Some(c.count), on, 18.0, false);
-            // The chevron, drawn: Tessel has no arrows.
+            // The chevron, drawn, so it matches the theme's other chevrons.
             let centre = pos2(r.rect.min.x + 14.0, r.rect.center().y);
             let points = if open {
                 vec![
