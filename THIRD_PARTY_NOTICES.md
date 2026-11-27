@@ -64,14 +64,16 @@ A drawn window (egui on wgpu and winit) on the engine above.
 
 | Item | Used for | License |
 |---|---|---|
-| egui and eframe (and `epaint`, `egui-wgpu`, `egui-winit`) | Drawing the window | MIT or Apache-2.0 |
+| egui and eframe (and `epaint`, `egui-wgpu`, `egui-winit`, `egui_system_font_provider`) | Drawing the window; system fonts for text Inter lacks | MIT or Apache-2.0 |
+| fontique (with poll-promise) | Finding a system font for Chinese, Japanese, Korean and other text | MIT or Apache-2.0 |
 | wgpu, winit | The GPU and the window | MIT or Apache-2.0 |
 | rodio, cpal (and Symphonia, already above) | Playing sounds | MIT or Apache-2.0; Symphonia MPL-2.0 |
 | rfd | Folder and file dialogs | MIT |
 | opener | Show in Folder | MIT or Apache-2.0 |
 | image | The window icon and checking screenshots | MIT or Apache-2.0 |
 | windows-sys, winresource (Windows) | The dark window frame; the .exe's icon | MIT or Apache-2.0; MIT |
-| Tessel and Brakwell | The interface's type, as in the Mac app | As the Mac app's (see above) |
+| Brakwell | Titles, big numbers and the wordmark, as in the Mac app | As the Mac app's (see above) |
+| Inter 4.1 (`assets/fonts/InterVariable.ttf`, the release's file unmodified; `Inter-Numbers.ttf` and `Inter-Blank.ttf`, two small files made from it by `tools/make-inter.py`: tabular digits for numbers in columns, and an empty missing-character glyph; see `Inter-NOTE.txt`) | The interface's text (the Mac app uses the system font instead) | SIL Open Font License 1.1, Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter); the release's `LICENSE.txt` travels with the fonts, unchanged, as `assets/fonts/OFL.txt` |
 | Inno Setup 6 (build tool; its setup and uninstall code is inside the Windows installer) | The Windows installer | Inno Setup License (free, redistribution allowed with the copyright notice kept), jrsoftware.org |
 
 ## Python libraries (installed by `setup.sh`, not distributed here)

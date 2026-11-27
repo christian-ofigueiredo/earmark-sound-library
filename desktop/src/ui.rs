@@ -636,7 +636,11 @@ impl EarmarkApp {
         }
         let mut right = rect.max.x - 8.0;
         if let Some(n) = count {
-            let g = p.layout_no_wrap(number(n), theme::text(11.0, 400), pal().ink_note);
+            let g = p.layout_no_wrap(
+                number(n),
+                theme::numbers(theme::text(11.0, 400)),
+                pal().ink_note,
+            );
             right -= g.size().x;
             p.galley(
                 pos2(right, rect.center().y - g.size().y / 2.0),
@@ -744,7 +748,7 @@ impl EarmarkApp {
             let open = self.expanded.contains(&c.name);
             let on = self.scope == Scope::Category(c.name.clone());
             let r = Self::side_item(ui, &title_case(&c.name), Some(c.count), on, 18.0, false);
-            // The chevron, drawn: Tessel has no arrows.
+            // The chevron, drawn, so it matches the theme's other chevrons.
             let centre = pos2(r.rect.min.x + 14.0, r.rect.center().y);
             let points = if open {
                 vec![
@@ -870,7 +874,13 @@ impl EarmarkApp {
             } else {
                 text.to_string()
             };
-            let g = theme::elided(ui, &shown, font.clone(), color, *w);
+            // Right-aligned cells hold numbers (length, BPM): tabular digits keep them in line.
+            let cell_font = if *right && !head {
+                theme::numbers(font.clone())
+            } else {
+                font.clone()
+            };
+            let g = theme::elided(ui, &shown, cell_font, color, *w);
             let gx = if *right {
                 rect.min.x + x + w - g.size().x
             } else {

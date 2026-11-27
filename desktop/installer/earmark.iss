@@ -45,6 +45,11 @@ CloseApplications=yes
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "Earmark.exe"; Flags: ignoreversion
+; The fonts are compiled into Earmark.exe; their licences travel beside it (Inter: SIL OFL 1.1).
+Source: "..\assets\fonts\OFL.txt"; DestDir: "{app}\licenses"; DestName: "Inter-OFL.txt"; Flags: ignoreversion
+Source: "..\assets\fonts\Inter-NOTE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
+Source: "..\..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
+Source: "..\..\LICENSE"; DestDir: "{app}\licenses"; DestName: "Earmark-LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Earmark"; Filename: "{app}\Earmark.exe"

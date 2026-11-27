@@ -66,7 +66,11 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          mkdir -p out
+          mkdir -p out/licenses
+          # Inter is compiled into the program: its licence and the notices go beside it.
+          cp desktop/assets/fonts/OFL.txt out/licenses/Inter-OFL.txt
+          cp desktop/assets/fonts/Inter-NOTE.txt THIRD_PARTY_NOTICES.md out/licenses/
+          cp LICENSE out/licenses/Earmark-LICENSE.txt
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp desktop/target/release/earmark-desktop.exe out/Earmark.exe
           else
@@ -93,7 +97,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Earmark-${{ matrix.name }}
-          path: out/*
+          path: out/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
