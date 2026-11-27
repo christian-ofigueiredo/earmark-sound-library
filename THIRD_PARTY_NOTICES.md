@@ -72,7 +72,7 @@ A drawn window (egui on wgpu and winit) on the engine above.
 | image | The window icon and checking screenshots | MIT or Apache-2.0 |
 | windows-sys, winresource (Windows) | The dark window frame; the .exe's icon | MIT or Apache-2.0; MIT |
 | Brakwell | Titles, big numbers and the wordmark, as in the Mac app | As the Mac app's (see above) |
-| Inter 4.0 (`assets/fonts/Inter.ttf`, trimmed to weights 300–700 with fonttools) | The interface's text (the Mac app uses the system font instead) | SIL Open Font License 1.1, Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter); the licence travels with the font as `assets/fonts/OFL.txt` |
+| Inter 4.1 (`assets/fonts/Inter-*.ttf`, the release's static text cut, unmodified: Light to Bold) | The interface's text (the Mac app uses the system font instead) | SIL Open Font License 1.1, Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter); the release's `LICENSE.txt` travels with the fonts in `assets/fonts` |
 | Inno Setup 6 (build tool; its setup and uninstall code is inside the Windows installer) | The Windows installer | Inno Setup License (free, redistribution allowed with the copyright notice kept), jrsoftware.org |
 
 ## Python libraries (installed by `setup.sh`, not distributed here)
